@@ -2,6 +2,7 @@ env:
   TERM: xterm-256color
 
 window:
+  opacity: 0.9
   padding:
     x: 0
     y: 0
@@ -10,15 +11,15 @@ scrolling:
 
 font:
   normal:
-    family: FiraCode Nerd Font
+    family: JetBrainsMono Nerd Font
     style: Regular
 
   bold:
-    family: FiraCode Nerd Font
+    family: JetBrainsMono Nerd Font
     style: Bold
 
   italic:
-    family: FiraCode Nerd Font
+    family: JetBrainsMono Nerd Font
     style: Italic
 
   size: 18
@@ -51,8 +52,6 @@ colors:
     magenta: '0xff6ac1'
     cyan:    '0x9aedfe'
     white:   '0xf1f1f0'
-
-background_opacity: 1.0
 
 selection:
   semantic_escape_chars: ",│`|:\"' ()[]{}<>\t"
