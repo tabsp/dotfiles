@@ -30,6 +30,14 @@ o.list = true
 
 g.mapleader = ' '
 
+-- Highlight on yank
+vim.cmd [[
+  augroup YankHighlight
+    autocmd!
+    autocmd TextYankPost * silent! lua vim.highlight.on_yank()
+  augroup end
+]]
+
 local function noremap(mode, binding)
   local opts = {
     noremap = true,
@@ -134,13 +142,48 @@ require('nvim-treesitter.configs').setup {
   highlight = {
     enable = true,
   },
+  textobjects = {
+    select = {
+      enable = true,
+      lookahead = true,
+      keymaps = {
+        ['af'] = '@function.outer',
+        ['if'] = '@function.inner',
+        ['ac'] = '@class.outer',
+        ['ic'] = '@class.inner',
+      },
+    },
+    move = {
+      enable = true,
+      set_jumps = true,
+      goto_next_start = {
+        [']m'] = '@function.outer',
+        [']]'] = '@class.outer',
+      },
+      goto_next_end = {
+        [']M'] = '@function.outer',
+        [']['] = '@class.outer',
+      },
+      goto_previous_start = {
+        ['[m'] = '@function.outer',
+        ['[['] = '@class.outer',
+      },
+      goto_previous_end = {
+        ['[M'] = '@function.outer',
+        ['[]'] = '@class.outer',
+      },
+    },
+  }
 }
 
 -- lewis6991/gitsigns.nvim
 require('gitsigns').setup{}
 
 -- lukas-reineke/indent-blankline.nvim
-g.indent_blankline_show_first_indent_level = true
+require("indent_blankline").setup {
+  show_current_context = true,
+  show_current_context_start = true,
+}
 
 -- b3nj5m1n/kommentary
 require('kommentary.config').use_extended_mappings()
