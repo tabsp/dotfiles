@@ -85,7 +85,7 @@ nnoremap 'H ^'
 nnoremap 'L $'
 nnoremap 'S :w<CR>'
 nnoremap 'Q :q<CR>'
-nnoremap '<C-d> :bdelete<CR>'
+nnoremap '<C-d> :Bdelete<CR>'
 
 nnoremap '<C-k> <C-w>k'
 nnoremap '<C-j> <C-w>j'

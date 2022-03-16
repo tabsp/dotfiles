@@ -30,6 +30,7 @@ local function init()
   use 'hrsh7th/cmp-path'
   use 'saadparwaiz1/cmp_luasnip'
   use 'L3MON4D3/LuaSnip'
+  use 'famiu/bufdelete.nvim'
 end
 
 local plugins = setmetatable({}, {
