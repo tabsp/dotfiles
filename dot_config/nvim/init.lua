@@ -121,9 +121,15 @@ vim.cmd 'colorscheme material'
 require('eviline')
 
 -- kyazdani42/nvim-tree.lua
-require('nvim-tree').setup{}
+g.nvim_tree_respect_buf_cwd = 1
+require('nvim-tree').setup {
+  update_cwd = true,
+  update_focused_file = {
+    enable = true,
+    update_cwd = true
+  },
+}
 nnoremap 'tt :NvimTreeToggle<CR>'
-
 
 -- akinsho/nvim-bufferline.lua
 require('bufferline').setup{}

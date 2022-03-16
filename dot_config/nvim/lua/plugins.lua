@@ -31,6 +31,7 @@ local function init()
   use 'saadparwaiz1/cmp_luasnip'
   use 'L3MON4D3/LuaSnip'
   use 'famiu/bufdelete.nvim'
+  use { 'ahmedkhalf/project.nvim', config = function () require("project_nvim").setup { detection_methods = { "lsp", "pattern" }, patterns = { ".git", "_darcs", ".hg", ".bzr", ".svn", "Makefile", "package.json" } } end }
 end
 
 local plugins = setmetatable({}, {
