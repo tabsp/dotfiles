@@ -1,14 +1,10 @@
-require('user.options')
-require('user.keymaps')
-require('user.autocommands')
-require('user.plugins')
-require('user.eviline')
-require('user.lspconfig')
-require('user.nvim-tree')
-require('user.bufferline')
-require('user.colorscheme')
-require('user.treesitter')
-require('user.gitsigns')
-require('user.commont')
-require('user.indent-blankline')
+require "core.options"
 
+vim.defer_fn(function()
+  require("core.utils").load_mappings()
+end, 0)
+
+-- setup packer + plugins
+require("core.packer").bootstrap()
+require "plugins"
+require "ui.eviline"
