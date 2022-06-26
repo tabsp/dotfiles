@@ -46,8 +46,7 @@ local plugins = {
     after = "nvim-lsp-installer",
     module = "lspconfig",
     config = function()
-      require "plugins.configs.lsp-installer"
-      require "plugins.configs.lspconfig"
+      require "lsp"
     end,
   },
 
@@ -92,7 +91,11 @@ local plugins = {
     after = "cmp-buffer",
   },
 
-  ["nvim-lualine/lualine.nvim"] = {},
+  ["nvim-lualine/lualine.nvim"] = {
+    config = function()
+      require "ui.eviline"
+    end,
+  },
   ["akinsho/bufferline.nvim"] = {
     tag = "v2.*",
     setup = function()
