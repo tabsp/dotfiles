@@ -9,6 +9,7 @@ local utils = require "core.utils"
 
 local servers = {
   sumneko_lua = require "lsp.lua",
+  bashls = require "lsp.bashls",
 }
 
 local lsp_installer_options = {
@@ -64,6 +65,9 @@ capabilities.textDocument.completion.completionItem = {
 }
 
 for name, m in pairs(servers) do
+  if not m.config then
+    m.config = {}
+  end
   local opts = m.config
   if opts then
     opts.on_attach = function(client, bufnr)
