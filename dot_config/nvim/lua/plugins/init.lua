@@ -31,9 +31,7 @@ local plugins = {
       require("plugins.configs.others").blankline()
     end,
   },
-  ["folke/tokyonight.nvim"] = {
-    config = require("plugins.configs.others").tokyonight(),
-  },
+
   -- lsp plugins
   ["williamboman/nvim-lsp-installer"] = {
     opt = true,
@@ -91,9 +89,14 @@ local plugins = {
     after = "cmp-buffer",
   },
 
-  ["nvim-lualine/lualine.nvim"] = {
+  ["feline-nvim/feline.nvim"] = {
     config = function()
-      require "ui.eviline"
+      require "plugins.configs.feline"
+    end,
+  },
+  ["rebelot/kanagawa.nvim"] = {
+    config = function()
+      require("plugins.configs.others").kanagawa()
     end,
   },
   ["akinsho/bufferline.nvim"] = {
@@ -143,6 +146,41 @@ local plugins = {
   ["ahmedkhalf/project.nvim"] = {
     config = function()
       require("plugins.configs.others").project()
+    end,
+  },
+
+  ["lewis6991/spellsitter.nvim"] = {
+    config = function()
+      require("plugins.configs.others").spellsitter()
+    end,
+  },
+  ["SmiteshP/nvim-gps"] = {
+    config = function()
+      require("plugins.configs.others").gps()
+    end,
+  },
+  ["nvim-lua/lsp-status.nvim"] = {},
+  ["norcalli/nvim-colorizer.lua"] = {
+    config = function()
+      require("plugins.configs.others").colorizer()
+    end,
+  },
+  ["stevearc/aerial.nvim"] = {
+    config = function()
+      require "plugins.configs.aerial"
+    end,
+  },
+  ["akinsho/toggleterm.nvim"] = {
+    tag = "v1.*",
+    config = function()
+      require "plugins.configs.toggleterm"
+    end,
+  },
+  ["max397574/better-escape.nvim"] = {},
+
+  ["karb94/neoscroll.nvim"] = {
+    config = function()
+      require("plugins.configs.others").neoscroll()
     end,
   },
 }

@@ -31,13 +31,36 @@ M.blankline = function()
   blankline.setup(options)
 end
 
-M.tokyonight = function()
-  local colorscheme = "tokyonight"
+M.kanagawa = function()
+  local colorscheme = "kanagawa"
   local status_ok, _ = pcall(vim.cmd, "colorscheme " .. colorscheme)
   if not status_ok then
     vim.notify("colorscheme " .. colorscheme .. " not found!")
     return
   end
+
+  local present, kanagawa = pcall(require, "kanagawa")
+
+  if not present then
+    return
+  end
+  local options = {
+    undercurl = true, -- enable undercurls
+    commentStyle = { italic = true },
+    functionStyle = {},
+    keywordStyle = { italic = true },
+    statementStyle = { bold = true },
+    typeStyle = {},
+    variablebuiltinStyle = { italic = true },
+    specialReturn = true, -- special highlight for the return keyword
+    specialException = true, -- special highlight for exception handling keywords
+    transparent = false, -- do not set background color
+    dimInactive = false, -- dim inactive window `:h hl-NormalNC`
+    globalStatus = false, -- adjust window separators highlight for laststatus=3
+    colors = {},
+    overrides = {},
+  }
+  kanagawa.setup(options)
 end
 
 M.bufferline = function()
@@ -168,4 +191,70 @@ M.project = function()
 
   project.setup(options)
 end
+
+M.spellsitter = function()
+  local present, spellsitter = pcall(require, "spellsitter")
+
+  if not present then
+    return
+  end
+
+  local options = {}
+
+  spellsitter.setup(options)
+end
+
+M.feline = function()
+  local present, feline = pcall(require, "feline")
+
+  if not present then
+    return
+  end
+
+  local options = {}
+
+  feline.setup(options)
+end
+
+M.colorizer = function()
+  local present, colorizer = pcall(require, "colorizer")
+
+  if not present then
+    return
+  end
+
+  local options = {
+    "*",
+  }
+
+  colorizer.setup(options)
+end
+
+M.gps = function()
+  local present, gps = pcall(require, "nvim-gps")
+
+  if not present then
+    return
+  end
+
+  local options = {}
+
+  gps.setup(options)
+end
+
+M.neoscroll = function()
+  local present, neoscroll = pcall(require, "neoscroll")
+
+  if not present then
+    return
+  end
+
+  local options = {
+    mappings = { "<C-u>", "<C-d>", "<C-b>", "<C-f>", "<C-y>", "<C-e>", "zt", "zz", "zb" },
+    performance_mode = true,
+  }
+
+  neoscroll.setup(options)
+end
+
 return M

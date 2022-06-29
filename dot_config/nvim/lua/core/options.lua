@@ -49,9 +49,6 @@ o.whichwrap:append "<>[]hl"
 
 g.mapleader = " "
 
-g.tokyonight_style = "night"
-g.tokyonight_italic_functions = true
-
 -- disable some builtin vim plugins
 local default_plugins = {
   "2html_plugin",

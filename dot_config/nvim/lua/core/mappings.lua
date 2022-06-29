@@ -246,4 +246,10 @@ M.telescope = {
   },
 }
 
+M.aerial = {
+  n = {
+    ["mm"] = { "<cmd> AerialToggle <CR>", "Aerial toggle" },
+  },
+}
+
 return M
