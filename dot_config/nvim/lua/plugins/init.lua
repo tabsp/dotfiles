@@ -183,6 +183,10 @@ local plugins = {
       require("plugins.configs.others").neoscroll()
     end,
   },
+
+  ["ellisonleao/glow.nvim"] = {
+    branch = "main",
+  },
 }
 
 require("core.packer").run(plugins)

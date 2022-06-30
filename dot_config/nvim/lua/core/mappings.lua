@@ -252,4 +252,10 @@ M.aerial = {
   },
 }
 
+M.glow = {
+  n = {
+    ["<leader>p"] = { "<cmd> Glow <CR>", "preview markdown" },
+  },
+}
+
 return M
