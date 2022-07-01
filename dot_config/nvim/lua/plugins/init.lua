@@ -88,15 +88,18 @@ local plugins = {
   ["hrsh7th/cmp-path"] = {
     after = "cmp-buffer",
   },
-
-  ["feline-nvim/feline.nvim"] = {
-    config = function()
-      require "plugins.configs.feline"
-    end,
+  ["hrsh7th/cmp-cmdline"] = {
+    after = "cmp-buffer",
   },
+
   ["rebelot/kanagawa.nvim"] = {
     config = function()
       require("plugins.configs.others").kanagawa()
+    end,
+  },
+  ["feline-nvim/feline.nvim"] = {
+    config = function()
+      require "plugins.configs.statusline"
     end,
   },
   ["akinsho/bufferline.nvim"] = {

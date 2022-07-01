@@ -16,9 +16,9 @@ local force_inactive = {
   bufnames = {},
 }
 
-local function get_color(hlgroup, attr)
-  return vim.fn.synIDattr(vim.fn.synIDtrans(vim.fn.hlID(hlgroup)), attr, "gui")
-end
+-- local function get_color(hlgroup, attr)
+--   return vim.fn.synIDattr(vim.fn.synIDtrans(vim.fn.hlID(hlgroup)), attr, "gui")
+-- end
 
 local function copy_update_component(component, updates)
   local new_component = {}
@@ -33,8 +33,8 @@ end
 
 local tokyonight_colors = {
   black = "#15161E",
-  bg = get_color("StatusLine", "bg"),
-  fg = get_color("StatusLine", "fg"),
+  bg = "#16161d",
+  fg = "#c8c093",
   brightbg = "#3b4261",
 
   red = "#f7768e",
@@ -60,16 +60,16 @@ local tokyonight_colors = {
   bg_highlight = "#292e42",
   bg1 = "#24283b",
   bg2 = "#1a1b26",
-  diag_error = get_color("DiagnosticError", "fg"),
-  diag_warn = get_color("DiagnosticWarn", "fg"),
-  diag_hint = get_color("DiagnosticHint", "fg"),
-  diag_info = get_color("DiagnosticInfo", "fg"),
-  vcs_add = get_color("GitSignsAdd", "fg"),
-  vcs_del = get_color("GitSignsDelete", "fg"),
-  vcs_change = get_color("GitSignsChange", "fg"),
+  diag_error = "#e82424",
+  diag_warn = "#ff9e3b",
+  diag_hint = "#6a9589",
+  diag_info = "#658594",
+  vcs_add = "#76946a",
+  vcs_del = "#c34043",
+  vcs_change = "#dca561",
 }
 
--- local colors = tokyonight_colors
+local colors = tokyonight_colors
 
 local function has_buftype(winid)
   winid = winid or 0
@@ -413,8 +413,6 @@ local components = {
   },
   inactive = { { TerminalMode, InactiveFileType, HelpFilename, TerminalName, FileName }, {} },
 }
-
-local colors = tokyonight_colors
 
 require("feline").setup {
   theme = colors,
