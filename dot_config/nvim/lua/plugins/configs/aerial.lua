@@ -5,10 +5,10 @@ if not present then
 end
 
 local options = {
-  close_behavior = "global",
-  backends = { "lsp", "treesitter", "markdown" },
-  min_width = 28,
+backends = { "lsp", "treesitter", "markdown" },
   show_guides = true,
+  layout = { min_width = 28 },
+  attach_mode = "global",
   filter_kind = {
     "Array",
     "Boolean",
