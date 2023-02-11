@@ -1,3 +1,5 @@
+source ~/.zsh/env.zsh
+source ~/.zsh/alias.zsh
 source ~/.zsh/antigen.zsh
 antigen use oh-my-zsh
 
@@ -14,6 +16,3 @@ THEME=denysdovhan/spaceship-prompt
 antigen list | grep $THEME; if [ $? -ne 0 ]; then antigen theme $THEME; fi
 
 antigen apply
-
-source ~/.zsh/env.zsh
-source ~/.zsh/alias.zsh

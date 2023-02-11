@@ -2,4 +2,8 @@ export PATH="/usr/local/bin:$PATH"
 export EDITOR="nvim"
 export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
-
+export https_proxy=http://127.0.0.1:7890
+export http_proxy=http://127.0.0.1:7890
+export all_proxy=socks5://127.0.0.1:7890
+export LANGUAGE="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"

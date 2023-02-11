@@ -174,7 +174,7 @@ local plugins = {
     end,
   },
   ["akinsho/toggleterm.nvim"] = {
-    tag = "v1.*",
+    tag = "*",
     config = function()
       require "plugins.configs.toggleterm"
     end,
