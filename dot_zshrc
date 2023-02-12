@@ -9,6 +9,7 @@ command-not-found
 colored-man-pages
 zsh-users/zsh-syntax-highlighting
 zsh-users/zsh-autosuggestions
+Aloxaf/fzf-tab
 EOBUNDLES
 
 # workaround for https://github.com/zsh-users/antigen/issues/675

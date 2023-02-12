@@ -1,0 +1,11 @@
+export LANG=zh_CN.UTF-8
+[[ -f ~/.Xresources ]] && xrdb -merge -I$HOME ~/.Xresources
+[[ -f ~/.xprofile ]] && . ~/.xprofile
+
+fcitx5 &
+cfw &
+slstatus &
+~/.fehbg &
+picom --experimental-backends -b
+
+exec ~/workspace/scripts/startdwm
