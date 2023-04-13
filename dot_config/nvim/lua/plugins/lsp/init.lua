@@ -92,17 +92,6 @@ return {
     opts = { ensure_installed = nil, automatic_installation = true, automatic_setup = false },
   },
   {
-    "utilyre/barbecue.nvim",
-    event = "VeryLazy",
-    dependencies = {
-      "neovim/nvim-lspconfig",
-      "SmiteshP/nvim-navic",
-      "nvim-tree/nvim-web-devicons",
-    },
-    enabled = false, -- use lspsaga
-    config = true,
-  },
-  {
     "folke/trouble.nvim",
     cmd = { "TroubleToggle", "Trouble" },
     opts = { use_diagnostic_signs = true },

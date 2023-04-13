@@ -1,6 +1,5 @@
 return {
   "nvim-lua/plenary.nvim",
-  "MunifTanjim/nui.nvim",
   {
     "folke/tokyonight.nvim",
     lazy = false,

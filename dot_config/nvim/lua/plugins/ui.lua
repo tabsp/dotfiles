@@ -9,6 +9,7 @@ return {
     end,
   },
   "folke/noice.nvim",
+  dependencies = { "MunifTanjim/nui.nvim" },
   event = "VeryLazy",
   opts = {
     lsp = {
