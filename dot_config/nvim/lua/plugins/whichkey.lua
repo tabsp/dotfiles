@@ -54,7 +54,6 @@ return {
           name = "+Git",
           h = { name = "Hunk" },
           t = { name = "Toggle" },
-          d = { name = "DiffviewOpen" },
         },
         n = { name = "+Notes" },
         p = { name = "+Project" },

@@ -139,4 +139,11 @@ M.lazy = {
   },
 }
 
+M.diffview = {
+  n = {
+    ["<leader>gd"] = { "<cmd> DiffviewOpen <CR>", "Open diff view" },
+    ["<leader>gc"] = { "<cmd> DiffviewClose <CR>", "Close diff view" },
+  },
+}
+
 return M
