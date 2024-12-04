@@ -67,23 +67,4 @@ M.tabby = {
   },
 }
 
--- M.telescope = {
---   n = {
---     -- find
---     ["<leader>ff"] = { "<cmd> Telescope find_files <CR>", "find files" },
---     ["<leader>fa"] = { "<cmd> Telescope find_files follow=true no_ignore=true hidden=true <CR>", "find all" },
---     ["<leader>fw"] = { "<cmd> Telescope live_grep <CR>", "live grep" },
---     ["<leader>fb"] = { "<cmd> Telescope buffers <CR>", "find buffers" },
---     ["<leader>fh"] = { "<cmd> Telescope help_tags <CR>", "help page" },
---     ["<leader>fo"] = { "<cmd> Telescope oldfiles <CR>", "find oldfiles" },
---     ["<leader>tk"] = { "<cmd> Telescope keymaps <CR>", "show keys" },
---     ["<leader>fn"] = { "<cmd> Telescope noice <CR>", "show noices" },
---     -- git
---     ["<leader>cm"] = { "<cmd> Telescope git_commits <CR>", "   git commits" },
---     ["<leader>gt"] = { "<cmd> Telescope git_status <CR>", "  git status" },
---     -- project
---     ["<leader>fp"] = { "<cmd> Telescope project <CR>", "find project" },
---   },
--- }
-
 return M
