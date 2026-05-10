@@ -66,6 +66,65 @@ version = "latest"
 [deps.tmux.linux.x86_64.params]
 package = "tmux"
 
+[deps.fish]
+command = "fish"
+
+[deps.fish.version_check]
+args = ["--version"]
+regex = 'fish, version ([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.fish.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://fishshell.com/"
+
+[deps.fish.mac.arm64.params]
+package = "fish"
+
+[deps.fish.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://fishshell.com/"
+
+[deps.fish.mac.x86_64.params]
+package = "fish"
+
+[deps.fish.linux.arm64]
+installer = "apt"
+version = "latest"
+source = "https://fishshell.com/"
+
+[deps.fish.linux.arm64.params]
+package = "fish"
+
+[deps.fish.linux.x86_64]
+installer = "apt"
+version = "latest"
+source = "https://fishshell.com/"
+
+[deps.fish.linux.x86_64.params]
+package = "fish"
+
+[deps.ghostty]
+command = "ghostty"
+
+[deps.ghostty.mac.arm64]
+installer = "cask"
+version = "latest"
+source = "https://ghostty.org/"
+
+[deps.ghostty.mac.arm64.params]
+package = "ghostty"
+
+[deps.ghostty.mac.x86_64]
+installer = "cask"
+version = "latest"
+source = "https://ghostty.org/"
+
+[deps.ghostty.mac.x86_64.params]
+package = "ghostty"
+
 # Deferred from the first runnable cut:
 # - repo_package execution needs repository mutation tests on Ubuntu/Debian.
 # - official_script execution needs temp-script tests and install_to marker tests.
