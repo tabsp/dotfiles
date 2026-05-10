@@ -65,3 +65,8 @@ version = "latest"
 
 [deps.tmux.linux.x86_64.params]
 package = "tmux"
+
+# Deferred from the first runnable cut:
+# - repo_package execution needs repository mutation tests on Ubuntu/Debian.
+# - official_script execution needs temp-script tests and install_to marker tests.
+# - download_binary execution needs archive extraction and sha256 tests.

@@ -1,5 +1,5 @@
 use crate::config::DotfilesManifest;
-use crate::path::{ensure_parent_dir, expand_home};
+use crate::path::{ensure_parent_dir, expand_home, paths_match};
 use crate::platform::Host;
 use std::fs;
 use std::os::unix::fs as unix_fs;
@@ -129,7 +129,7 @@ fn apply_action(action: Action) -> Result<(), String> {
 
 fn is_expected_symlink(target: &Path, source: &Path) -> bool {
     fs::read_link(target)
-        .map(|actual| actual == source)
+        .map(|actual| paths_match(&actual, source))
         .unwrap_or(false)
 }
 

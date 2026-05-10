@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn expand_home(path: &str) -> Result<PathBuf, String> {
@@ -30,4 +31,11 @@ pub fn which(command: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+pub fn paths_match(left: &Path, right: &Path) -> bool {
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
 }

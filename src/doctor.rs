@@ -1,5 +1,5 @@
 use crate::config::{DepsManifest, DotfilesManifest, VersionCheck, VersionStream};
-use crate::path::{expand_home, which};
+use crate::path::{expand_home, paths_match, which};
 use crate::platform::Host;
 use regex::Regex;
 use std::fs;
@@ -57,7 +57,7 @@ pub fn run_doctor(
         let target = expand_home(&file.target)?;
         let expected = repo.join(&file.source);
         match fs::read_link(&target) {
-            Ok(actual) if actual == expected => {
+            Ok(actual) if paths_match(&actual, &expected) => {
                 oks.push(format!("link {} -> {}", target.display(), expected.display()));
             }
             Ok(actual) => {
