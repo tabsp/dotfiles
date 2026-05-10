@@ -4,3 +4,4 @@ lazy-lock.json
 .nvimlog
 nvim.log
 __pycache__/
+target/
