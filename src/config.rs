@@ -21,6 +21,16 @@ pub struct Dependency {
     pub linux: BTreeMap<String, InstallEntry>,
 }
 
+impl Dependency {
+    pub fn entries_for(&self, platform: &str, arch: &str) -> Vec<&InstallEntry> {
+        match platform {
+            "mac" => self.mac.get(arch).into_iter().collect(),
+            "linux" => self.linux.get(arch).into_iter().collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct VersionCheck {
     #[serde(default = "default_version_args")]

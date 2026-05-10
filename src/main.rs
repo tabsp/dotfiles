@@ -1,5 +1,7 @@
+mod check;
 mod config;
 mod output;
+mod platform;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::Path;
@@ -55,17 +57,19 @@ fn run() -> Result<(), String> {
             output::progress("doctor");
             Ok(())
         }
-        Command::Check => {
-            let _deps = config::load_deps(Path::new("deps.toml"))?;
-            let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
-            for entry in &files.files {
-                let source = Path::new(&entry.source);
-                if !source.exists() {
-                    return Err(format!("missing source path: {}", source.display()));
-                }
-            }
+        Command::Check => run_check(),
+    }
+}
+
+fn run_check() -> Result<(), String> {
+    let deps = config::load_deps(Path::new("deps.toml"))?;
+    let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
+    let host = platform::detect_host()?;
+    match check::run_check(&deps, &files, &host, Path::new(".")) {
+        Ok(()) => {
             output::progress("check");
             Ok(())
         }
+        Err(errors) => Err(errors.join("\nerror: ")),
     }
 }
