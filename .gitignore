@@ -1,0 +1,6 @@
+.DS_Store
+lazy-lock.json
+.config/fish/fish_variables
+.nvimlog
+nvim.log
+__pycache__/
