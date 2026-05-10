@@ -1,5 +1,6 @@
 mod check;
 mod config;
+mod doctor;
 mod link;
 mod output;
 mod path;
@@ -52,10 +53,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         Command::Link { conflict, dry_run } => run_link(conflict, dry_run),
-        Command::Doctor => {
-            output::progress("doctor");
-            Ok(())
-        }
+        Command::Doctor => run_doctor(),
         Command::Check => run_check(),
     }
 }
@@ -91,4 +89,15 @@ fn run_link(conflict: Conflict, dry_run: bool) -> Result<(), String> {
     };
 
     link::run_link(&files, &host, &repo, conflict, dry_run)
+}
+
+fn run_doctor() -> Result<(), String> {
+    let repo = std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
+    let deps = config::load_deps(Path::new("deps.toml"))?;
+    let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
+    let host = platform::detect_host()?;
+    match check::run_check(&deps, &files, &host, &repo) {
+        Ok(()) => doctor::run_doctor(&deps, &files, &host, &repo),
+        Err(errors) => Err(errors.join("\nerror: ")),
+    }
 }
