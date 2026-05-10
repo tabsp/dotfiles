@@ -1,0 +1,19 @@
+[[files]]
+source = "config/nvim"
+target = "~/.config/nvim"
+kind = "dir"
+
+[[files]]
+source = "config/fish"
+target = "~/.config/fish"
+kind = "dir"
+
+[[files]]
+source = "config/ghostty"
+target = "~/.config/ghostty"
+kind = "dir"
+
+[[files]]
+source = "config/tmux.conf"
+target = "~/.tmux.conf"
+kind = "file"

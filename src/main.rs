@@ -1,6 +1,8 @@
+mod config;
 mod output;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::path::Path;
 
 #[derive(Debug, Parser)]
 #[command(name = "dotman")]
@@ -31,9 +33,16 @@ enum Conflict {
 }
 
 fn main() {
+    if let Err(err) = run() {
+        output::error(err);
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
-    let result: Result<(), String> = match cli.command {
+    match cli.command {
         Command::Bootstrap => {
             output::progress("bootstrap");
             Ok(())
@@ -47,13 +56,16 @@ fn main() {
             Ok(())
         }
         Command::Check => {
+            let _deps = config::load_deps(Path::new("deps.toml"))?;
+            let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
+            for entry in &files.files {
+                let source = Path::new(&entry.source);
+                if !source.exists() {
+                    return Err(format!("missing source path: {}", source.display()));
+                }
+            }
             output::progress("check");
             Ok(())
         }
-    };
-
-    if let Err(err) = result {
-        output::error(err);
-        std::process::exit(1);
     }
 }

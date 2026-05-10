@@ -1,0 +1,67 @@
+[deps.git]
+command = "git"
+
+[deps.git.version_check]
+args = ["--version"]
+regex = 'git version ([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.git.mac.arm64]
+installer = "system"
+version = "latest"
+
+[deps.git.mac.x86_64]
+installer = "system"
+version = "latest"
+
+[deps.git.linux.arm64]
+installer = "apt"
+version = "latest"
+
+[deps.git.linux.arm64.params]
+package = "git"
+
+[deps.git.linux.x86_64]
+installer = "apt"
+version = "latest"
+
+[deps.git.linux.x86_64.params]
+package = "git"
+
+[deps.tmux]
+command = "tmux"
+
+[deps.tmux.version_check]
+args = ["-V"]
+regex = 'tmux ([0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.tmux.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/tmux/tmux"
+
+[deps.tmux.mac.arm64.params]
+package = "tmux"
+
+[deps.tmux.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/tmux/tmux"
+
+[deps.tmux.mac.x86_64.params]
+package = "tmux"
+
+[deps.tmux.linux.arm64]
+installer = "apt"
+version = "latest"
+
+[deps.tmux.linux.arm64.params]
+package = "tmux"
+
+[deps.tmux.linux.x86_64]
+installer = "apt"
+version = "latest"
+
+[deps.tmux.linux.x86_64.params]
+package = "tmux"
