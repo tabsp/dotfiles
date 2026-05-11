@@ -1,13 +1,13 @@
 use crate::config::{InstallEntry, Installer};
 use crate::path::which;
-use crate::platform::{distro_supported, Host, Platform};
+use crate::platform::{Host, Platform, distro_supported};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::process::Command;
+use std::process::Stdio;
 
 pub fn is_installed(command: &str, entry: &InstallEntry) -> Result<bool, String> {
     match entry.installer {
@@ -49,12 +49,8 @@ pub fn install_missing(command: &str, entry: &InstallEntry, host: &Host) -> Resu
         Installer::Cask => run("brew", &["install", "--cask", package(entry)?]),
         Installer::Apt => run("sudo", &["apt-get", "install", "-y", package(entry)?]),
         Installer::RepoPackage => install_repo_package(entry, host),
-        Installer::OfficialScript => {
-            install_official_script(command, entry)
-        }
-        Installer::DownloadBinary => {
-            install_download_binary(entry)
-        }
+        Installer::OfficialScript => install_official_script(command, entry),
+        Installer::DownloadBinary => install_download_binary(entry),
     }
 }
 
@@ -126,7 +122,8 @@ fn install_download_binary(entry: &InstallEntry) -> Result<(), String> {
         let downloaded = crate::http::download_https(url, true)?;
         verify_sha256(&downloaded.bytes, sha256)?;
         let payload = crate::archive::unpack(&downloaded.bytes, &archive_kind, temp.path())?;
-        let binary = resolve_binary_path(temp.path(), payload.as_deref(), &archive_kind, binary_path)?;
+        let binary =
+            resolve_binary_path(temp.path(), payload.as_deref(), &archive_kind, binary_path)?;
         install_binary(&binary, &install_to)?;
         Ok(())
     })();
@@ -144,7 +141,7 @@ fn install_official_script(command: &str, entry: &InstallEntry) -> Result<(), St
     };
 
     if let Some(install_to) = &install_to {
-        match existing_install_state(&install_to)? {
+        match existing_install_state(install_to)? {
             ExistingInstall::Installed => return Ok(()),
             ExistingInstall::Invalid(reason) => {
                 return Err(format!(
@@ -226,8 +223,12 @@ fn existing_install_state(path: &Path) -> Result<ExistingInstall, String> {
     if !path.exists() {
         return Ok(ExistingInstall::Missing);
     }
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|err| format!("failed to read existing install target {}: {err}", path.display()))?;
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        format!(
+            "failed to read existing install target {}: {err}",
+            path.display()
+        )
+    })?;
     if !metadata.is_file() {
         return Ok(ExistingInstall::Invalid(
             "target exists but is not a regular file".to_string(),
@@ -313,7 +314,12 @@ fn install_binary(source: &Path, install_to: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         let mut perms = fs::metadata(install_to)
-            .map_err(|err| format!("failed to read permissions on {}: {err}", install_to.display()))?
+            .map_err(|err| {
+                format!(
+                    "failed to read permissions on {}: {err}",
+                    install_to.display()
+                )
+            })?
             .permissions();
         perms.set_mode(0o755);
         fs::set_permissions(install_to, perms)
@@ -513,7 +519,8 @@ mod tests {
     fn resolve_binary_path_non_raw_requires_existing_file() {
         let temp = tempfile::tempdir().expect("tempdir");
         let kind = crate::archive::ArchiveKind::TarGz;
-        let err = resolve_binary_path(temp.path(), None, &kind, "nvim/bin/nvim").expect_err("must fail");
+        let err =
+            resolve_binary_path(temp.path(), None, &kind, "nvim/bin/nvim").expect_err("must fail");
         assert!(err.contains("binary_path not found"));
     }
 
@@ -532,10 +539,7 @@ mod tests {
 
     #[test]
     fn string_array_param_rejects_non_string_items() {
-        let entry = fake_entry_with(&[(
-            "args",
-            toml::Value::Array(vec![toml::Value::Integer(1)]),
-        )]);
+        let entry = fake_entry_with(&[("args", toml::Value::Array(vec![toml::Value::Integer(1)]))]);
         let err = string_array_param(&entry, "args").expect_err("must fail");
         assert!(err.contains("must be an array of strings"));
     }
@@ -569,7 +573,8 @@ mod tests {
             },
         };
 
-        let err = install_missing("non-existent-command", &entry, &host_mac()).expect_err("must fail");
+        let err =
+            install_missing("non-existent-command", &entry, &host_mac()).expect_err("must fail");
         assert!(err.contains("official_script invalid install_to"));
     }
 
@@ -614,7 +619,8 @@ mod tests {
             },
         };
 
-        let err = install_missing("non-existent-command", &entry, &host_mac()).expect_err("must fail");
+        let err =
+            install_missing("non-existent-command", &entry, &host_mac()).expect_err("must fail");
         assert!(err.contains("download_binary invalid install_to"));
     }
 
@@ -626,7 +632,10 @@ mod tests {
             source: Some("https://example.invalid".to_string()),
             params: {
                 let mut map = std::collections::BTreeMap::new();
-                map.insert("package".to_string(), toml::Value::String("tool".to_string()));
+                map.insert(
+                    "package".to_string(),
+                    toml::Value::String("tool".to_string()),
+                );
                 map.insert(
                     "repo_url".to_string(),
                     toml::Value::String("https://example.invalid/repo".to_string()),

@@ -93,7 +93,9 @@ kind = "dir"
         .stderr(predicate::str::contains("duplicate command"))
         .stderr(predicate::str::contains("pins version"))
         .stderr(predicate::str::contains("source must use https"))
-        .stderr(predicate::str::contains("target must be absolute or ~-based"));
+        .stderr(predicate::str::contains(
+            "target must be absolute or ~-based",
+        ));
 }
 
 #[test]
@@ -137,9 +139,15 @@ kind = "file"
         .failure()
         .stderr(predicate::str::contains("missing required param url"))
         .stderr(predicate::str::contains("missing required param sha256"))
-        .stderr(predicate::str::contains("missing required param archive_kind"))
-        .stderr(predicate::str::contains("missing required param binary_path"))
-        .stderr(predicate::str::contains("missing required param install_to"));
+        .stderr(predicate::str::contains(
+            "missing required param archive_kind",
+        ))
+        .stderr(predicate::str::contains(
+            "missing required param binary_path",
+        ))
+        .stderr(predicate::str::contains(
+            "missing required param install_to",
+        ));
 }
 
 #[test]
@@ -178,7 +186,9 @@ kind = "file"
         .arg("check")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("missing required param script_url"));
+        .stderr(predicate::str::contains(
+            "missing required param script_url",
+        ));
 }
 
 #[test]
@@ -221,7 +231,9 @@ kind = "file"
         .arg("check")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("param script_url must use https://"))
+        .stderr(predicate::str::contains(
+            "param script_url must use https://",
+        ))
         .stderr(predicate::str::contains("param args must be string array"));
 }
 
@@ -266,9 +278,15 @@ kind = "file"
         .failure()
         .stderr(predicate::str::contains("missing required param package"))
         .stderr(predicate::str::contains("missing required param repo_url"))
-        .stderr(predicate::str::contains("missing required param repo_key_url"))
-        .stderr(predicate::str::contains("missing required param repo_channel"))
-        .stderr(predicate::str::contains("missing required param repo_components"));
+        .stderr(predicate::str::contains(
+            "missing required param repo_key_url",
+        ))
+        .stderr(predicate::str::contains(
+            "missing required param repo_channel",
+        ))
+        .stderr(predicate::str::contains(
+            "missing required param repo_components",
+        ));
 }
 
 #[test]
@@ -318,8 +336,12 @@ kind = "file"
         .assert()
         .failure()
         .stderr(predicate::str::contains("param repo_url must use https://"))
-        .stderr(predicate::str::contains("param repo_key_url must use https://"))
-        .stderr(predicate::str::contains("param repo_components must be non-empty string array"));
+        .stderr(predicate::str::contains(
+            "param repo_key_url must use https://",
+        ))
+        .stderr(predicate::str::contains(
+            "param repo_components must be non-empty string array",
+        ));
 }
 
 #[test]
@@ -365,5 +387,7 @@ kind = "file"
         .arg("check")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("install_to must be absolute or ~-based"));
+        .stderr(predicate::str::contains(
+            "install_to must be absolute or ~-based",
+        ));
 }

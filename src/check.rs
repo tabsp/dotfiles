@@ -1,5 +1,5 @@
 use crate::config::{DepsManifest, DotfilesManifest, FileKind, Installer};
-use crate::platform::{distro_supported, Host, Platform};
+use crate::platform::{Host, Platform, distro_supported};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -24,7 +24,10 @@ pub fn run_check(
             errors.push(format!("duplicate command in deps.toml: {}", dep.command));
         }
 
-        match dep.entries_for(host.platform.key(), host.arch.key()).as_slice() {
+        match dep
+            .entries_for(host.platform.key(), host.arch.key())
+            .as_slice()
+        {
             [] => errors.push(format!("dependency {name} has no current-host entry")),
             [entry] => {
                 validate_installer_platform(name, entry.installer, host, &mut errors);
@@ -37,7 +40,9 @@ pub fn run_check(
                 }
                 validate_https(name, entry.source.as_deref(), &mut errors);
             }
-            _ => errors.push(format!("dependency {name} has multiple current-host entries")),
+            _ => errors.push(format!(
+                "dependency {name} has multiple current-host entries"
+            )),
         }
     }
 
@@ -98,10 +103,10 @@ fn validate_installer_platform(
 }
 
 fn validate_https(name: &str, source: Option<&str>, errors: &mut Vec<String>) {
-    if let Some(source) = source {
-        if !source.starts_with("https://") {
-            errors.push(format!("dependency {name} source must use https://"));
-        }
+    if let Some(source) = source
+        && !source.starts_with("https://")
+    {
+        errors.push(format!("dependency {name} source must use https://"));
     }
 }
 
@@ -118,12 +123,16 @@ fn validate_installer_params(
             require_string_param(name, entry, "archive_kind", errors);
             require_string_param(name, entry, "binary_path", errors);
             require_string_param(name, entry, "install_to", errors);
-            if let Some(url) = entry.params.get("url").and_then(toml::Value::as_str) {
-                if !url.starts_with("https://") {
-                    errors.push(format!("dependency {name} param url must use https://"));
-                }
+            if let Some(url) = entry.params.get("url").and_then(toml::Value::as_str)
+                && !url.starts_with("https://")
+            {
+                errors.push(format!("dependency {name} param url must use https://"));
             }
-            if let Some(kind) = entry.params.get("archive_kind").and_then(toml::Value::as_str) {
+            if let Some(kind) = entry
+                .params
+                .get("archive_kind")
+                .and_then(toml::Value::as_str)
+            {
                 match kind {
                     "raw" | "tar.gz" | "tar.xz" | "zip" => {}
                     _ => errors.push(format!(
@@ -139,12 +148,12 @@ fn validate_installer_params(
             require_string_param(name, entry, "script_url", errors);
             validate_optional_string_array_param(name, entry, "args", errors);
             validate_optional_string_param(name, entry, "install_to", errors);
-            if let Some(script_url) = entry.params.get("script_url").and_then(toml::Value::as_str) {
-                if !script_url.starts_with("https://") {
-                    errors.push(format!(
-                        "dependency {name} param script_url must use https://"
-                    ));
-                }
+            if let Some(script_url) = entry.params.get("script_url").and_then(toml::Value::as_str)
+                && !script_url.starts_with("https://")
+            {
+                errors.push(format!(
+                    "dependency {name} param script_url must use https://"
+                ));
             }
             if let Some(install_to) = entry.params.get("install_to").and_then(toml::Value::as_str) {
                 validate_managed_path(repo, "install_to", install_to, errors);
@@ -156,17 +165,22 @@ fn validate_installer_params(
             require_string_param(name, entry, "repo_key_url", errors);
             require_string_param(name, entry, "repo_channel", errors);
             require_non_empty_string_array_param(name, entry, "repo_components", errors);
-            if let Some(repo_url) = entry.params.get("repo_url").and_then(toml::Value::as_str) {
-                if !repo_url.starts_with("https://") {
-                    errors.push(format!("dependency {name} param repo_url must use https://"));
-                }
+            if let Some(repo_url) = entry.params.get("repo_url").and_then(toml::Value::as_str)
+                && !repo_url.starts_with("https://")
+            {
+                errors.push(format!(
+                    "dependency {name} param repo_url must use https://"
+                ));
             }
-            if let Some(key_url) = entry.params.get("repo_key_url").and_then(toml::Value::as_str) {
-                if !key_url.starts_with("https://") {
-                    errors.push(format!(
-                        "dependency {name} param repo_key_url must use https://"
-                    ));
-                }
+            if let Some(key_url) = entry
+                .params
+                .get("repo_key_url")
+                .and_then(toml::Value::as_str)
+                && !key_url.starts_with("https://")
+            {
+                errors.push(format!(
+                    "dependency {name} param repo_key_url must use https://"
+                ));
             }
         }
         _ => {}
@@ -192,10 +206,10 @@ fn validate_optional_string_param(
     key: &str,
     errors: &mut Vec<String>,
 ) {
-    if let Some(value) = entry.params.get(key) {
-        if !value.is_str() {
-            errors.push(format!("dependency {name} param {key} must be string"));
-        }
+    if let Some(value) = entry.params.get(key)
+        && !value.is_str()
+    {
+        errors.push(format!("dependency {name} param {key} must be string"));
     }
 }
 
@@ -209,11 +223,15 @@ fn validate_optional_string_array_param(
         return;
     };
     let Some(array) = value.as_array() else {
-        errors.push(format!("dependency {name} param {key} must be string array"));
+        errors.push(format!(
+            "dependency {name} param {key} must be string array"
+        ));
         return;
     };
     if array.iter().any(|v| !v.is_str()) {
-        errors.push(format!("dependency {name} param {key} must be string array"));
+        errors.push(format!(
+            "dependency {name} param {key} must be string array"
+        ));
     }
 }
 
@@ -228,15 +246,24 @@ fn require_non_empty_string_array_param(
         return;
     };
     let Some(array) = value.as_array() else {
-        errors.push(format!("dependency {name} param {key} must be non-empty string array"));
+        errors.push(format!(
+            "dependency {name} param {key} must be non-empty string array"
+        ));
         return;
     };
     if array.is_empty() || array.iter().any(|v| !v.is_str()) {
-        errors.push(format!("dependency {name} param {key} must be non-empty string array"));
+        errors.push(format!(
+            "dependency {name} param {key} must be non-empty string array"
+        ));
     }
 }
 
-fn validate_source(repo: &Path, source: &str, expected: Option<FileKind>, errors: &mut Vec<String>) {
+fn validate_source(
+    repo: &Path,
+    source: &str,
+    expected: Option<FileKind>,
+    errors: &mut Vec<String>,
+) {
     if source.starts_with('/')
         || source.starts_with('~')
         || source.contains('$')
@@ -269,15 +296,19 @@ fn validate_target(repo: &Path, target: &str, errors: &mut Vec<String>) {
 
 fn validate_managed_path(repo: &Path, label: &str, target: &str, errors: &mut Vec<String>) {
     if target.contains('$') {
-        errors.push(format!("{label} must not contain environment variables: {target}"));
+        errors.push(format!(
+            "{label} must not contain environment variables: {target}"
+        ));
     }
     if !(target.starts_with("~/") || target.starts_with('/')) {
         errors.push(format!("{label} must be absolute or ~-based: {target}"));
     }
-    if let Some(path) = expand_home(target) {
-        if path.starts_with(repo) {
-            errors.push(format!("{label} must not point inside repository: {target}"));
-        }
+    if let Some(path) = expand_home(target)
+        && path.starts_with(repo)
+    {
+        errors.push(format!(
+            "{label} must not point inside repository: {target}"
+        ));
     }
 }
 

@@ -48,7 +48,9 @@ fn link_dry_run_reports_conflict_reason_and_fails() {
         .assert()
         .failure()
         .stdout(predicate::str::contains("WouldFail"))
-        .stdout(predicate::str::contains("reason: target is an existing file"));
+        .stdout(predicate::str::contains(
+            "reason: target is an existing file",
+        ));
 }
 
 #[test]

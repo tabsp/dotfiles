@@ -46,6 +46,7 @@ struct Action {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 enum ActionKind {
     WouldLink,
     WouldBackup,
@@ -64,7 +65,8 @@ fn plan(
         if !entry.enabled {
             continue;
         }
-        if !entry.platforms.is_empty() && !entry.platforms.iter().any(|p| p == host.platform.key()) {
+        if !entry.platforms.is_empty() && !entry.platforms.iter().any(|p| p == host.platform.key())
+        {
             continue;
         }
 
@@ -171,8 +173,7 @@ fn unique_backup_path(target: &Path) -> PathBuf {
 }
 
 fn timestamp() -> String {
-    let now =
-        time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
     let format = time::macros::format_description!("[year][month][day][hour][minute][second]");
     now.format(&format)
         .unwrap_or_else(|_| "19700101000000".to_string())

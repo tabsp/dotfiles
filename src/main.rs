@@ -61,7 +61,8 @@ fn run() -> Result<(), String> {
 }
 
 fn run_check() -> Result<(), String> {
-    let repo = std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
+    let repo =
+        std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
     let deps = config::load_deps(Path::new("deps.toml"))?;
     let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
     let host = platform::detect_host()?;
@@ -75,7 +76,8 @@ fn run_check() -> Result<(), String> {
 }
 
 fn run_link(conflict: Conflict, dry_run: bool) -> Result<(), String> {
-    let repo = std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
+    let repo =
+        std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
     let deps = config::load_deps(Path::new("deps.toml"))?;
     let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
     let host = platform::detect_host()?;
@@ -94,7 +96,8 @@ fn run_link(conflict: Conflict, dry_run: bool) -> Result<(), String> {
 }
 
 fn run_doctor() -> Result<(), String> {
-    let repo = std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
+    let repo =
+        std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
     let deps = config::load_deps(Path::new("deps.toml"))?;
     let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
     let host = platform::detect_host()?;
@@ -105,7 +108,8 @@ fn run_doctor() -> Result<(), String> {
 }
 
 fn run_bootstrap() -> Result<(), String> {
-    let repo = std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
+    let repo =
+        std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
     let deps_manifest = config::load_deps(Path::new("deps.toml"))?;
     let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
     let host = platform::detect_host()?;

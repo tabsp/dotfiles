@@ -79,8 +79,14 @@ mod tests {
     #[test]
     fn parse_archive_kind_supports_expected_values() {
         assert!(matches!(parse_archive_kind("raw"), Ok(ArchiveKind::Raw)));
-        assert!(matches!(parse_archive_kind("tar.gz"), Ok(ArchiveKind::TarGz)));
-        assert!(matches!(parse_archive_kind("tar.xz"), Ok(ArchiveKind::TarXz)));
+        assert!(matches!(
+            parse_archive_kind("tar.gz"),
+            Ok(ArchiveKind::TarGz)
+        ));
+        assert!(matches!(
+            parse_archive_kind("tar.xz"),
+            Ok(ArchiveKind::TarXz)
+        ));
         assert!(matches!(parse_archive_kind("zip"), Ok(ArchiveKind::Zip)));
     }
 

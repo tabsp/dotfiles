@@ -96,14 +96,14 @@ pub enum FileKind {
 }
 
 pub fn load_deps(path: &Path) -> Result<DepsManifest, String> {
-    let raw =
-        fs::read_to_string(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let raw = fs::read_to_string(path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     toml::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
 }
 
 pub fn load_dotfiles(path: &Path) -> Result<DotfilesManifest, String> {
-    let raw =
-        fs::read_to_string(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let raw = fs::read_to_string(path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     toml::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
 }
 

@@ -15,7 +15,10 @@ pub fn ensure_parent_dir(path: &Path) -> Result<(), String> {
         .parent()
         .ok_or_else(|| format!("target has no parent: {}", path.display()))?;
     if parent.exists() && !parent.is_dir() {
-        return Err(format!("target parent is not a directory: {}", parent.display()));
+        return Err(format!(
+            "target parent is not a directory: {}",
+            parent.display()
+        ));
     }
     std::fs::create_dir_all(parent)
         .map_err(|err| format!("failed to create {}: {err}", parent.display()))

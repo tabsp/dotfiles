@@ -53,8 +53,11 @@ fn doctor_warns_for_version_drift_but_keeps_exit_zero() {
     make_executable(&fake);
     std::fs::create_dir_all(repo.path().join("config")).expect("config dir");
     std::fs::write(repo.path().join("config/tmux.conf"), "set -g mouse on\n").expect("source");
-    std::os::unix::fs::symlink(repo.path().join("config/tmux.conf"), home.path().join(".tmux.conf"))
-        .expect("link");
+    std::os::unix::fs::symlink(
+        repo.path().join("config/tmux.conf"),
+        home.path().join(".tmux.conf"),
+    )
+    .expect("link");
     std::fs::write(
         repo.path().join("deps.toml"),
         format!(

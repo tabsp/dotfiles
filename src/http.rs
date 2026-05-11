@@ -29,7 +29,9 @@ pub fn download_https(url: &str, allow_redirects: bool) -> Result<DownloadedFile
     let bytes = response
         .bytes()
         .map_err(|err| format!("failed to read response body: {err}"))?;
-    Ok(DownloadedFile { bytes: bytes.to_vec() })
+    Ok(DownloadedFile {
+        bytes: bytes.to_vec(),
+    })
 }
 
 pub fn validate_manifest_https(url: &str) -> Result<(), String> {

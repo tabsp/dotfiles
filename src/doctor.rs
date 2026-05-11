@@ -58,7 +58,11 @@ pub fn run_doctor(
         let expected = repo.join(&file.source);
         match fs::read_link(&target) {
             Ok(actual) if paths_match(&actual, &expected) => {
-                oks.push(format!("link {} -> {}", target.display(), expected.display()));
+                oks.push(format!(
+                    "link {} -> {}",
+                    target.display(),
+                    expected.display()
+                ));
             }
             Ok(actual) => {
                 hard_errors.push(format!(
