@@ -44,4 +44,7 @@ if type -q lazygit
 end
 
 # opencode
-fish_add_path \$HOME/.opencode/bin
+set -l opencode_bin "$HOME/.opencode/bin"
+if test -d $opencode_bin
+    fish_add_path $opencode_bin
+end
