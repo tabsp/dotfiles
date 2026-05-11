@@ -10,7 +10,7 @@ pub fn install_missing(deps: &DepsManifest, host: &Host) -> Result<(), String> {
         };
 
         println!("==> dependency {name}");
-        installers::install_missing(&dep.command, entry)?;
+        installers::install_missing(&dep.command, entry, host)?;
     }
 
     Ok(())

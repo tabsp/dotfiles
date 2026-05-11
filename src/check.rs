@@ -28,6 +28,7 @@ pub fn run_check(
             [] => errors.push(format!("dependency {name} has no current-host entry")),
             [entry] => {
                 validate_installer_platform(name, entry.installer, host, &mut errors);
+                validate_installer_params(name, entry, &mut errors);
                 if entry.version != "latest" && dep.version_check.is_none() {
                     errors.push(format!(
                         "dependency {name} pins version {} but has no version_check",
@@ -101,6 +102,126 @@ fn validate_https(name: &str, source: Option<&str>, errors: &mut Vec<String>) {
         if !source.starts_with("https://") {
             errors.push(format!("dependency {name} source must use https://"));
         }
+    }
+}
+
+fn validate_installer_params(name: &str, entry: &crate::config::InstallEntry, errors: &mut Vec<String>) {
+    match entry.installer {
+        Installer::DownloadBinary => {
+            require_string_param(name, entry, "url", errors);
+            require_string_param(name, entry, "sha256", errors);
+            require_string_param(name, entry, "archive_kind", errors);
+            require_string_param(name, entry, "binary_path", errors);
+            require_string_param(name, entry, "install_to", errors);
+            if let Some(url) = entry.params.get("url").and_then(toml::Value::as_str) {
+                if !url.starts_with("https://") {
+                    errors.push(format!("dependency {name} param url must use https://"));
+                }
+            }
+            if let Some(kind) = entry.params.get("archive_kind").and_then(toml::Value::as_str) {
+                match kind {
+                    "raw" | "tar.gz" | "tar.xz" | "zip" => {}
+                    _ => errors.push(format!(
+                        "dependency {name} has unsupported archive_kind: {kind}"
+                    )),
+                }
+            }
+        }
+        Installer::OfficialScript => {
+            require_string_param(name, entry, "script_url", errors);
+            validate_optional_string_array_param(name, entry, "args", errors);
+            validate_optional_string_param(name, entry, "install_to", errors);
+            if let Some(script_url) = entry.params.get("script_url").and_then(toml::Value::as_str) {
+                if !script_url.starts_with("https://") {
+                    errors.push(format!(
+                        "dependency {name} param script_url must use https://"
+                    ));
+                }
+            }
+        }
+        Installer::RepoPackage => {
+            require_string_param(name, entry, "package", errors);
+            require_string_param(name, entry, "repo_url", errors);
+            require_string_param(name, entry, "repo_key_url", errors);
+            require_string_param(name, entry, "repo_channel", errors);
+            require_non_empty_string_array_param(name, entry, "repo_components", errors);
+            if let Some(repo_url) = entry.params.get("repo_url").and_then(toml::Value::as_str) {
+                if !repo_url.starts_with("https://") {
+                    errors.push(format!("dependency {name} param repo_url must use https://"));
+                }
+            }
+            if let Some(key_url) = entry.params.get("repo_key_url").and_then(toml::Value::as_str) {
+                if !key_url.starts_with("https://") {
+                    errors.push(format!(
+                        "dependency {name} param repo_key_url must use https://"
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn require_string_param(
+    name: &str,
+    entry: &crate::config::InstallEntry,
+    key: &str,
+    errors: &mut Vec<String>,
+) {
+    match entry.params.get(key) {
+        Some(value) if value.is_str() => {}
+        Some(_) => errors.push(format!("dependency {name} param {key} must be string")),
+        None => errors.push(format!("dependency {name} missing required param {key}")),
+    }
+}
+
+fn validate_optional_string_param(
+    name: &str,
+    entry: &crate::config::InstallEntry,
+    key: &str,
+    errors: &mut Vec<String>,
+) {
+    if let Some(value) = entry.params.get(key) {
+        if !value.is_str() {
+            errors.push(format!("dependency {name} param {key} must be string"));
+        }
+    }
+}
+
+fn validate_optional_string_array_param(
+    name: &str,
+    entry: &crate::config::InstallEntry,
+    key: &str,
+    errors: &mut Vec<String>,
+) {
+    let Some(value) = entry.params.get(key) else {
+        return;
+    };
+    let Some(array) = value.as_array() else {
+        errors.push(format!("dependency {name} param {key} must be string array"));
+        return;
+    };
+    if array.iter().any(|v| !v.is_str()) {
+        errors.push(format!("dependency {name} param {key} must be string array"));
+    }
+}
+
+fn require_non_empty_string_array_param(
+    name: &str,
+    entry: &crate::config::InstallEntry,
+    key: &str,
+    errors: &mut Vec<String>,
+) {
+    let Some(value) = entry.params.get(key) else {
+        errors.push(format!("dependency {name} missing required param {key}"));
+        return;
+    };
+    let Some(array) = value.as_array() else {
+        errors.push(format!("dependency {name} param {key} must be non-empty string array"));
+        return;
+    };
+    if array.is_empty() || array.iter().any(|v| !v.is_str()) {
+        errors.push(format!("dependency {name} param {key} must be non-empty string array"));
     }
 }
 

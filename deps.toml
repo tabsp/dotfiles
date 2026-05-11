@@ -129,3 +129,59 @@ package = "ghostty"
 # - repo_package execution needs repository mutation tests on Ubuntu/Debian.
 # - official_script execution needs temp-script tests and install_to marker tests.
 # - download_binary execution needs archive extraction and sha256 tests.
+#
+# Example: official_script (inactive sample)
+# [deps.example_official_script]
+# command = "example-tool"
+#
+# [deps.example_official_script.mac.arm64]
+# installer = "official_script"
+# version = "latest"
+# source = "https://example.com/docs/install"
+#
+# [deps.example_official_script.mac.arm64.params]
+# script_url = "https://example.com/install.sh"
+# args = ["--yes"]
+# install_to = "~/.local/bin/example-tool"
+#
+# Example: download_binary (inactive sample)
+# [deps.example_download_binary]
+# command = "example-bin"
+#
+# [deps.example_download_binary.version_check]
+# args = ["--version"]
+# regex = 'v?([0-9]+\.[0-9]+\.[0-9]+)'
+# stream = "stdout"
+#
+# [deps.example_download_binary.linux.x86_64]
+# installer = "download_binary"
+# version = "1.2.3"
+# source = "https://example.com/releases"
+#
+# [deps.example_download_binary.linux.x86_64.params]
+# url = "https://example.com/releases/download/v1.2.3/example-linux-x86_64.tar.gz"
+# sha256 = "REPLACE_WITH_REAL_SHA256"
+# archive_kind = "tar.gz"
+# binary_path = "example/bin/example-bin"
+# install_to = "~/.local/bin/example-bin"
+#
+# Example: repo_package (inactive sample)
+# [deps.example_repo_package]
+# command = "example-repo-tool"
+#
+# [deps.example_repo_package.version_check]
+# args = ["--version"]
+# regex = '([0-9]+\.[0-9]+\.[0-9]+)'
+# stream = "stdout"
+#
+# [deps.example_repo_package.linux.x86_64]
+# installer = "repo_package"
+# version = "1.0.0"
+# source = "https://example.com/repo-docs"
+#
+# [deps.example_repo_package.linux.x86_64.params]
+# package = "example-repo-tool"
+# repo_url = "https://packages.example.com/ubuntu"
+# repo_key_url = "https://packages.example.com/KEY.gpg"
+# repo_channel = "stable"
+# repo_components = ["main"]

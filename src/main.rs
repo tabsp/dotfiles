@@ -1,12 +1,15 @@
+mod archive;
 mod check;
 mod config;
 mod deps;
 mod doctor;
+mod http;
 mod installers;
 mod link;
 mod output;
 mod path;
 mod platform;
+mod process;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::Path;
