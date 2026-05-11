@@ -28,7 +28,7 @@ pub fn run_check(
             [] => errors.push(format!("dependency {name} has no current-host entry")),
             [entry] => {
                 validate_installer_platform(name, entry.installer, host, &mut errors);
-                validate_installer_params(name, entry, &mut errors);
+                validate_installer_params(name, entry, repo, &mut errors);
                 if entry.version != "latest" && dep.version_check.is_none() {
                     errors.push(format!(
                         "dependency {name} pins version {} but has no version_check",
@@ -105,7 +105,12 @@ fn validate_https(name: &str, source: Option<&str>, errors: &mut Vec<String>) {
     }
 }
 
-fn validate_installer_params(name: &str, entry: &crate::config::InstallEntry, errors: &mut Vec<String>) {
+fn validate_installer_params(
+    name: &str,
+    entry: &crate::config::InstallEntry,
+    repo: &Path,
+    errors: &mut Vec<String>,
+) {
     match entry.installer {
         Installer::DownloadBinary => {
             require_string_param(name, entry, "url", errors);
@@ -126,6 +131,9 @@ fn validate_installer_params(name: &str, entry: &crate::config::InstallEntry, er
                     )),
                 }
             }
+            if let Some(install_to) = entry.params.get("install_to").and_then(toml::Value::as_str) {
+                validate_managed_path(repo, "install_to", install_to, errors);
+            }
         }
         Installer::OfficialScript => {
             require_string_param(name, entry, "script_url", errors);
@@ -137,6 +145,9 @@ fn validate_installer_params(name: &str, entry: &crate::config::InstallEntry, er
                         "dependency {name} param script_url must use https://"
                     ));
                 }
+            }
+            if let Some(install_to) = entry.params.get("install_to").and_then(toml::Value::as_str) {
+                validate_managed_path(repo, "install_to", install_to, errors);
             }
         }
         Installer::RepoPackage => {
@@ -253,17 +264,19 @@ fn validate_source(repo: &Path, source: &str, expected: Option<FileKind>, errors
 }
 
 fn validate_target(repo: &Path, target: &str, errors: &mut Vec<String>) {
+    validate_managed_path(repo, "target", target, errors);
+}
+
+fn validate_managed_path(repo: &Path, label: &str, target: &str, errors: &mut Vec<String>) {
     if target.contains('$') {
-        errors.push(format!(
-            "target must not contain environment variables: {target}"
-        ));
+        errors.push(format!("{label} must not contain environment variables: {target}"));
     }
     if !(target.starts_with("~/") || target.starts_with('/')) {
-        errors.push(format!("target must be absolute or ~-based: {target}"));
+        errors.push(format!("{label} must be absolute or ~-based: {target}"));
     }
     if let Some(path) = expand_home(target) {
         if path.starts_with(repo) {
-            errors.push(format!("target must not point inside repository: {target}"));
+            errors.push(format!("{label} must not point inside repository: {target}"));
         }
     }
 }

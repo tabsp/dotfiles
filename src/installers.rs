@@ -137,9 +137,13 @@ fn install_download_binary(entry: &InstallEntry) -> Result<(), String> {
 fn install_official_script(command: &str, entry: &InstallEntry) -> Result<(), String> {
     let script_url = required_string(entry, "script_url")?;
     let args = string_array_param(entry, "args")?;
+    let install_to = if let Some(path) = string_param(entry, "install_to") {
+        Some(crate::path::expand_home(path)?)
+    } else {
+        None
+    };
 
-    if let Some(path) = string_param(entry, "install_to") {
-        let install_to = crate::path::expand_home(path)?;
+    if let Some(install_to) = &install_to {
         match existing_install_state(&install_to)? {
             ExistingInstall::Installed => return Ok(()),
             ExistingInstall::Invalid(reason) => {
@@ -171,8 +175,7 @@ fn install_official_script(command: &str, entry: &InstallEntry) -> Result<(), St
                 .map_err(|err| format!("failed to set script executable bit: {err}"))?;
         }
 
-        let mut child = Command::new("sh");
-        child.arg(&script_path);
+        let mut child = Command::new(&script_path);
         child.args(args.iter().map(String::as_str));
         let output = child
             .output()
@@ -186,7 +189,23 @@ fn install_official_script(command: &str, entry: &InstallEntry) -> Result<(), St
             return Err(message);
         }
 
-        if which(command).is_none() {
+        if let Some(install_to) = &install_to {
+            match existing_install_state(install_to)? {
+                ExistingInstall::Installed => {}
+                ExistingInstall::Invalid(reason) => {
+                    return Err(format!(
+                        "official_script completed but install_to is invalid: {} ({reason})",
+                        install_to.display()
+                    ));
+                }
+                ExistingInstall::Missing => {
+                    return Err(format!(
+                        "official_script completed but install_to is missing: {}",
+                        install_to.display()
+                    ));
+                }
+            }
+        } else if which(command).is_none() {
             return Err(format!(
                 "official_script completed but command not found in PATH: {command}"
             ));
@@ -321,37 +340,37 @@ fn install_repo_package(entry: &InstallEntry, host: &Host) -> Result<(), String>
     let result = (|| {
         let key_download = crate::http::download_https(repo_key_url, false)?;
         let key_asc_path = temp.path().join("repo-key.asc");
-        fs::write(&key_asc_path, key_download.bytes)
+        fs::write(&key_asc_path, &key_download.bytes)
             .map_err(|err| format!("failed to write temporary key file: {err}"))?;
 
-        let keyring_name = format!("{package}-archive-keyring.gpg");
+        let keyring_name = format!("{package}-dotman.gpg");
         let keyring_dest = format!("/usr/share/keyrings/{keyring_name}");
         let temp_key_gpg = temp.path().join("repo-key.gpg");
         let temp_key_gpg_s = temp_key_gpg.to_string_lossy().to_string();
-        let key_asc_s = key_asc_path.to_string_lossy().to_string();
-        let dearmor_output =
-            crate::process::run_capture("gpg", &["--dearmor", "-o", &temp_key_gpg_s, &key_asc_s])?;
-        if !dearmor_output.status.success() {
-            let mut message = format!("gpg --dearmor exited {}", dearmor_output.status);
-            if let Some(context) = crate::process::failure_context(&dearmor_output) {
-                message.push('\n');
-                message.push_str(&context);
+        if is_armored_pgp_key(&key_download.bytes) {
+            let key_asc_s = key_asc_path.to_string_lossy().to_string();
+            let dearmor_output = crate::process::run_capture(
+                "gpg",
+                &["--dearmor", "-o", &temp_key_gpg_s, &key_asc_s],
+            )?;
+            if !dearmor_output.status.success() {
+                let mut message = format!("gpg --dearmor exited {}", dearmor_output.status);
+                if let Some(context) = crate::process::failure_context(&dearmor_output) {
+                    message.push('\n');
+                    message.push_str(&context);
+                }
+                return Err(message);
             }
-            return Err(message);
+        } else {
+            fs::write(&temp_key_gpg, &key_download.bytes)
+                .map_err(|err| format!("failed to write temporary keyring file: {err}"))?;
         }
 
-        run_capture_checked(
-            "sudo",
-            &[
-                "install",
-                "-m",
-                "0644",
-                &temp_key_gpg_s,
-                keyring_dest.as_str(),
-            ],
-        )?;
+        let key_bytes = fs::read(&temp_key_gpg)
+            .map_err(|err| format!("failed to read temporary keyring file: {err}"))?;
+        install_if_different(&temp_key_gpg_s, &keyring_dest, &key_bytes)?;
 
-        let sources_path = format!("/etc/apt/sources.list.d/{package}.list");
+        let sources_path = format!("/etc/apt/sources.list.d/{package}-dotman.list");
         let source_line = format!(
             "deb [signed-by={}] {} {} {}\n",
             keyring_dest,
@@ -367,16 +386,7 @@ fn install_repo_package(entry: &InstallEntry, host: &Host) -> Result<(), String>
                 .map_err(|err| format!("failed to write temporary sources file: {err}"))?;
         }
         let temp_sources_s = temp_sources.to_string_lossy().to_string();
-        run_capture_checked(
-            "sudo",
-            &[
-                "install",
-                "-m",
-                "0644",
-                &temp_sources_s,
-                sources_path.as_str(),
-            ],
-        )?;
+        install_if_different(&temp_sources_s, &sources_path, source_line.as_bytes())?;
 
         run_capture_checked("sudo", &["apt-get", "update"])?;
         run_capture_checked("sudo", &["apt-get", "install", "-y", package])?;
@@ -397,6 +407,21 @@ fn run_capture_checked(command: &str, args: &[&str]) -> Result<(), String> {
         message.push_str(&context);
     }
     Err(message)
+}
+
+fn is_armored_pgp_key(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"-----BEGIN PGP")
+}
+
+fn install_if_different(src: &str, dest: &str, desired_bytes: &[u8]) -> Result<(), String> {
+    let current = Command::new("sudo")
+        .args(["cat", dest])
+        .output()
+        .map_err(|err| format!("failed to read existing {dest} via sudo: {err}"))?;
+    if current.status.success() && current.stdout == desired_bytes {
+        return Ok(());
+    }
+    run_capture_checked("sudo", &["install", "-m", "0644", src, dest])
 }
 
 #[cfg(test)]

@@ -321,3 +321,49 @@ kind = "file"
         .stderr(predicate::str::contains("param repo_key_url must use https://"))
         .stderr(predicate::str::contains("param repo_components must be non-empty string array"));
 }
+
+#[test]
+fn check_validates_install_to_path_constraints() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(temp.path().join("config")).expect("config");
+    std::fs::write(temp.path().join("config/tmux.conf"), "set -g mouse on\n").expect("source");
+    std::fs::write(
+        temp.path().join("deps.toml"),
+        format!(
+            r#"
+[deps.nv]
+command = "nvim"
+{}
+installer = "download_binary"
+version = "0.10.4"
+source = "https://example.invalid/nvim"
+{}
+url = "https://example.invalid/nvim.tar.gz"
+sha256 = "deadbeef"
+archive_kind = "tar.gz"
+binary_path = "nvim/bin/nvim"
+install_to = "relative/path"
+"#,
+            current_host_table("nv"),
+            current_host_params_table("nv")
+        ),
+    )
+    .expect("deps");
+    std::fs::write(
+        temp.path().join("dotfiles.toml"),
+        r#"
+[[files]]
+source = "config/tmux.conf"
+target = "~/.tmux.conf"
+kind = "file"
+"#,
+    )
+    .expect("dotfiles");
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dotman").expect("dotman binary");
+    cmd.current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("install_to must be absolute or ~-based"));
+}

@@ -25,9 +25,14 @@ fn truncate_bytes(bytes: &[u8]) -> String {
     if bytes.is_empty() {
         return String::new();
     }
-    let mut text = String::from_utf8_lossy(bytes).to_string();
-    if text.len() > MAX_CAPTURED_BYTES {
-        text.truncate(MAX_CAPTURED_BYTES);
+    let truncated = bytes.len() > MAX_CAPTURED_BYTES;
+    let slice = if truncated {
+        &bytes[..MAX_CAPTURED_BYTES]
+    } else {
+        bytes
+    };
+    let mut text = String::from_utf8_lossy(slice).to_string();
+    if truncated {
         text.push_str("\n...output truncated...");
     }
     text
