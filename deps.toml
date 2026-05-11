@@ -28,6 +28,36 @@ version = "latest"
 [deps.git.linux.x86_64.params]
 package = "git"
 
+[deps.make]
+command = "make"
+
+[deps.make.version_check]
+args = ["--version"]
+regex = 'GNU Make ([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+stream = "stdout"
+
+[deps.make.mac.arm64]
+installer = "system"
+version = "latest"
+
+[deps.make.mac.x86_64]
+installer = "system"
+version = "latest"
+
+[deps.make.linux.arm64]
+installer = "apt"
+version = "latest"
+
+[deps.make.linux.arm64.params]
+package = "make"
+
+[deps.make.linux.x86_64]
+installer = "apt"
+version = "latest"
+
+[deps.make.linux.x86_64.params]
+package = "make"
+
 [deps.tmux]
 command = "tmux"
 
@@ -91,19 +121,23 @@ source = "https://fishshell.com/"
 package = "fish"
 
 [deps.fish.linux.arm64]
-installer = "apt"
+installer = "ppa"
 version = "latest"
 source = "https://fishshell.com/"
+distros = ["ubuntu"]
 
 [deps.fish.linux.arm64.params]
+ppa = "ppa:fish-shell/release-4"
 package = "fish"
 
 [deps.fish.linux.x86_64]
-installer = "apt"
+installer = "ppa"
 version = "latest"
 source = "https://fishshell.com/"
+distros = ["ubuntu"]
 
 [deps.fish.linux.x86_64.params]
+ppa = "ppa:fish-shell/release-4"
 package = "fish"
 
 [deps.ghostty]
@@ -125,63 +159,348 @@ source = "https://ghostty.org/"
 [deps.ghostty.mac.x86_64.params]
 package = "ghostty"
 
-# Deferred from the first runnable cut:
-# - repo_package execution needs repository mutation tests on Ubuntu/Debian.
-# - official_script execution needs temp-script tests and install_to marker tests.
-# - download_binary execution needs archive extraction and sha256 tests.
-#
-# Example: official_script (inactive sample)
-# [deps.example_official_script]
-# command = "example-tool"
-#
-# [deps.example_official_script.mac.arm64]
-# installer = "official_script"
-# version = "latest"
-# source = "https://example.com/docs/install"
-#
-# [deps.example_official_script.mac.arm64.params]
-# script_url = "https://example.com/install.sh"
-# args = ["--yes"]
-# install_to = "~/.local/bin/example-tool"
-#
-# Example: download_binary (inactive sample)
-# [deps.example_download_binary]
-# command = "example-bin"
-#
-# [deps.example_download_binary.version_check]
-# args = ["--version"]
-# regex = 'v?([0-9]+\.[0-9]+\.[0-9]+)'
-# stream = "stdout"
-#
-# [deps.example_download_binary.linux.x86_64]
-# installer = "download_binary"
-# version = "1.2.3"
-# source = "https://example.com/releases"
-#
-# [deps.example_download_binary.linux.x86_64.params]
-# url = "https://example.com/releases/download/v1.2.3/example-linux-x86_64.tar.gz"
-# sha256 = "REPLACE_WITH_REAL_SHA256"
-# archive_kind = "tar.gz"
-# binary_path = "example/bin/example-bin"
-# install_to = "~/.local/bin/example-bin"
-#
-# Example: repo_package (inactive sample)
-# [deps.example_repo_package]
-# command = "example-repo-tool"
-#
-# [deps.example_repo_package.version_check]
-# args = ["--version"]
-# regex = '([0-9]+\.[0-9]+\.[0-9]+)'
-# stream = "stdout"
-#
-# [deps.example_repo_package.linux.x86_64]
-# installer = "repo_package"
-# version = "1.0.0"
-# source = "https://example.com/repo-docs"
-#
-# [deps.example_repo_package.linux.x86_64.params]
-# package = "example-repo-tool"
-# repo_url = "https://packages.example.com/ubuntu"
-# repo_key_url = "https://packages.example.com/KEY.gpg"
-# repo_channel = "stable"
-# repo_components = ["main"]
+[deps.ghostty.linux.arm64]
+installer = "ppa"
+version = "latest"
+source = "https://ghostty.org/"
+distros = ["ubuntu"]
+
+[deps.ghostty.linux.arm64.params]
+ppa = "ppa:mkasberg/ghostty-ubuntu"
+package = "ghostty"
+
+[deps.ghostty.linux.x86_64]
+installer = "ppa"
+version = "latest"
+source = "https://ghostty.org/"
+distros = ["ubuntu"]
+
+[deps.ghostty.linux.x86_64.params]
+ppa = "ppa:mkasberg/ghostty-ubuntu"
+package = "ghostty"
+
+[deps.nvim]
+command = "nvim"
+
+[deps.nvim.version_check]
+args = ["--version"]
+regex = 'NVIM v?([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.nvim.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/neovim/neovim"
+
+[deps.nvim.mac.arm64.params]
+package = "neovim"
+
+[deps.nvim.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/neovim/neovim"
+
+[deps.nvim.mac.x86_64.params]
+package = "neovim"
+
+[deps.nvim.linux.arm64]
+installer = "download_binary"
+version = "0.12.2"
+source = "https://github.com/neovim/neovim"
+
+[deps.nvim.linux.arm64.params]
+url = "https://github.com/neovim/neovim/releases/download/v0.12.2/nvim-linux-arm64.tar.gz"
+sha256 = "f697d4e4582b6e4b5c3c26e76e06ce26efa08ba1768e03fd2733fcc422bb0490"
+archive_kind = "tar.gz"
+binary_path = "nvim-linux-arm64/bin/nvim"
+install_to = "~/.local/bin/nvim"
+
+[deps.nvim.linux.x86_64]
+installer = "download_binary"
+version = "0.12.2"
+source = "https://github.com/neovim/neovim"
+
+[deps.nvim.linux.x86_64.params]
+url = "https://github.com/neovim/neovim/releases/download/v0.12.2/nvim-linux-x86_64.tar.gz"
+sha256 = "31cf85945cb600d96cdf69f88bc68bec814acbff50863c5546adef3a1bcef260"
+archive_kind = "tar.gz"
+binary_path = "nvim-linux-x86_64/bin/nvim"
+install_to = "~/.local/bin/nvim"
+
+[deps.yazi]
+command = "yazi"
+
+[deps.yazi.version_check]
+args = ["--version"]
+regex = 'yazi ([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.yazi.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/sxyazi/yazi"
+
+[deps.yazi.mac.arm64.params]
+package = "yazi"
+
+[deps.yazi.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/sxyazi/yazi"
+
+[deps.yazi.mac.x86_64.params]
+package = "yazi"
+
+[deps.yazi.linux.arm64]
+installer = "download_binary"
+version = "26.5.6"
+source = "https://github.com/sxyazi/yazi"
+
+[deps.yazi.linux.arm64.params]
+url = "https://github.com/sxyazi/yazi/releases/download/v26.5.6/yazi-aarch64-unknown-linux-gnu.zip"
+sha256 = "c38b07961e7fc4c76503fd0f4a1b4bd0b379a99835b818cd899b0315c728e1e1"
+archive_kind = "zip"
+binary_path = "yazi-aarch64-unknown-linux-gnu/yazi"
+install_to = "~/.local/bin/yazi"
+
+[deps.yazi.linux.x86_64]
+installer = "download_binary"
+version = "26.5.6"
+source = "https://github.com/sxyazi/yazi"
+
+[deps.yazi.linux.x86_64.params]
+url = "https://github.com/sxyazi/yazi/releases/download/v26.5.6/yazi-x86_64-unknown-linux-gnu.zip"
+sha256 = "1c9096f0a83b8102c194385f644cdeff93cc8269426163c9d033041ebd537bd2"
+archive_kind = "zip"
+binary_path = "yazi-x86_64-unknown-linux-gnu/yazi"
+install_to = "~/.local/bin/yazi"
+
+[deps.zoxide]
+command = "zoxide"
+
+[deps.zoxide.version_check]
+args = ["--version"]
+regex = 'zoxide ([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.zoxide.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/ajeetdsouza/zoxide"
+
+[deps.zoxide.mac.arm64.params]
+package = "zoxide"
+
+[deps.zoxide.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/ajeetdsouza/zoxide"
+
+[deps.zoxide.mac.x86_64.params]
+package = "zoxide"
+
+[deps.zoxide.linux.arm64]
+installer = "official_script"
+version = "latest"
+source = "https://github.com/ajeetdsouza/zoxide"
+
+[deps.zoxide.linux.arm64.params]
+script_url = "https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh"
+install_to = "~/.local/bin/zoxide"
+
+[deps.zoxide.linux.x86_64]
+installer = "official_script"
+version = "latest"
+source = "https://github.com/ajeetdsouza/zoxide"
+
+[deps.zoxide.linux.x86_64.params]
+script_url = "https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh"
+install_to = "~/.local/bin/zoxide"
+
+[deps.starship]
+command = "starship"
+
+[deps.starship.version_check]
+args = ["--version"]
+regex = 'starship ([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.starship.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://starship.rs/"
+
+[deps.starship.mac.arm64.params]
+package = "starship"
+
+[deps.starship.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://starship.rs/"
+
+[deps.starship.mac.x86_64.params]
+package = "starship"
+
+[deps.starship.linux.arm64]
+installer = "official_script"
+version = "latest"
+source = "https://starship.rs/"
+
+[deps.starship.linux.arm64.params]
+script_url = "https://starship.rs/install.sh"
+args = ["-y", "-b", "~/.local/bin"]
+install_to = "~/.local/bin/starship"
+
+[deps.starship.linux.x86_64]
+installer = "official_script"
+version = "latest"
+source = "https://starship.rs/"
+
+[deps.starship.linux.x86_64.params]
+script_url = "https://starship.rs/install.sh"
+args = ["-y", "-b", "~/.local/bin"]
+install_to = "~/.local/bin/starship"
+
+[deps.eza]
+command = "eza"
+
+[deps.eza.version_check]
+args = ["--version"]
+regex = 'eza(?: - A modern, maintained replacement for ls)? v?([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.eza.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/eza-community/eza"
+
+[deps.eza.mac.arm64.params]
+package = "eza"
+
+[deps.eza.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/eza-community/eza"
+
+[deps.eza.mac.x86_64.params]
+package = "eza"
+
+[deps.eza.linux.arm64]
+installer = "download_binary"
+version = "0.23.4"
+source = "https://github.com/eza-community/eza"
+
+[deps.eza.linux.arm64.params]
+url = "https://github.com/eza-community/eza/releases/download/v0.23.4/eza_aarch64-unknown-linux-gnu.tar.gz"
+sha256 = "366e8430225f9955c3dc659b452150c169894833ccfef455e01765e265a3edda"
+archive_kind = "tar.gz"
+binary_path = "eza"
+install_to = "~/.local/bin/eza"
+
+[deps.eza.linux.x86_64]
+installer = "download_binary"
+version = "0.23.4"
+source = "https://github.com/eza-community/eza"
+
+[deps.eza.linux.x86_64.params]
+url = "https://github.com/eza-community/eza/releases/download/v0.23.4/eza_x86_64-unknown-linux-gnu.tar.gz"
+sha256 = "0c38665440226cd8bef5d1d4f3bc6ff77c927fb0d68b752739105db7ab5b358d"
+archive_kind = "tar.gz"
+binary_path = "eza"
+install_to = "~/.local/bin/eza"
+
+[deps.lazygit]
+command = "lazygit"
+
+[deps.lazygit.version_check]
+args = ["--version"]
+regex = 'version=([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.lazygit.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/jesseduffield/lazygit"
+
+[deps.lazygit.mac.arm64.params]
+package = "lazygit"
+
+[deps.lazygit.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/jesseduffield/lazygit"
+
+[deps.lazygit.mac.x86_64.params]
+package = "lazygit"
+
+[deps.lazygit.linux.arm64]
+installer = "download_binary"
+version = "0.61.1"
+source = "https://github.com/jesseduffield/lazygit"
+
+[deps.lazygit.linux.arm64.params]
+url = "https://github.com/jesseduffield/lazygit/releases/download/v0.61.1/lazygit_0.61.1_linux_arm64.tar.gz"
+sha256 = "20b1abb2bee5dfd46173b9047353eb678bc51a23839e821958d0b1863ab1655e"
+archive_kind = "tar.gz"
+binary_path = "lazygit"
+install_to = "~/.local/bin/lazygit"
+
+[deps.lazygit.linux.x86_64]
+installer = "download_binary"
+version = "0.61.1"
+source = "https://github.com/jesseduffield/lazygit"
+
+[deps.lazygit.linux.x86_64.params]
+url = "https://github.com/jesseduffield/lazygit/releases/download/v0.61.1/lazygit_0.61.1_linux_x86_64.tar.gz"
+sha256 = "1b91e660700f2332696726b635202576b543e2bc49b639830dccd26bc5160d5d"
+archive_kind = "tar.gz"
+binary_path = "lazygit"
+install_to = "~/.local/bin/lazygit"
+
+[deps.fzf]
+command = "fzf"
+
+[deps.fzf.version_check]
+args = ["--version"]
+regex = '([0-9]+\.[0-9]+\.[0-9]+)'
+stream = "stdout"
+
+[deps.fzf.mac.arm64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/junegunn/fzf"
+
+[deps.fzf.mac.arm64.params]
+package = "fzf"
+
+[deps.fzf.mac.x86_64]
+installer = "brew"
+version = "latest"
+source = "https://github.com/junegunn/fzf"
+
+[deps.fzf.mac.x86_64.params]
+package = "fzf"
+
+[deps.fzf.linux.arm64]
+installer = "download_binary"
+version = "0.72.0"
+source = "https://github.com/junegunn/fzf"
+
+[deps.fzf.linux.arm64.params]
+url = "https://github.com/junegunn/fzf/releases/download/v0.72.0/fzf-0.72.0-linux_arm64.tar.gz"
+sha256 = "a0a5b50730f568c5f08b8dbba1e6e598db253e1856d371290086786b889b996b"
+archive_kind = "tar.gz"
+binary_path = "fzf"
+install_to = "~/.local/bin/fzf"
+
+[deps.fzf.linux.x86_64]
+installer = "download_binary"
+version = "0.72.0"
+source = "https://github.com/junegunn/fzf"
+
+[deps.fzf.linux.x86_64.params]
+url = "https://github.com/junegunn/fzf/releases/download/v0.72.0/fzf-0.72.0-linux_amd64.tar.gz"
+sha256 = "0e58e4bd0b3c5d68c56b54c460a6863d0de79633ed18d388575a960ab447b006"
+archive_kind = "tar.gz"
+binary_path = "fzf"
+install_to = "~/.local/bin/fzf"

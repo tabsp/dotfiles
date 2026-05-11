@@ -14,7 +14,7 @@ pub fn is_installed(command: &str, entry: &InstallEntry) -> Result<bool, String>
         Installer::System => Ok(which(command).is_some()),
         Installer::Brew => package_command("brew", &["list", "--formula", package(entry)?]),
         Installer::Cask => package_command("brew", &["list", "--cask", package(entry)?]),
-        Installer::Apt | Installer::RepoPackage => {
+        Installer::Apt | Installer::RepoPackage | Installer::Ppa => {
             package_command("dpkg", &["-s", package(entry)?])
         }
         Installer::OfficialScript => {
@@ -49,6 +49,7 @@ pub fn install_missing(command: &str, entry: &InstallEntry, host: &Host) -> Resu
         Installer::Cask => run("brew", &["install", "--cask", package(entry)?]),
         Installer::Apt => run("sudo", &["apt-get", "install", "-y", package(entry)?]),
         Installer::RepoPackage => install_repo_package(entry, host),
+        Installer::Ppa => install_ppa(entry, host),
         Installer::OfficialScript => install_official_script(command, entry),
         Installer::DownloadBinary => install_download_binary(entry),
     }
@@ -56,6 +57,10 @@ pub fn install_missing(command: &str, entry: &InstallEntry, host: &Host) -> Resu
 
 fn package(entry: &InstallEntry) -> Result<&str, String> {
     string_param(entry, "package").ok_or_else(|| "missing package param".to_string())
+}
+
+fn bootstrap_package(entry: &InstallEntry) -> &str {
+    string_param(entry, "bootstrap_package").unwrap_or("software-properties-common")
 }
 
 fn string_param<'a>(entry: &'a InstallEntry, key: &str) -> Option<&'a str> {
@@ -133,7 +138,7 @@ fn install_download_binary(entry: &InstallEntry) -> Result<(), String> {
 
 fn install_official_script(command: &str, entry: &InstallEntry) -> Result<(), String> {
     let script_url = required_string(entry, "script_url")?;
-    let args = string_array_param(entry, "args")?;
+    let args = expand_script_args(string_array_param(entry, "args")?)?;
     let install_to = if let Some(path) = string_param(entry, "install_to") {
         Some(crate::path::expand_home(path)?)
     } else {
@@ -211,6 +216,17 @@ fn install_official_script(command: &str, entry: &InstallEntry) -> Result<(), St
     })();
     cleanup_temp(temp, result.is_ok())?;
     result
+}
+
+fn expand_script_args(args: Vec<String>) -> Result<Vec<String>, String> {
+    args.iter().map(|arg| expand_script_arg(arg)).collect()
+}
+
+fn expand_script_arg(arg: &str) -> Result<String, String> {
+    if arg.starts_with("~/") {
+        return crate::path::expand_home(arg).map(|path| path.to_string_lossy().into_owned());
+    }
+    Ok(arg.to_string())
 }
 
 enum ExistingInstall {
@@ -402,6 +418,24 @@ fn install_repo_package(entry: &InstallEntry, host: &Host) -> Result<(), String>
     result
 }
 
+fn install_ppa(entry: &InstallEntry, host: &Host) -> Result<(), String> {
+    if host.platform != Platform::Linux || host.distro.as_deref() != Some("ubuntu") {
+        return Err("ppa supports Ubuntu Linux only".to_string());
+    }
+
+    let package = package(entry)?;
+    let ppa = required_string(entry, "ppa")?;
+    let bootstrap = bootstrap_package(entry);
+
+    if !package_command("dpkg", &["-s", bootstrap])? {
+        run_capture_checked("sudo", &["apt-get", "install", "-y", bootstrap])?;
+    }
+
+    run_capture_checked("sudo", &["add-apt-repository", "-y", ppa])?;
+    run_capture_checked("sudo", &["apt-get", "update"])?;
+    run_capture_checked("sudo", &["apt-get", "install", "-y", package])
+}
+
 fn run_capture_checked(command: &str, args: &[&str]) -> Result<(), String> {
     let output = crate::process::run_capture(command, args)?;
     if output.status.success() {
@@ -444,6 +478,7 @@ mod tests {
             installer: Installer::DownloadBinary,
             version: "1.0.0".to_string(),
             source: Some("https://example.invalid".to_string()),
+            distros: None,
             params: map,
         }
     }
@@ -559,6 +594,7 @@ mod tests {
             installer: Installer::OfficialScript,
             version: "latest".to_string(),
             source: Some("https://example.invalid".to_string()),
+            distros: None,
             params: {
                 let mut map = std::collections::BTreeMap::new();
                 map.insert(
@@ -593,6 +629,7 @@ mod tests {
             installer: Installer::DownloadBinary,
             version: "1.0.0".to_string(),
             source: Some("https://example.invalid".to_string()),
+            distros: None,
             params: {
                 let mut map = std::collections::BTreeMap::new();
                 map.insert(
@@ -630,6 +667,7 @@ mod tests {
             installer: Installer::RepoPackage,
             version: "1.0.0".to_string(),
             source: Some("https://example.invalid".to_string()),
+            distros: None,
             params: {
                 let mut map = std::collections::BTreeMap::new();
                 map.insert(
@@ -675,9 +713,71 @@ mod tests {
             installer: Installer::RepoPackage,
             version: "1.0.0".to_string(),
             source: Some("https://example.invalid".to_string()),
+            distros: None,
             params: std::collections::BTreeMap::new(),
         };
         let err = install_missing("tool", &entry, &host_linux_ubuntu()).expect_err("must fail");
         assert!(err.contains("missing package param"));
+    }
+
+    #[test]
+    fn ppa_bootstrap_package_defaults_to_software_properties_common() {
+        let entry = fake_entry_with(&[]);
+        assert_eq!(bootstrap_package(&entry), "software-properties-common");
+    }
+
+    #[test]
+    fn ppa_bootstrap_package_can_be_overridden() {
+        let entry = fake_entry_with(&[(
+            "bootstrap_package",
+            toml::Value::String("custom-package".to_string()),
+        )]);
+        assert_eq!(bootstrap_package(&entry), "custom-package");
+    }
+
+    #[test]
+    fn ppa_rejects_non_ubuntu_before_command_execution() {
+        let entry = InstallEntry {
+            installer: Installer::Ppa,
+            version: "latest".to_string(),
+            source: Some("https://example.invalid".to_string()),
+            distros: None,
+            params: std::collections::BTreeMap::new(),
+        };
+        let err_mac = install_ppa(&entry, &host_mac()).expect_err("must fail on mac");
+        assert!(err_mac.contains("Ubuntu Linux only"));
+
+        let host_debian = Host {
+            platform: Platform::Linux,
+            arch: Arch::X86_64,
+            distro: Some("debian".to_string()),
+        };
+        let err_debian = install_ppa(&entry, &host_debian).expect_err("must fail on debian");
+        assert!(err_debian.contains("Ubuntu Linux only"));
+    }
+
+    #[test]
+    fn expand_script_arg_expands_leading_home() {
+        let home = std::env::var("HOME").expect("HOME");
+        assert_eq!(
+            expand_script_arg("~/.local/bin").expect("expand"),
+            format!("{home}/.local/bin")
+        );
+    }
+
+    #[test]
+    fn expand_script_arg_keeps_env_var_literal() {
+        assert_eq!(
+            expand_script_arg("$HOME/.local/bin").expect("expand"),
+            "$HOME/.local/bin"
+        );
+    }
+
+    #[test]
+    fn expand_script_arg_keeps_embedded_tilde_literal() {
+        assert_eq!(
+            expand_script_arg("prefix~/path").expect("expand"),
+            "prefix~/path"
+        );
     }
 }

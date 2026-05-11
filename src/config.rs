@@ -29,6 +29,13 @@ impl Dependency {
             _ => Vec::new(),
         }
     }
+
+    pub fn entries_for_host<'a>(&'a self, host: &crate::platform::Host) -> Vec<&'a InstallEntry> {
+        self.entries_for(host.platform.key(), host.arch.key())
+            .into_iter()
+            .filter(|entry| entry.matches_distro(host))
+            .collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,7 +61,24 @@ pub struct InstallEntry {
     #[serde(default)]
     pub source: Option<String>,
     #[serde(default)]
+    pub distros: Option<Vec<String>>,
+    #[serde(default)]
     pub params: BTreeMap<String, toml::Value>,
+}
+
+impl InstallEntry {
+    pub fn matches_distro(&self, host: &crate::platform::Host) -> bool {
+        let Some(distros) = &self.distros else {
+            return true;
+        };
+        if host.platform != crate::platform::Platform::Linux || distros.is_empty() {
+            return false;
+        }
+        let Some(distro) = host.distro.as_deref() else {
+            return false;
+        };
+        distros.iter().any(|item| item == distro)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -65,6 +89,7 @@ pub enum Installer {
     Cask,
     Apt,
     RepoPackage,
+    Ppa,
     OfficialScript,
     DownloadBinary,
 }
@@ -117,4 +142,48 @@ fn default_version_args() -> Vec<String> {
 
 fn default_version_stream() -> VersionStream {
     VersionStream::Stdout
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::{Arch, Host, Platform};
+
+    fn entry_with_distros(distros: Option<Vec<&str>>) -> InstallEntry {
+        InstallEntry {
+            installer: Installer::Ppa,
+            version: "latest".to_string(),
+            source: None,
+            distros: distros.map(|items| items.into_iter().map(str::to_string).collect()),
+            params: BTreeMap::new(),
+        }
+    }
+
+    fn linux_host(distro: &str) -> Host {
+        Host {
+            platform: Platform::Linux,
+            arch: Arch::X86_64,
+            distro: Some(distro.to_string()),
+        }
+    }
+
+    #[test]
+    fn entry_without_distros_matches_any_distro() {
+        assert!(entry_with_distros(None).matches_distro(&linux_host("debian")));
+    }
+
+    #[test]
+    fn entry_with_matching_distro_matches() {
+        assert!(entry_with_distros(Some(vec!["ubuntu"])).matches_distro(&linux_host("ubuntu")));
+    }
+
+    #[test]
+    fn entry_with_non_matching_distro_does_not_match() {
+        assert!(!entry_with_distros(Some(vec!["ubuntu"])).matches_distro(&linux_host("debian")));
+    }
+
+    #[test]
+    fn empty_distros_matches_no_distro() {
+        assert!(!entry_with_distros(Some(vec![])).matches_distro(&linux_host("ubuntu")));
+    }
 }

@@ -2,7 +2,16 @@ if status is-interactive
     # Commands to run in interactive sessions can go here
 end
 
-fish_add_path ~/.local/bin
+set -l local_bin "$HOME/.local/bin"
+if test -d $local_bin
+    fish_add_path $local_bin
+end
+
+set -l cargo_bin "$HOME/.cargo/bin"
+if test -d $cargo_bin
+    fish_add_path $cargo_bin
+end
+
 if test (uname) = Darwin
     if test -d /opt/homebrew
         fish_add_path /opt/homebrew/bin /opt/homebrew/sbin

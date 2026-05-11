@@ -24,10 +24,22 @@ pub fn run_check(
             errors.push(format!("duplicate command in deps.toml: {}", dep.command));
         }
 
-        match dep
-            .entries_for(host.platform.key(), host.arch.key())
-            .as_slice()
-        {
+        validate_distros_scope(name, dep, &mut errors);
+
+        let raw_entries = dep.entries_for(host.platform.key(), host.arch.key());
+        let entries: Vec<_> = raw_entries
+            .iter()
+            .copied()
+            .filter(|entry| entry.matches_distro(host))
+            .collect();
+
+        match entries.as_slice() {
+            [] if host.platform == Platform::Linux && !raw_entries.is_empty() => {
+                let distro = host.distro.as_deref().unwrap_or("unknown");
+                errors.push(format!(
+                    "dependency {name} has no current-host entry for distro {distro}"
+                ));
+            }
             [] => errors.push(format!("dependency {name} has no current-host entry")),
             [entry] => {
                 validate_installer_platform(name, entry.installer, host, &mut errors);
@@ -93,12 +105,29 @@ fn validate_installer_platform(
                 "dependency {name} uses mac-only installer on non-mac host"
             ));
         }
-        Installer::Apt | Installer::RepoPackage if host.platform != Platform::Linux => {
+        Installer::Apt | Installer::RepoPackage | Installer::Ppa
+            if host.platform != Platform::Linux =>
+        {
             errors.push(format!(
                 "dependency {name} uses linux-only installer on non-linux host"
             ));
         }
+        Installer::Ppa if host.distro.as_deref() != Some("ubuntu") => {
+            errors.push(format!(
+                "dependency {name} ppa installer supports Ubuntu only"
+            ));
+        }
         _ => {}
+    }
+}
+
+fn validate_distros_scope(name: &str, dep: &crate::config::Dependency, errors: &mut Vec<String>) {
+    for entry in dep.mac.values() {
+        if entry.distros.is_some() {
+            errors.push(format!(
+                "dependency {name} distros is only valid on linux entries"
+            ));
+        }
     }
 }
 
@@ -182,6 +211,11 @@ fn validate_installer_params(
                     "dependency {name} param repo_key_url must use https://"
                 ));
             }
+        }
+        Installer::Ppa => {
+            require_string_param(name, entry, "ppa", errors);
+            require_string_param(name, entry, "package", errors);
+            validate_optional_string_param(name, entry, "bootstrap_package", errors);
         }
         _ => {}
     }

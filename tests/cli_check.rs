@@ -1,6 +1,8 @@
 mod common;
 
-use common::{current_host_params_table, current_host_table, non_current_host_table};
+use common::{
+    current_host_params_table, current_host_table, non_current_host_table, write_minimal_dotfiles,
+};
 use predicates::prelude::*;
 
 #[test]
@@ -389,5 +391,120 @@ kind = "file"
         .failure()
         .stderr(predicate::str::contains(
             "install_to must be absolute or ~-based",
+        ));
+}
+
+#[test]
+fn check_rejects_distros_on_mac_entry() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_minimal_dotfiles(temp.path());
+    let mac_table_with_distros = if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        "[deps.fish.mac.x86_64]"
+    } else {
+        "[deps.fish.mac.arm64]"
+    };
+    let mac_params_with_distros = if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        "[deps.fish.mac.x86_64.params]"
+    } else {
+        "[deps.fish.mac.arm64.params]"
+    };
+    std::fs::write(
+        temp.path().join("deps.toml"),
+        format!(
+            r#"
+[deps.fish]
+command = "fish"
+
+{}
+installer = "brew"
+version = "latest"
+distros = ["ubuntu"]
+
+{}
+package = "fish"
+
+{}
+installer = "system"
+version = "latest"
+"#,
+            mac_table_with_distros,
+            mac_params_with_distros,
+            current_host_table("fish")
+        ),
+    )
+    .expect("deps");
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dotman").expect("dotman binary");
+    cmd.current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "distros is only valid on linux entries",
+        ));
+}
+
+#[test]
+fn check_validates_ppa_required_params() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_minimal_dotfiles(temp.path());
+    std::fs::write(
+        temp.path().join("deps.toml"),
+        format!(
+            r#"
+[deps.fish]
+command = "fish"
+
+{}
+installer = "ppa"
+version = "latest"
+"#,
+            current_host_table("fish")
+        ),
+    )
+    .expect("deps");
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dotman").expect("dotman binary");
+    cmd.current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing required param ppa"))
+        .stderr(predicate::str::contains("missing required param package"));
+}
+
+#[test]
+fn check_validates_ppa_bootstrap_package_type() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_minimal_dotfiles(temp.path());
+    std::fs::write(
+        temp.path().join("deps.toml"),
+        format!(
+            r#"
+[deps.fish]
+command = "fish"
+
+{}
+installer = "ppa"
+version = "latest"
+
+{}
+ppa = "ppa:fish-shell/release-4"
+package = "fish"
+bootstrap_package = 1
+"#,
+            current_host_table("fish"),
+            current_host_params_table("fish")
+        ),
+    )
+    .expect("deps");
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dotman").expect("dotman binary");
+    cmd.current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "param bootstrap_package must be string",
         ));
 }
