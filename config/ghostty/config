@@ -1,3 +1,5 @@
 font-family = MesloLGS Nerd Font Mono
 font-size = 19
 window-decoration = false
+command = fish
+shell-integration = fish

@@ -123,5 +123,42 @@ fn run_bootstrap() -> Result<(), String> {
 
     deps::install_missing(&deps_manifest, &host)?;
     link::run_link(&files, &host, &repo, link::Conflict::Backup, false)?;
-    doctor::run_doctor(&deps_manifest, &files, &host, &repo)
+    doctor::run_doctor(&deps_manifest, &files, &host, &repo)?;
+    print_post_bootstrap_hints();
+    Ok(())
+}
+
+fn print_post_bootstrap_hints() {
+    if is_ghostty_terminal(
+        std::env::var("TERM_PROGRAM").ok().as_deref(),
+        std::env::var("GHOSTTY_RESOURCES_DIR").ok().as_deref(),
+    ) {
+        return;
+    }
+
+    eprintln!("hint: open Ghostty to use the managed terminal config.");
+    eprintln!("hint: run `make shell` if you also want fish as your login shell.");
+}
+
+fn is_ghostty_terminal(term_program: Option<&str>, ghostty_resources_dir: Option<&str>) -> bool {
+    term_program.is_some_and(|value| value.eq_ignore_ascii_case("ghostty"))
+        || ghostty_resources_dir.is_some_and(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_ghostty_terminal_from_term_program_or_resources_dir() {
+        assert!(is_ghostty_terminal(Some("Ghostty"), None));
+        assert!(is_ghostty_terminal(Some("ghostty"), None));
+        assert!(is_ghostty_terminal(
+            None,
+            Some("/Applications/Ghostty.app/resources")
+        ));
+        assert!(!is_ghostty_terminal(Some("Apple_Terminal"), None));
+        assert!(!is_ghostty_terminal(None, Some("")));
+        assert!(!is_ghostty_terminal(None, None));
+    }
 }
