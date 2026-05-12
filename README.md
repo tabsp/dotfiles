@@ -13,6 +13,7 @@ Personal dotfiles managed by `make` and the internal Rust backend `dotman`.
 - `make link CONFLICT=backup`: back up target conflicts before linking.
 - `make link CONFLICT=overwrite`: overwrite target conflicts before linking.
 - `make doctor`: inspect installed commands, versions, and linked files.
+- `make shell`: interactively set fish as the login shell.
 - `make check`: validate manifests and host support.
 - `make lint`: run formatting and static analysis checks.
 - `make test`: run Rust tests.
@@ -21,8 +22,28 @@ Personal dotfiles managed by `make` and the internal Rust backend `dotman`.
 ## Development Dependencies
 
 - Rust toolchain with `cargo`, `rustfmt`, and `clippy`
+- C compiler/linker for Rust crates with native dependencies
 - GNU Make
 - Git
+
+These are bootstrap prerequisites: they must exist before `make bootstrap` can
+build and run `dotman`. Dependencies in `deps.toml` are managed after the Rust
+backend has already been built.
+
+On Ubuntu/Debian, install the non-Rust build prerequisites first:
+
+```sh
+sudo apt-get install -y git make build-essential
+```
+
+On macOS, install Xcode Command Line Tools first:
+
+```sh
+xcode-select --install
+```
+
+Install Rust with rustup, then make sure `cargo`, `rustc`, `rustfmt`, and
+`clippy` are available on `PATH`.
 
 ## Layout
 
@@ -51,6 +72,21 @@ Fast path:
 ```sh
 make bootstrap
 ```
+
+`make bootstrap` runs `doctor` in the same process environment after installing
+dependencies. `dotman` searches `$HOME/.local/bin` and `$HOME/.cargo/bin`
+directly, so newly installed user-local tools can be verified before opening a
+new fish shell. It does not change your login shell; switch shells manually
+after bootstrap if desired.
+
+To set fish as the default login shell after bootstrap:
+
+```sh
+make shell
+```
+
+This command prints the `chsh` command it will run and requires interactive
+confirmation. Non-interactive runs fail with the equivalent manual command.
 
 Cautious path:
 

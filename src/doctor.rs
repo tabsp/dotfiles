@@ -17,18 +17,18 @@ pub fn run_doctor(
     let mut oks = Vec::new();
 
     for (name, dep) in &deps.deps {
-        let entries = dep.entries_for(host.platform.key(), host.arch.key());
+        let entries = dep.entries_for_host(host);
         if entries.is_empty() {
             continue;
         }
-        if which(&dep.command).is_none() {
+        let Some(command_path) = which(&dep.command) else {
             hard_errors.push(format!("{name}: missing command {}", dep.command));
             continue;
-        }
+        };
         oks.push(format!("{name}: command {}", dep.command));
 
         if let Some(check) = &dep.version_check {
-            match read_version(&dep.command, check) {
+            match read_version(&command_path, check) {
                 Ok(version) => {
                     let expected = &entries[0].version;
                     if expected == "latest" {
@@ -99,7 +99,7 @@ pub fn run_doctor(
     }
 }
 
-fn read_version(command: &str, check: &VersionCheck) -> Result<String, String> {
+fn read_version(command: &Path, check: &VersionCheck) -> Result<String, String> {
     let output = Command::new(command)
         .args(&check.args)
         .output()
@@ -113,10 +113,45 @@ fn read_version(command: &str, check: &VersionCheck) -> Result<String, String> {
         VersionStream::Stderr => output.stderr,
     };
     let text = String::from_utf8_lossy(&bytes);
-    let regex = Regex::new(&check.regex).map_err(|err| format!("invalid version regex: {err}"))?;
+    extract_version(&text, &check.regex)
+}
+
+fn extract_version(text: &str, regex: &str) -> Result<String, String> {
+    let regex = Regex::new(regex).map_err(|err| format!("invalid version regex: {err}"))?;
     regex
-        .captures(&text)
+        .captures(text)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| "version output did not match regex".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_version_handles_multiline_eza_output() {
+        let text = "eza - A modern, maintained replacement for ls\nv0.23.4 [+git]\n";
+        let version = extract_version(text, r"(?m)^v?([0-9]+\.[0-9]+\.[0-9]+)").expect("version");
+        assert_eq!(version, "0.23.4");
+    }
+
+    #[test]
+    fn extract_version_handles_localized_fish_output() {
+        let text = "fish，版本 4.7.1\n";
+        let version = extract_version(
+            text,
+            r"fish[，,]\s*(?:version|版本)\s+([0-9]+\.[0-9]+\.[0-9]+)",
+        )
+        .expect("version");
+        assert_eq!(version, "4.7.1");
+    }
+
+    #[test]
+    fn extract_version_handles_capitalized_yazi_output() {
+        let text = "Yazi 26.5.6 (aa52643 2026-05-05)\n";
+        let version =
+            extract_version(text, r"(?i)yazi\s+([0-9]+\.[0-9]+\.[0-9]+)").expect("version");
+        assert_eq!(version, "26.5.6");
+    }
 }

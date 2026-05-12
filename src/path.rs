@@ -26,14 +26,28 @@ pub fn ensure_parent_dir(path: &Path) -> Result<(), String> {
 
 #[allow(dead_code)]
 pub fn which(command: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
+    for dir in command_search_dirs() {
         let candidate = dir.join(command);
         if candidate.is_file() {
             return Some(candidate);
         }
     }
     None
+}
+
+fn command_search_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .collect();
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join(".cargo/bin"));
+    }
+
+    dirs
 }
 
 pub fn paths_match(left: &Path, right: &Path) -> bool {

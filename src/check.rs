@@ -24,7 +24,7 @@ pub fn run_check(
             errors.push(format!("duplicate command in deps.toml: {}", dep.command));
         }
 
-        validate_distros_scope(name, dep, &mut errors);
+        reject_distros_on_mac(name, dep, &mut errors);
 
         let raw_entries = dep.entries_for(host.platform.key(), host.arch.key());
         let entries: Vec<_> = raw_entries
@@ -121,7 +121,7 @@ fn validate_installer_platform(
     }
 }
 
-fn validate_distros_scope(name: &str, dep: &crate::config::Dependency, errors: &mut Vec<String>) {
+fn reject_distros_on_mac(name: &str, dep: &crate::config::Dependency, errors: &mut Vec<String>) {
     for entry in dep.mac.values() {
         if entry.distros.is_some() {
             errors.push(format!(

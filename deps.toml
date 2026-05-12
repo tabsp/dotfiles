@@ -101,7 +101,7 @@ command = "fish"
 
 [deps.fish.version_check]
 args = ["--version"]
-regex = 'fish, version ([0-9]+\.[0-9]+\.[0-9]+)'
+regex = 'fish[，,]\s*(?:version|版本)\s+([0-9]+\.[0-9]+\.[0-9]+)'
 stream = "stdout"
 
 [deps.fish.mac.arm64]
@@ -232,7 +232,7 @@ command = "yazi"
 
 [deps.yazi.version_check]
 args = ["--version"]
-regex = 'yazi ([0-9]+\.[0-9]+\.[0-9]+)'
+regex = '(?i)yazi\s+([0-9]+\.[0-9]+\.[0-9]+)'
 stream = "stdout"
 
 [deps.yazi.mac.arm64]
@@ -366,7 +366,7 @@ command = "eza"
 
 [deps.eza.version_check]
 args = ["--version"]
-regex = 'eza(?: - A modern, maintained replacement for ls)? v?([0-9]+\.[0-9]+\.[0-9]+)'
+regex = '(?m)^v?([0-9]+\.[0-9]+\.[0-9]+)'
 stream = "stdout"
 
 [deps.eza.mac.arm64]

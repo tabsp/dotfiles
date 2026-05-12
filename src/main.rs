@@ -10,6 +10,7 @@ mod output;
 mod path;
 mod platform;
 mod process;
+mod shell;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::Path;
@@ -32,6 +33,7 @@ enum Command {
         dry_run: bool,
     },
     Doctor,
+    Shell,
     Check,
 }
 
@@ -56,6 +58,7 @@ fn run() -> Result<(), String> {
         Command::Bootstrap => run_bootstrap(),
         Command::Link { conflict, dry_run } => run_link(conflict, dry_run),
         Command::Doctor => run_doctor(),
+        Command::Shell => shell::run_shell(),
         Command::Check => run_check(),
     }
 }

@@ -186,4 +186,22 @@ mod tests {
     fn empty_distros_matches_no_distro() {
         assert!(!entry_with_distros(Some(vec![])).matches_distro(&linux_host("ubuntu")));
     }
+
+    #[test]
+    fn entries_for_host_filters_by_distro() {
+        let mut linux = BTreeMap::new();
+        linux.insert(
+            "x86_64".to_string(),
+            entry_with_distros(Some(vec!["ubuntu"])),
+        );
+        let dep = Dependency {
+            command: "fish".to_string(),
+            version_check: None,
+            mac: BTreeMap::new(),
+            linux,
+        };
+
+        assert_eq!(dep.entries_for_host(&linux_host("debian")).len(), 0);
+        assert_eq!(dep.entries_for_host(&linux_host("ubuntu")).len(), 1);
+    }
 }
