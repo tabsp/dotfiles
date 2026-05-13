@@ -126,8 +126,8 @@ expectations are documented before adding higher-level schema features.
 
 Status: proposed
 Category: maintainability
-Depends on: P2 - Manifest Schema Evolution
 Current code signal: manifest entries are explicit per platform and architecture.
+Depends on: P2 - Manifest Schema Evolution
 
 `deps.toml` repeats many macOS and Linux architecture entries where only a small
 number of fields differ.
@@ -160,6 +160,52 @@ intentionally unsupported, and how platform-specific code paths are isolated.
 Outcome: platform support policy is documented, Unix-only behavior is clearly
 guarded, and any future Windows support is treated as a separate compatibility
 epic rather than an accidental extension.
+
+### P2 - Release Readiness
+
+Status: proposed
+Category: distribution
+Current code signal: `dotman` is versioned as a Rust package, but release
+process, artifact naming, changelog policy, and upgrade compatibility are not
+defined.
+Depends on: P1 - Quality Gates And Coverage Policy
+
+Dotman needs a defined release contract before adding convenience distribution
+channels.
+
+Outcome: release versioning, artifact naming, changelog expectations, and
+backward compatibility policy are documented and verified.
+
+### P3 - Release Distribution
+
+Status: proposed
+Category: distribution
+Current code signal: `dotman` is built locally through Cargo and wrapped by
+Makefile workflows.
+Depends on: P2 - Cross-Platform Support Strategy, P2 - Release Readiness
+
+Bootstrapping on a new machine currently requires cloning the repository and
+building locally. A lower-friction install path would shorten the path from an
+empty machine to a configured environment.
+
+Outcome: publish versioned `dotman` release artifacts and define supported
+installation channels.
+
+### P3 - Recovery And Cleanup
+
+Status: proposed
+Category: safety
+Current code signal: link conflicts can be backed up, temporary installer
+directories are cleaned up, and README documents that automatic rollback is not
+provided in v1.
+Depends on: P0 - Atomic Directory Install, P0 - Verified Extraction Pipeline
+
+Dotman prioritizes preventing broken machine state, but users also need a clear
+path to inspect and clean up managed changes after a failed or unwanted
+bootstrap.
+
+Outcome: recovery boundaries are documented and Dotman provides explicit cleanup
+or uninstall workflows for state it can safely identify as managed.
 
 ### P3 - Managed Config Coverage
 

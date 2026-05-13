@@ -112,5 +112,5 @@ make link DRY_RUN=1
 `make link CONFLICT=backup` creates backup files for conflicting link targets.
 If link results are not desired, restore from those backup files manually.
 
-This project does not provide automatic rollback in v1. Dependency installation
-side effects from package managers are not rolled back by this workflow.
+Automatic rollback is not currently supported. Dependency installation side
+effects from package managers are not rolled back by this workflow.
