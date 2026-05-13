@@ -152,6 +152,15 @@ fn validate_installer_params(
             require_string_param(name, entry, "archive_kind", errors);
             require_string_param(name, entry, "binary_path", errors);
             require_string_param(name, entry, "install_to", errors);
+            validate_optional_string_param(name, entry, "install_dir_from", errors);
+            validate_optional_string_param(name, entry, "install_dir_to", errors);
+            let has_install_dir_from = entry.params.contains_key("install_dir_from");
+            let has_install_dir_to = entry.params.contains_key("install_dir_to");
+            if has_install_dir_from != has_install_dir_to {
+                errors.push(format!(
+                    "dependency {name} must declare both install_dir_from and install_dir_to, or neither"
+                ));
+            }
             if let Some(url) = entry.params.get("url").and_then(toml::Value::as_str)
                 && !url.starts_with("https://")
             {
@@ -171,6 +180,13 @@ fn validate_installer_params(
             }
             if let Some(install_to) = entry.params.get("install_to").and_then(toml::Value::as_str) {
                 validate_managed_path(repo, "install_to", install_to, errors);
+            }
+            if let Some(install_dir_to) = entry
+                .params
+                .get("install_dir_to")
+                .and_then(toml::Value::as_str)
+            {
+                validate_managed_path(repo, "install_dir_to", install_dir_to, errors);
             }
         }
         Installer::OfficialScript => {

@@ -214,6 +214,8 @@ sha256 = "f697d4e4582b6e4b5c3c26e76e06ce26efa08ba1768e03fd2733fcc422bb0490"
 archive_kind = "tar.gz"
 binary_path = "nvim-linux-arm64/bin/nvim"
 install_to = "~/.local/bin/nvim"
+install_dir_from = "nvim-linux-arm64"
+install_dir_to = "~/.local/opt/nvim"
 
 [deps.nvim.linux.x86_64]
 installer = "download_binary"
@@ -226,6 +228,8 @@ sha256 = "31cf85945cb600d96cdf69f88bc68bec814acbff50863c5546adef3a1bcef260"
 archive_kind = "tar.gz"
 binary_path = "nvim-linux-x86_64/bin/nvim"
 install_to = "~/.local/bin/nvim"
+install_dir_from = "nvim-linux-x86_64"
+install_dir_to = "~/.local/opt/nvim"
 
 [deps.yazi]
 command = "yazi"

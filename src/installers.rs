@@ -30,6 +30,9 @@ pub fn is_installed(command: &str, entry: &InstallEntry) -> Result<bool, String>
         }
         Installer::DownloadBinary => {
             let install_to = crate::path::expand_home(required_string(entry, "install_to")?)?;
+            if let Some(path) = string_param(entry, "install_dir_to") {
+                return archive_dir_install_state(&install_to, &crate::path::expand_home(path)?);
+            }
             Ok(matches!(
                 existing_install_state(&install_to)?,
                 ExistingInstall::Installed
@@ -110,16 +113,22 @@ fn install_download_binary(entry: &InstallEntry) -> Result<(), String> {
     let archive_kind = crate::archive::parse_archive_kind(required_string(entry, "archive_kind")?)?;
     let binary_path = required_string(entry, "binary_path")?;
     let install_to = crate::path::expand_home(required_string(entry, "install_to")?)?;
+    let install_dir_from = string_param(entry, "install_dir_from");
+    let install_dir_to = string_param(entry, "install_dir_to")
+        .map(crate::path::expand_home)
+        .transpose()?;
 
-    match existing_install_state(&install_to)? {
-        ExistingInstall::Installed => return Ok(()),
-        ExistingInstall::Invalid(reason) => {
-            return Err(format!(
-                "download_binary invalid install_to={} reason={reason}",
-                install_to.display()
-            ));
+    if install_dir_from.is_none() {
+        match existing_install_state(&install_to)? {
+            ExistingInstall::Installed => return Ok(()),
+            ExistingInstall::Invalid(reason) => {
+                return Err(format!(
+                    "download_binary invalid install_to={} reason={reason}",
+                    install_to.display()
+                ));
+            }
+            ExistingInstall::Missing => {}
         }
-        ExistingInstall::Missing => {}
     }
 
     let temp = tempfile::tempdir().map_err(|err| format!("failed to create temp dir: {err}"))?;
@@ -129,7 +138,18 @@ fn install_download_binary(entry: &InstallEntry) -> Result<(), String> {
         let payload = crate::archive::unpack(&downloaded.bytes, &archive_kind, temp.path())?;
         let binary =
             resolve_binary_path(temp.path(), payload.as_deref(), &archive_kind, binary_path)?;
-        install_binary(&binary, &install_to)?;
+        if let (Some(install_dir_from), Some(install_dir_to)) = (install_dir_from, &install_dir_to)
+        {
+            install_archive_dir(
+                temp.path(),
+                install_dir_from,
+                install_dir_to,
+                binary_path,
+                &install_to,
+            )?;
+        } else {
+            install_binary(&binary, &install_to)?;
+        }
         Ok(())
     })();
     cleanup_temp(temp, result.is_ok())?;
@@ -259,6 +279,146 @@ fn existing_install_state(path: &Path) -> Result<ExistingInstall, String> {
         }
     }
     Ok(ExistingInstall::Installed)
+}
+
+fn archive_dir_install_state(install_to: &Path, install_dir_to: &Path) -> Result<bool, String> {
+    if !install_dir_to.is_dir() {
+        return Ok(false);
+    }
+    let metadata = match fs::metadata(install_to) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(format!(
+                "failed to read existing install target {}: {err}",
+                install_to.display()
+            ));
+        }
+    };
+    if !metadata.is_file() {
+        return Ok(false);
+    }
+    #[cfg(unix)]
+    {
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn install_archive_dir(
+    temp_dir: &Path,
+    install_dir_from: &str,
+    install_dir_to: &Path,
+    binary_path: &str,
+    install_to: &Path,
+) -> Result<(), String> {
+    let source_dir = temp_dir.join(install_dir_from);
+    if !source_dir.is_dir() {
+        return Err(format!(
+            "install_dir_from not found after unpack: {install_dir_from}"
+        ));
+    }
+
+    let binary = temp_dir.join(binary_path);
+    if !binary.is_file() {
+        return Err(format!("binary_path not found after unpack: {binary_path}"));
+    }
+
+    if let Some(parent) = install_dir_to.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create install directory {}: {err}",
+                parent.display()
+            )
+        })?;
+    }
+    // TODO: replace by copying into a sibling temp dir and renaming into place.
+    if install_dir_to.exists() {
+        fs::remove_dir_all(install_dir_to).map_err(|err| {
+            format!(
+                "failed to remove existing install directory {}: {err}",
+                install_dir_to.display()
+            )
+        })?;
+    }
+    copy_dir_recursive(&source_dir, install_dir_to)?;
+
+    let relative_binary = Path::new(binary_path)
+        .strip_prefix(install_dir_from)
+        .map_err(|_| "binary_path must be inside install_dir_from".to_string())?;
+    let target_binary = install_dir_to.join(relative_binary);
+    if let Some(parent) = install_to.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create install directory {}: {err}",
+                parent.display()
+            )
+        })?;
+    }
+    if install_to.exists() {
+        fs::remove_file(install_to).map_err(|err| {
+            format!(
+                "failed to remove existing binary {}: {err}",
+                install_to.display()
+            )
+        })?;
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&target_binary, install_to).map_err(|err| {
+            format!(
+                "failed to link binary {} -> {}: {err}",
+                install_to.display(),
+                target_binary.display()
+            )
+        })?;
+    }
+    #[cfg(not(unix))]
+    {
+        install_binary(&target_binary, install_to)?;
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<(), String> {
+    fs::create_dir_all(dest)
+        .map_err(|err| format!("failed to create directory {}: {err}", dest.display()))?;
+    for entry in fs::read_dir(source)
+        .map_err(|err| format!("failed to read directory {}: {err}", source.display()))?
+    {
+        let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
+        let source_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .map_err(|err| format!("failed to read file type {}: {err}", source_path.display()))?;
+        if file_type.is_dir() {
+            copy_dir_recursive(&source_path, &dest_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &dest_path).map_err(|err| {
+                format!(
+                    "failed to copy file {} -> {}: {err}",
+                    source_path.display(),
+                    dest_path.display()
+                )
+            })?;
+            let perms = fs::metadata(&source_path)
+                .map_err(|err| {
+                    format!(
+                        "failed to read permissions on {}: {err}",
+                        source_path.display()
+                    )
+                })?
+                .permissions();
+            fs::set_permissions(&dest_path, perms)
+                .map_err(|err| format!("failed to preserve file permissions: {err}"))?;
+        } else if file_type.is_symlink() {
+            // TODO: preserve symlinks if an upstream archive starts using them.
+        }
+    }
+    Ok(())
 }
 
 fn verify_sha256(bytes: &[u8], expected_hex: &str) -> Result<(), String> {
@@ -550,6 +710,22 @@ mod tests {
         assert!(matches!(state, ExistingInstall::Installed));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn existing_install_state_keeps_symlink_invalid_for_regular_installers() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("target");
+        let link = temp.path().join("tool");
+        fs::write(&target, b"#!/bin/sh\necho hi\n").expect("write target");
+        let mut perms = fs::metadata(&target).expect("meta").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&target, perms).expect("chmod");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+        let state = existing_install_state(&link).expect("state");
+        assert!(matches!(state, ExistingInstall::Invalid(_)));
+    }
+
     #[test]
     fn resolve_binary_path_non_raw_requires_existing_file() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -557,6 +733,127 @@ mod tests {
         let err =
             resolve_binary_path(temp.path(), None, &kind, "nvim/bin/nvim").expect_err("must fail");
         assert!(err.contains("binary_path not found"));
+    }
+
+    #[test]
+    fn install_archive_dir_preserves_runtime_and_links_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let unpacked = temp.path().join("nvim-linux-x86_64");
+        fs::create_dir_all(unpacked.join("bin")).expect("bin dir");
+        fs::create_dir_all(unpacked.join("share/nvim/runtime/lua/vim")).expect("runtime dir");
+        fs::write(unpacked.join("bin/nvim"), b"#!/bin/sh\necho nvim\n").expect("binary");
+        fs::write(
+            unpacked.join("share/nvim/runtime/lua/vim/uri.lua"),
+            b"return {}\n",
+        )
+        .expect("runtime file");
+        #[cfg(unix)]
+        {
+            let mut perms = fs::metadata(unpacked.join("bin/nvim"))
+                .expect("meta")
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(unpacked.join("bin/nvim"), perms).expect("chmod");
+        }
+
+        let install_dir_to = temp.path().join("opt/nvim");
+        let install_to = temp.path().join("bin/nvim");
+        install_archive_dir(
+            temp.path(),
+            "nvim-linux-x86_64",
+            &install_dir_to,
+            "nvim-linux-x86_64/bin/nvim",
+            &install_to,
+        )
+        .expect("install archive dir");
+
+        assert!(
+            install_dir_to
+                .join("share/nvim/runtime/lua/vim/uri.lua")
+                .exists()
+        );
+        let installed_binary = fs::canonicalize(&install_to).expect("canonicalize installed bin");
+        let expected_binary =
+            fs::canonicalize(install_dir_to.join("bin/nvim")).expect("canonicalize target bin");
+        assert_eq!(installed_binary, expected_binary);
+    }
+
+    #[test]
+    fn download_binary_with_install_dir_requires_directory_to_be_installed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let install_to = temp.path().join("bin/nvim");
+        fs::create_dir_all(install_to.parent().expect("parent")).expect("bin dir");
+        fs::write(&install_to, b"#!/bin/sh\necho old nvim\n").expect("binary");
+        #[cfg(unix)]
+        {
+            let mut perms = fs::metadata(&install_to).expect("meta").permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&install_to, perms).expect("chmod");
+        }
+        let missing_install_dir = temp.path().join("opt/nvim");
+        let entry = fake_entry_with(&[
+            (
+                "url",
+                toml::Value::String("https://example.invalid/nvim.tar.gz".to_string()),
+            ),
+            ("sha256", toml::Value::String("deadbeef".to_string())),
+            ("archive_kind", toml::Value::String("tar.gz".to_string())),
+            (
+                "binary_path",
+                toml::Value::String("nvim/bin/nvim".to_string()),
+            ),
+            (
+                "install_to",
+                toml::Value::String(install_to.to_string_lossy().to_string()),
+            ),
+            ("install_dir_from", toml::Value::String("nvim".to_string())),
+            (
+                "install_dir_to",
+                toml::Value::String(missing_install_dir.to_string_lossy().to_string()),
+            ),
+        ]);
+
+        assert!(!is_installed("nvim", &entry).expect("installed check"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn download_binary_with_install_dir_ignores_existing_symlink_when_target_needs_reinstall() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let install_dir_to = temp.path().join("opt/nvim");
+        let install_to = temp.path().join("bin/nvim");
+        let target = install_dir_to.join("bin/nvim");
+        fs::create_dir_all(target.parent().expect("target parent")).expect("target dir");
+        fs::write(&target, b"#!/bin/sh\necho broken\n").expect("target");
+        let mut perms = fs::metadata(&target).expect("meta").permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(&target, perms).expect("chmod");
+        fs::create_dir_all(install_to.parent().expect("parent")).expect("bin dir");
+        std::os::unix::fs::symlink(&target, &install_to).expect("symlink");
+        let entry = fake_entry_with(&[
+            (
+                "url",
+                toml::Value::String("https://example.invalid/nvim.tar.gz".to_string()),
+            ),
+            ("sha256", toml::Value::String("deadbeef".to_string())),
+            ("archive_kind", toml::Value::String("tar.gz".to_string())),
+            (
+                "binary_path",
+                toml::Value::String("nvim/bin/nvim".to_string()),
+            ),
+            (
+                "install_to",
+                toml::Value::String(install_to.to_string_lossy().to_string()),
+            ),
+            ("install_dir_from", toml::Value::String("nvim".to_string())),
+            (
+                "install_dir_to",
+                toml::Value::String(install_dir_to.to_string_lossy().to_string()),
+            ),
+        ]);
+
+        let err = install_download_binary(&entry).expect_err("must reach download");
+        assert!(!err.contains("download_binary invalid install_to"));
     }
 
     #[test]

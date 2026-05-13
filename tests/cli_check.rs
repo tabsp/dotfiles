@@ -395,6 +395,113 @@ kind = "file"
 }
 
 #[test]
+fn check_validates_download_binary_install_dir_to_path_constraints() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(temp.path().join("config")).expect("config");
+    std::fs::write(temp.path().join("config/tmux.conf"), "set -g mouse on\n").expect("source");
+    std::fs::write(
+        temp.path().join("deps.toml"),
+        format!(
+            r#"
+[deps.nv]
+command = "nvim"
+{}
+installer = "download_binary"
+version = "0.10.4"
+source = "https://example.invalid/nvim"
+
+[deps.nv.version_check]
+regex = 'v?([0-9]+\.[0-9]+\.[0-9]+)'
+
+{}
+url = "https://example.invalid/nvim.tar.gz"
+sha256 = "deadbeef"
+archive_kind = "tar.gz"
+binary_path = "nvim/bin/nvim"
+install_to = "~/.local/bin/nvim"
+install_dir_from = "nvim"
+install_dir_to = "relative/opt/nvim"
+"#,
+            current_host_table("nv"),
+            current_host_params_table("nv")
+        ),
+    )
+    .expect("deps");
+    std::fs::write(
+        temp.path().join("dotfiles.toml"),
+        r#"
+[[files]]
+source = "config/tmux.conf"
+target = "~/.tmux.conf"
+kind = "file"
+"#,
+    )
+    .expect("dotfiles");
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dotman").expect("dotman binary");
+    cmd.current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "install_dir_to must be absolute or ~-based",
+        ));
+}
+
+#[test]
+fn check_requires_download_binary_install_dir_params_as_pair() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(temp.path().join("config")).expect("config");
+    std::fs::write(temp.path().join("config/tmux.conf"), "set -g mouse on\n").expect("source");
+    std::fs::write(
+        temp.path().join("deps.toml"),
+        format!(
+            r#"
+[deps.nv]
+command = "nvim"
+{}
+installer = "download_binary"
+version = "0.10.4"
+source = "https://example.invalid/nvim"
+
+[deps.nv.version_check]
+regex = 'v?([0-9]+\.[0-9]+\.[0-9]+)'
+
+{}
+url = "https://example.invalid/nvim.tar.gz"
+sha256 = "deadbeef"
+archive_kind = "tar.gz"
+binary_path = "nvim/bin/nvim"
+install_to = "~/.local/bin/nvim"
+install_dir_from = "nvim"
+"#,
+            current_host_table("nv"),
+            current_host_params_table("nv")
+        ),
+    )
+    .expect("deps");
+    std::fs::write(
+        temp.path().join("dotfiles.toml"),
+        r#"
+[[files]]
+source = "config/tmux.conf"
+target = "~/.tmux.conf"
+kind = "file"
+"#,
+    )
+    .expect("dotfiles");
+
+    let mut cmd = assert_cmd::Command::cargo_bin("dotman").expect("dotman binary");
+    cmd.current_dir(temp.path())
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "must declare both install_dir_from and install_dir_to",
+        ));
+}
+
+#[test]
 fn check_rejects_distros_on_mac_entry() {
     let temp = tempfile::tempdir().expect("tempdir");
     write_minimal_dotfiles(temp.path());
