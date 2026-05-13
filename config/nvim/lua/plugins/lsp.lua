@@ -62,7 +62,7 @@ return {
 
           -- When you move your cursor, the highlights will be cleared (the second autocommand).
           local client = vim.lsp.get_client_by_id(event.data.client_id)
-          if client and client.supports_method(vim.lsp.protocol.Methods.textDocument_documentHighlight) then
+          if client and client:supports_method(vim.lsp.protocol.Methods.textDocument_documentHighlight, event.buf) then
             local highlight_augroup = vim.api.nvim_create_augroup("lsp-highlight", { clear = false })
             vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
               buffer = event.buf,
@@ -102,20 +102,30 @@ return {
         clangd = {},
       }
       require("mason").setup()
-      local ensure_installed = vim.tbl_keys(servers or {})
+      local server_names = vim.tbl_keys(servers or {})
+      local ensure_installed = vim.deepcopy(server_names)
       vim.list_extend(ensure_installed, {
         "stylua",
+        "tree-sitter-cli",
       })
-      require("mason-tool-installer").setup { ensure_installed = ensure_installed }
+      local mason_tool_installer = require "mason-tool-installer"
+      mason_tool_installer.setup { ensure_installed = ensure_installed, run_on_start = false }
+      local required_executables = { "lua-language-server", "clangd", "stylua", "tree-sitter" }
+      local needs_install = vim.iter(required_executables):any(function(executable)
+        return vim.fn.executable(executable) == 0
+      end)
+      if needs_install then
+        mason_tool_installer.check_install(false, #vim.api.nvim_list_uis() == 0)
+      end
+
+      for server_name, server in pairs(servers) do
+        server.capabilities = vim.tbl_deep_extend("force", {}, capabilities, server.capabilities or {})
+        vim.lsp.config(server_name, server)
+      end
 
       require("mason-lspconfig").setup {
-        handlers = {
-          function(server_name)
-            local server = servers[server_name] or {}
-            server.capabilities = vim.tbl_deep_extend("force", {}, capabilities, server.capabilities or {})
-            require("lspconfig")[server_name].setup(server)
-          end,
-        },
+        ensure_installed = server_names,
+        automatic_enable = server_names,
       }
     end,
   },

@@ -23,6 +23,7 @@ require("lazy").setup {
     },
   },
   install = { colorscheme = { "tokyonight" } },
+  rocks = { enabled = false },
   -- automatically check for plugin updates
   checker = { enabled = true, notify = false },
 }
