@@ -1,6 +1,7 @@
 # dotfiles
 
-Personal dotfiles managed by `make` and the internal Rust backend `dotman`.
+Personal dotfiles managed by `dotman`, a safety-first bootstrap manager for
+macOS and Linux.
 
 ## Commands
 
