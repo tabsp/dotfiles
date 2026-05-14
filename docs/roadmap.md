@@ -29,6 +29,27 @@ implementation plans.
 
 ## Active Queue
 
+### P0 - Roadmap Agent Harness
+
+Status: specified
+Category: automation
+Current code signal: roadmap, specs, plans, and `AGENTS.md` define manual agent
+rules, but there is no deterministic runtime for selecting, validating,
+executing, and handing off roadmap work.
+
+Spec:
+`docs/superpowers/specs/2026-05-14-roadmap-agent-harness-design.md`
+
+This is a prerequisite for future roadmap implementation. Before other roadmap
+epics move into agentic implementation, agent sessions need a stable workflow
+runtime that preserves priority order, requires spec and plan artifacts, records
+handoff state, and exposes checks for roadmap/spec/plan consistency.
+
+Outcome: agent sessions can initialize context, select one roadmap epic, lock
+active work, create spec and plan templates, validate spec and plan artifacts,
+run workflow checks, advance runtime phase deliberately, record verification,
+finish active locks, and leave structured handoff notes for the next session.
+
 ### P0 - Atomic Directory Install
 
 Status: proposed
