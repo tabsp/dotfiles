@@ -57,3 +57,7 @@ set -l opencode_bin "$HOME/.opencode/bin"
 if test -d $opencode_bin
     fish_add_path $opencode_bin
 end
+
+# bun
+set --export BUN_INSTALL "$HOME/.bun"
+set --export PATH $BUN_INSTALL/bin $PATH

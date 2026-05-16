@@ -7,3 +7,4 @@ __pycache__/
 target/
 docs/superpowers/agent/state.toml
 docs/superpowers/agent/current-handoff.md
+config/fish/completions/
