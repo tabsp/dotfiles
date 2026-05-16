@@ -19,6 +19,33 @@ Before planning or implementation, read:
 - Preserve existing user changes. Do not revert unrelated files.
 - Prefer small, verifiable changes.
 
+
+## Agent Harness
+
+Before starting any roadmap work, use the deterministic harness commands to
+select and lock the active epic:
+
+```sh
+make agent-init      # once per checkout: create state.toml
+make agent-next      # print next eligible epic
+make agent-start EPIC="P0 - ..."  # lock one epic
+make agent-status    # confirm lock
+```
+
+Use `make agent-check` before claiming completion of any phase. Use
+`make agent-advance` to move through the workflow (specified → planned →
+in_progress → verifying). Use `make agent-finish` only after recording
+passing verification with `make agent-record-verification`.
+
+The harness enforces:
+- One active epic at a time
+- Spec and plan artifacts before implementation
+- P0 prerequisite ordering
+- Structured handoff notes before finish
+
+Runtime state lives in `docs/superpowers/agent/state.toml`. Handoff notes are
+tracked under `docs/superpowers/agent/handoffs/`.
+
 ## Commit Style
 
 Use Conventional Commits for new commits:
