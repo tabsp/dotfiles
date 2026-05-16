@@ -44,7 +44,13 @@ The harness enforces:
 - Structured handoff notes before finish
 
 Runtime state lives in `docs/superpowers/agent/state.toml`. Handoff notes are
-tracked under `docs/superpowers/agent/handoffs/`.
+
+## Commit After Each Epic
+
+After `make agent-finish` completes successfully, commit all changes for that
+epic before starting the next one. Use `make agent-set-roadmap-status` to update
+the roadmap instead of manual sed edits. Run `git status` to verify the
+working tree is clean before calling `make agent-next`.
 
 ## Commit Style
 
