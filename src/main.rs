@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+mod agent;
 mod archive;
 mod check;
 mod config;
@@ -25,6 +27,10 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Agent {
+        #[command(subcommand)]
+        command: agent::AgentCommand,
+    },
     Bootstrap,
     Link {
         #[arg(long, default_value = "backup")]
@@ -60,6 +66,7 @@ fn run() -> Result<(), String> {
         Command::Doctor => run_doctor(),
         Command::Shell => shell::run_shell(),
         Command::Check => run_check(),
+        Command::Agent { command } => agent::run_agent(command),
     }
 }
 

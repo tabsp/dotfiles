@@ -63,6 +63,24 @@ in the primary references above and this repository's roadmap rules.
 - Do not mark roadmap items `done` without recorded verification.
 - Do not support multiple simultaneous active epics in v1.
 
+## Design
+
+The harness is implemented as a repo-local command runtime exposed through
+`make agent-*` targets. It stores workflow state in ignored TOML, durable memory
+in tracked handoff notes, and template inputs in tracked Markdown files. The
+runtime validates roadmap, spec, plan, handoff, and verification consistency, but
+it does not make semantic quality decisions or mutate machine state outside the
+repository workflow files described here.
+
+## Error Handling
+
+Harness commands should fail closed when required context, artifacts, state
+schema, or workflow gates are invalid. Failures should include a stable
+`AGENT_*` error code where this spec defines one, followed by a human-readable
+message that explains the corrective action. Commands must not silently overwrite
+active state, stale handoffs, existing templates, roadmap status, dependency
+state, shell state, symlinks, or git history.
+
 ## Design Principles
 
 ### Deterministic Runtime
@@ -119,10 +137,12 @@ Expose deterministic commands through `make`:
 ```sh
 make agent-init
 make agent-next
-make agent-start EPIC="P0 - Roadmap Agent Harness"
+make agent-start EPIC="P0 - Roadmap Agent Harness" WORK_KIND=roadmap
+make agent-start EPIC="P0 - Roadmap Agent Harness" WORK_KIND=small_direct_edit EXCEPTION_REASON="user requested direct docs correction"
 make agent-status
 make agent-check
 make agent-handoff MODE=create
+make agent-handoff MODE=set SECTION=Phase VALUE=verifying
 make agent-template KIND=spec
 make agent-advance PHASE=planned
 make agent-record-verification COMMAND="cargo test" RESULT=passed SUMMARY="all tests passed"
@@ -142,6 +162,16 @@ Initialize missing runtime state from repository context:
 
 It should create missing `state.toml` with conservative defaults. It should
 never select an epic automatically.
+
+`README.md` is an input-presence check only in v1. `agent-init` should fail if
+it is missing, because missing project context means the repository is not in the
+expected shape. It should not parse or derive runtime fields from README content.
+
+Existing `state.toml` must be parsed before reuse. If the file has no
+`schema_version`, an unsupported `schema_version`, or cannot be parsed,
+`agent-init` should fail with a stable error code and instruct the user to move
+or remove the stale state file. It should not overwrite an existing state file
+silently.
 
 ### `make agent-next`
 
@@ -163,6 +193,7 @@ It should accept optional structured metadata for deterministic checks:
 
 ```sh
 make agent-start EPIC="P0 - Roadmap Agent Harness" WORK_KIND=roadmap
+make agent-start EPIC="P0 - Roadmap Agent Harness" WORK_KIND=small_direct_edit EXCEPTION_REASON="user requested small direct edit"
 ```
 
 Allowed `WORK_KIND` values:
@@ -173,6 +204,14 @@ Allowed `WORK_KIND` values:
 - `harness_docs`: documentation correction needed to finish the harness
 
 When `WORK_KIND` is omitted, default to `roadmap`.
+
+For `WORK_KIND=small_direct_edit`, `WORK_KIND=emergency_fix`, and
+`WORK_KIND=harness_docs`, `EXCEPTION_REASON` is required and must be non-empty.
+The runtime cannot prove user intent, so the exception boundary is auditability:
+the caller must record a short reason that explicitly says why this work is an
+exception to the spec-and-plan gate. `agent-start` should reject exception work
+kinds without this reason, and `agent-check` should fail exception locks whose
+state is missing it.
 
 ### `make agent-status`
 
@@ -185,6 +224,23 @@ Print concise human-readable state:
 - plan path and existence
 - last handoff path
 - last verification summary
+
+The human-readable output format is stable enough for smoke tests but not a
+machine interface. The labels should be lower-case ASCII labels followed by a
+colon, including at least:
+
+```text
+current epic:
+phase:
+locked:
+work kind:
+spec:
+plan:
+last handoff:
+last verification:
+```
+
+Automation should use `state.toml` rather than parsing `agent-status`.
 
 ### `make agent-check`
 
@@ -199,9 +255,27 @@ Checks should include:
 - `specified` items have a spec
 - `planned` and `in_progress` items have a spec and plan
 - plans include explicit verification commands
-- handoff notes include current epic, phase, completed work, modified files,
-  verification, unresolved risks, and next step
+- handoff notes include current epic, phase, exception reason, completed work,
+  modified files, verification, unresolved risks, and next step
 - P0 harness prerequisite is respected for runtime-declared implementation work
+
+`agent-check` should emit stable error codes before human-readable messages.
+Tests may assert these codes. Required codes include:
+
+- `AGENT_MISSING_SPEC`
+- `AGENT_MISSING_PLAN`
+- `AGENT_ROADMAP_SPEC_UNLINKED`
+- `AGENT_ROADMAP_PLAN_UNLINKED`
+- `AGENT_PHASE_AHEAD`
+- `AGENT_HANDOFF_MISSING`
+- `AGENT_HANDOFF_INCOMPLETE`
+- `AGENT_HANDOFF_MISMATCH`
+- `AGENT_P0_PREREQUISITE`
+- `AGENT_UNSUPPORTED_STATE_SCHEMA`
+- `AGENT_MISSING_SPEC_SECTION`
+- `AGENT_MISSING_PLAN_SECTION`
+- `AGENT_FINISH_WRONG_PHASE`
+- `AGENT_FINISH_NO_VERIFICATION`
 
 ### `make agent-handoff`
 
@@ -212,13 +286,20 @@ The command should support deterministic modes:
 ```sh
 make agent-handoff MODE=create
 make agent-handoff MODE=validate
+make agent-handoff MODE=set SECTION=Completed VALUE="- Wrote implementation plan."
 ```
 
 `MODE=create` creates `current-handoff.md` from the template when it does not
 exist. If it exists but does not match the active epic, `MODE=create` should
 fail and instruct the user to finish or remove the stale handoff. `MODE=validate`
-fails if required sections remain empty or the current epic does not match the
-active lock. The substantive content should be written by the human or agent.
+fails if required sections remain empty, the current epic does not match the
+active lock, or the handoff phase does not match `state.phase`. The substantive
+content should be written by the human or agent.
+
+`MODE=set` updates one handoff section at a time and preserves the rest of the
+file. It exists to avoid brittle ad hoc Markdown rewrites in agentic sessions.
+It should require `SECTION` and `VALUE`, fail for unknown sections, and fail if
+`current-handoff.md` is missing.
 
 ### `make agent-template`
 
@@ -251,6 +332,12 @@ The command should update runtime state only. It should not edit
 `docs/roadmap.md` automatically. If the roadmap status should change, the human
 or agent must make that explicit document edit and `make agent-check` should
 validate the result.
+
+Before mutating state, `agent-advance` must run the same P0 prerequisite gate
+used by `agent-check` for any transition into `in_progress` or `verifying`.
+When `P0 - Roadmap Agent Harness` is not yet `done`, a different roadmap epic
+must not be advanced into implementation work unless the active runtime state
+uses an explicit exception work kind with a non-empty `exception_reason`.
 
 ### `make agent-record-verification`
 
@@ -294,9 +381,17 @@ The command should:
 - require current phase `verifying`
 - require at least one recorded verification entry with `RESULT=passed`
 - require a complete handoff note
-- move `current-handoff.md` to the finished handoff path under `handoffs/`
+- move `current-handoff.md` to a unique finished handoff path under `handoffs/`
 - unlock the active epic
 - record phase `done`
+
+Failure conditions emit stable error codes:
+
+- `AGENT_FINISH_WRONG_PHASE` when the active phase is not `verifying`
+- `AGENT_FINISH_NO_VERIFICATION` when no verification entry with
+  `RESULT=passed` is recorded
+- `AGENT_HANDOFF_INCOMPLETE` (from handoff validation) when the handoff is
+  missing required sections or contains only placeholder content
 
 It should not change roadmap status automatically. The roadmap item may be
 manually marked `done` after verification is recorded, then checked with
@@ -319,6 +414,7 @@ docs/superpowers/agent/
   current-handoff.md
   handoffs/
     YYYY-MM-DD-<topic>.md
+    YYYY-MM-DD-<topic>-2.md
   templates/
     spec.md
     plan.md
@@ -334,16 +430,21 @@ ignored by git. The implementation must update `.gitignore` for these paths.
 `current-handoff.md` is created only by `make agent-handoff MODE=create` and is
 moved away by `make agent-finish`. Finished handoffs should be tracked under
 `handoffs/` so durable memory is committed without committing an active lock.
+`agent-finish` must never overwrite an existing finished handoff. The first
+candidate path is `handoffs/YYYY-MM-DD-<slug>.md`; if that exists, append
+`-2`, then `-3`, and so on before `.md` until an unused path is found.
 
 ### `state.toml`
 
 Machine-readable state:
 
 ```toml
+schema_version = 1
 current_epic = "P0 - Roadmap Agent Harness"
 phase = "specified"
 locked = true
 work_kind = "roadmap"
+exception_reason = ""
 spec = "docs/superpowers/specs/2026-05-14-roadmap-agent-harness-design.md"
 plan = ""
 current_handoff = "docs/superpowers/agent/current-handoff.md"
@@ -355,6 +456,15 @@ result = "passed"
 summary = "all tests passed"
 recorded_at = "2026-05-14"
 ```
+
+`schema_version = 1` is required. v1 should reject unknown schema versions
+rather than attempting a lossy migration. Additive optional fields may be
+accepted only when they do not change the meaning of existing fields.
+
+After `agent-finish`, state may retain `current_epic` for the completed item with
+`phase = "done"` and `locked = false` so `agent-check` can compare the completed
+runtime state with the durable roadmap status. The next successful `agent-start`
+may overwrite that completed identity after verifying `locked = false`.
 
 ### Handoff Files
 
@@ -374,6 +484,10 @@ P0 - Roadmap Agent Harness
 ## Phase
 
 specified
+
+## Exception Reason
+
+- None.
 
 ## Completed
 
@@ -431,12 +545,20 @@ in_progress -> verifying       when exception work is ready for verification
 verifying   -> done            via agent-finish after verification is recorded
 ```
 
-`agent-next` is always read-only. `agent-start` records `selected`. For
-`WORK_KIND=roadmap`, it may immediately record `specified` or `planned` if the
-required artifacts already exist.
+`agent-next` is always read-only and prints exactly one result: the
+highest-priority unblocked epic. A `--all` or `--list` mode is deferred
+to a future version; v1 focuses on single-epic workflow discipline.
+`agent-start` records `selected`. For `WORK_KIND=roadmap`, it may
+immediately record `specified` or `planned` if the required artifacts
+already exist.
 
 `agent-advance` should reject backward moves and phase skips, except that
 exception work kinds may advance directly from `selected` to `in_progress`.
+When the human updates `docs/roadmap.md` status ahead of the runtime (e.g.
+manual status change to `in_progress` before running `agent-advance`),
+the runtime should follow that lead. The normal order is: human edits roadmap,
+then runtime advances to match. `agent-check` validates the resulting
+consistency.
 `agent-start` is the only command allowed to collapse initial roadmap-work
 phases based on already existing artifacts. Missing roadmap links for an
 existing spec or plan block roadmap-work advancement to `specified` or
@@ -471,6 +593,28 @@ Roadmap/runtime mismatch severity:
 - runtime `done` with roadmap `done`: pass
 - runtime `done` with roadmap `deferred`: fail
 
+Artifact and handoff severity:
+
+- roadmap `specified` or later without a linked spec path: fail
+- roadmap `planned`, `in_progress`, or `done` without a linked plan path: fail
+- linked spec path missing on disk for roadmap `specified` or later: fail
+- linked plan path missing on disk for roadmap `planned`, `in_progress`, or
+  `done`: fail
+- spec file exists for the active epic but is not linked from roadmap when
+  runtime phase is `specified` or later: fail
+- plan file exists for the active epic but is not linked from roadmap when
+  runtime phase is `planned` or later: fail
+- missing current handoff for `selected`, `specified`, or `planned`: warn
+- missing current handoff for `in_progress` or `verifying`: fail
+- handoff required section is absent or contains only a placeholder: fail when
+  handoff validation is required
+- handoff current epic differs from `state.current_epic`: fail
+- handoff phase differs from `state.phase`: fail
+
+Placeholder handoff content is any required section whose trimmed body is empty,
+`Not recorded yet.`, `Not run yet.`, or only a bullet containing one of those
+phrases.
+
 Self-review and user review are process gates for this repository's
 brainstorming workflow, but they do not create additional roadmap status values.
 When a spec exists and is linked from the roadmap, `specified` is the durable
@@ -487,6 +631,11 @@ Allowed exceptions:
 - `WORK_KIND=emergency_fix` for a user-requested urgent fix
 - `WORK_KIND=harness_docs` for documentation correction needed to finish the
   harness itself
+
+Exception work kinds are not machine proof of user intent. They are allowed only
+when `exception_reason` records a human-readable justification supplied at
+`agent-start`. The reason is part of the audit trail and must be shown by
+`agent-status`, recorded in state, and preserved in handoff notes.
 
 Exception work still needs an active lock that points to a roadmap item. If the
 work does not naturally belong to another roadmap epic, it should lock
@@ -526,6 +675,27 @@ Work-kind gates:
 spec-before-implementation and plan-before-implementation gates, but they do
 not bypass the one-epic lock, handoff, or verification gates.
 
+## Quality Boundary
+
+The harness is a workflow and evidence gate, not a semantic quality oracle. It
+can check that specs, plans, handoffs, and verification records exist and meet
+minimum structural requirements. It cannot prove that a spec is wise, a plan is
+complete, or code is correct.
+
+To reduce false confidence, v1 should enforce these structural quality floors:
+
+- specs contain the required headings listed in this document
+- plans contain `## Existing Code Map`, `## Expected Outcomes`, task headings,
+  checkboxes, `**Files:**` blocks with backticked paths, and a
+  parseable `## Verification Commands` section
+- handoffs contain substantive notes for exception reason, completed work,
+  modified files, verification, unresolved risks, and next step
+- verification records include command, result, summary, and date
+- final completion records at least one passing verification command
+
+Human or agent review remains required for semantic quality, safety reasoning,
+and whether the produced code actually satisfies the original request.
+
 ## Artifact Rules
 
 ### Specs
@@ -536,16 +706,17 @@ Specs live under:
 docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
 ```
 
-A spec should include:
+A spec must include these parseable top-level headings:
 
-- goal
-- scope
-- non-goals
-- design principles or constraints
-- architecture or workflow
-- error handling
-- verification strategy
-- open questions only when they block implementation planning
+- `## Goal`
+- `## Scope`
+- `## Non-Goals`
+- `## Design`
+- `## Error Handling`
+- `## Verification Strategy`
+
+Open questions may be included under `## Open Questions` only when they block
+implementation planning.
 
 Spec paths should be explicit in the roadmap when an item is `specified` or
 later.
@@ -600,8 +771,17 @@ If a roadmap item does not yet have a spec, `make agent-start` should derive a
 candidate topic slug from the epic title by lowercasing ASCII letters, replacing
 non-alphanumeric runs with `-`, and trimming leading or trailing `-`.
 
-If the derived candidate path already exists for a different roadmap item,
-append `-2`, then `-3`, and so on until the path is unused.
+The default spec path for an unlinked item is:
+
+```text
+docs/superpowers/specs/<current-local-date>-<slug>-design.md
+```
+
+The date is the local calendar date used by the running process, formatted as
+`YYYY-MM-DD`. If the first candidate already exists and is linked to the same
+roadmap item, reuse it. If it exists for another roadmap item or is unlinked,
+append a numeric suffix before `-design.md`: `YYYY-MM-DD-<slug>-2-design.md`,
+then `-3`, and so on until an unused or same-item-linked path is found.
 
 ### Handoff
 
@@ -609,6 +789,7 @@ Handoff notes should include:
 
 - current epic
 - phase
+- exception reason
 - completed work
 - modified files
 - verification commands and results
@@ -638,6 +819,9 @@ Expected verification layers:
 The implementation plan should choose the narrowest relevant command first and
 broaden verification before claiming completion.
 
+The implementation should include tests for edge cases where no roadmap item is
+eligible because all items are deferred or blocked.
+
 ## Acceptance Criteria
 
 - Roadmap contains a P0 harness epic and marks it as prerequisite work.
@@ -647,11 +831,14 @@ broaden verification before claiming completion.
 - `make agent-next` can identify the next eligible roadmap epic without
   mutating state.
 - `make agent-start` can lock one epic and reject concurrent locks.
+- exception `WORK_KIND` values require a non-empty exception reason.
 - `make agent-status` prints current state.
 - `make agent-check` catches missing specs, missing plans, invalid status
   transitions, incomplete handoff notes, and runtime-declared implementation
   work blocked by the P0 harness prerequisite.
+- `agent-check` uses stable error codes for workflow failures.
 - `make agent-handoff` creates or validates structured handoff notes.
+- handoff validation rejects stale handoffs and phase mismatches.
 - `make agent-template` creates spec or plan artifacts from templates without
   overwriting existing files.
 - `make agent-advance` moves runtime phase only after required artifacts exist.
@@ -677,3 +864,13 @@ broaden verification before claiming completion.
   inspect and validate, not perform machine-state changes.
 - Agent sessions may still skip commands. Mitigation: make `AGENTS.md` and
   roadmap point to this P0 harness as a prerequisite once implemented.
+- Concurrent sessions in the same checkout may race while reading and writing
+  `state.toml` or `current-handoff.md`. Mitigation: v1 documents single-session
+  use and avoids silent overwrites; cross-process locking is deferred unless
+  repeated collisions occur.
+- Exception work kinds can be abused by callers. Mitigation: require explicit
+  `exception_reason`, preserve it in state and handoff notes, and make review
+  responsible for validating that the exception was legitimate.
+- Passing harness checks can create false confidence in low-quality artifacts.
+  Mitigation: document the quality boundary and require review plus explicit
+  verification evidence before marking work done.

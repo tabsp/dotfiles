@@ -5,3 +5,5 @@ config/fish/fish_variables
 nvim.log
 __pycache__/
 target/
+docs/superpowers/agent/state.toml
+docs/superpowers/agent/current-handoff.md

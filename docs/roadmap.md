@@ -31,7 +31,7 @@ implementation plans.
 
 ### P0 - Roadmap Agent Harness
 
-Status: specified
+Status: done
 Category: automation
 Current code signal: roadmap, specs, plans, and `AGENTS.md` define manual agent
 rules, but there is no deterministic runtime for selecting, validating,
@@ -39,6 +39,9 @@ executing, and handing off roadmap work.
 
 Spec:
 `docs/superpowers/specs/2026-05-14-roadmap-agent-harness-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-14-roadmap-agent-harness.md`
 
 This is a prerequisite for future roadmap implementation. Before other roadmap
 epics move into agentic implementation, agent sessions need a stable workflow
