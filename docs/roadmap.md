@@ -75,8 +75,14 @@ The old install remains usable if staging or verification fails.
 
 ### P0 - Verified Extraction Pipeline
 
-Status: proposed
+Status: done
 Category: safety
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p0-verified-extraction-pipeline-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p0-verified-extraction-pipeline.md`
 Current code signal: checksum verification exists; extraction policy is not yet
 explicit.
 
