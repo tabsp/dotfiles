@@ -8,6 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::process::Stdio;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn is_installed(command: &str, entry: &InstallEntry) -> Result<bool, String> {
     match entry.installer {
@@ -307,6 +308,23 @@ fn archive_dir_install_state(install_to: &Path, install_dir_to: &Path) -> Result
     Ok(true)
 }
 
+fn sibling_tempdir(parent: &Path, prefix: &str) -> Result<PathBuf, String> {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let pid = std::process::id();
+    let name = format!("{prefix}.staging-{pid}-{ts}");
+    let path = parent.join(&name);
+    fs::create_dir(&path).map_err(|err| {
+        format!(
+            "failed to create staging directory {}: {err}",
+            path.display()
+        )
+    })?;
+    Ok(path)
+}
+
 fn install_archive_dir(
     temp_dir: &Path,
     install_dir_from: &str,
@@ -326,29 +344,77 @@ fn install_archive_dir(
         return Err(format!("binary_path not found after unpack: {binary_path}"));
     }
 
-    if let Some(parent) = install_dir_to.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create install directory {}: {err}",
-                parent.display()
-            )
-        })?;
+    let parent_dir = install_dir_to.parent().ok_or_else(|| {
+        "install_dir_to has no parent directory".to_string()
+    })?;
+    fs::create_dir_all(parent_dir).map_err(|err| {
+        format!(
+            "failed to create install directory {}: {err}",
+            parent_dir.display()
+        )
+    })?;
+
+    let staging = sibling_tempdir(
+        parent_dir,
+        install_dir_to
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("staging"),
+    )?;
+
+    // Copy into staging. If this fails, the old install is still intact.
+    if let Err(err) = copy_dir_recursive(&source_dir, &staging) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!("AGENT_ARCHIVE_DIR_STAGE_FAILED: failed to stage directory install: {err}"));
     }
-    // TODO: replace by copying into a sibling temp dir and renaming into place.
-    if install_dir_to.exists() {
-        fs::remove_dir_all(install_dir_to).map_err(|err| {
+
+    let old_path = if install_dir_to.exists() {
+        let old = install_dir_to.with_file_name(format!(
+            "{}.old",
+            install_dir_to
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("backup")
+        ));
+        // If an old backup from a previous failed run exists, remove it first.
+        if old.exists() {
+            fs::remove_dir_all(&old).map_err(|err| {
+                format!("failed to remove leftover backup {}: {err}", old.display())
+            })?;
+        }
+        fs::rename(install_dir_to, &old).map_err(|err| {
+            let _ = fs::remove_dir_all(&staging);
             format!(
-                "failed to remove existing install directory {}: {err}",
+                "AGENT_ARCHIVE_DIR_RENAME_FAILED: failed to move old install directory {}: {err}",
                 install_dir_to.display()
             )
         })?;
-    }
-    copy_dir_recursive(&source_dir, install_dir_to)?;
+        Some(old)
+    } else {
+        None
+    };
 
+    // Promote staging to final location.
+    if let Err(err) = fs::rename(&staging, install_dir_to) {
+        // Attempt to restore the old directory.
+        if let Some(ref old) = old_path
+            && old.exists()
+        {
+            let _ = fs::rename(old, install_dir_to);
+        }
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!(
+            "AGENT_ARCHIVE_DIR_PROMOTE_FAILED: failed to promote staged directory to {}: {err}",
+            install_dir_to.display()
+        ));
+    }
+
+    // Symlink setup.
     let relative_binary = Path::new(binary_path)
         .strip_prefix(install_dir_from)
         .map_err(|_| "binary_path must be inside install_dir_from".to_string())?;
     let target_binary = install_dir_to.join(relative_binary);
+
     if let Some(parent) = install_to.parent() {
         fs::create_dir_all(parent).map_err(|err| {
             format!(
@@ -369,7 +435,7 @@ fn install_archive_dir(
     {
         std::os::unix::fs::symlink(&target_binary, install_to).map_err(|err| {
             format!(
-                "failed to link binary {} -> {}: {err}",
+                "AGENT_ARCHIVE_DIR_SYMLINK_FAILED: failed to link binary {} -> {}: {err}",
                 install_to.display(),
                 target_binary.display()
             )
@@ -379,8 +445,21 @@ fn install_archive_dir(
     {
         install_binary(&target_binary, install_to)?;
     }
+
+    // Clean up the old backup.
+    if let Some(old) = old_path
+        && old.exists()
+        && let Err(err) = fs::remove_dir_all(&old)
+    {
+        eprintln!(
+            "AGENT_ARCHIVE_DIR_CLEANUP_FAILED: warn: failed to remove old install backup {}: {err}",
+            old.display()
+        );
+    }
+
     Ok(())
 }
+
 
 fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<(), String> {
     fs::create_dir_all(dest)
@@ -1077,4 +1156,176 @@ mod tests {
             "prefix~/path"
         );
     }
+
+
+    // --- Atomic directory install tests ---
+
+    fn setup_fake_archive_dir(temp: &Path, dir_name: &str, binary_name: &str) -> Result<(), String> {
+        let source = temp.join(dir_name);
+        fs::create_dir_all(&source).map_err(|e| format!("create source dir: {e}"))?;
+        let bin = source.join(binary_name);
+        fs::write(&bin, b"fake binary").map_err(|e| format!("write binary: {e}"))?;
+        #[cfg(unix)]
+        {
+            let mut perms = fs::metadata(&bin).map_err(|e| format!("metadata: {e}"))?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&bin, perms).map_err(|e| format!("chmod: {e}"))?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn atomic_install_first_time_no_existing_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let install_root = tempfile::tempdir().expect("install root");
+        let install_dir_to = install_root.path().join("mytool");
+        let install_to = install_root.path().join("bin").join("mytool");
+
+        setup_fake_archive_dir(temp.path(), "mytool-v1.0", "mytool").expect("setup");
+        install_archive_dir(
+            temp.path(),
+            "mytool-v1.0",
+            &install_dir_to,
+            "mytool-v1.0/mytool",
+            &install_to,
+        )
+        .expect("install_archive_dir should succeed");
+
+        assert!(install_dir_to.exists());
+        assert!(install_dir_to.join("mytool").exists());
+        assert!(!install_dir_to.with_file_name(format!(
+            "{}.old",
+            install_dir_to.file_name().unwrap().to_str().unwrap()
+        )).exists());
+        #[cfg(unix)]
+        {
+            let link_target = fs::read_link(&install_to).expect("read_link");
+            assert_eq!(link_target, install_dir_to.join("mytool"));
+        }
+    }
+
+    #[test]
+    fn atomic_install_upgrade_existing_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let install_root = tempfile::tempdir().expect("install root");
+        let install_dir_to = install_root.path().join("mytool");
+        let install_to = install_root.path().join("bin").join("mytool");
+
+        // First install — create a pre-existing "old" install.
+        fs::create_dir_all(&install_dir_to).expect("create old dir");
+        fs::write(install_dir_to.join("mytool"), b"old binary").expect("write old");
+        fs::create_dir_all(install_to.parent().unwrap()).expect("create bin dir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(install_dir_to.join("mytool"), &install_to).expect("symlink");
+
+        // Second install with new content.
+        setup_fake_archive_dir(temp.path(), "mytool-v2.0", "mytool").expect("setup");
+        install_archive_dir(
+            temp.path(),
+            "mytool-v2.0",
+            &install_dir_to,
+            "mytool-v2.0/mytool",
+            &install_to,
+        )
+        .expect("install_archive_dir should succeed");
+
+        assert!(install_dir_to.exists());
+        // Old backup should be cleaned up.
+        assert!(!install_dir_to.with_file_name(format!(
+            "{}.old",
+            install_dir_to.file_name().unwrap().to_str().unwrap()
+        )).exists());
+        // Symlink should point to new path.
+        #[cfg(unix)]
+        {
+            let link_target = fs::read_link(&install_to).expect("read_link");
+            assert_eq!(link_target, install_dir_to.join("mytool"));
+        }
+    }
+
+    #[test]
+    fn atomic_install_staging_failure_preserves_old_install() {
+        let install_root = tempfile::tempdir().expect("install root");
+        let install_dir_to = install_root.path().join("mytool");
+
+        // Create pre-existing old install.
+        fs::create_dir_all(&install_dir_to).expect("create old dir");
+        let old_binary_path = install_dir_to.join("mytool");
+        fs::write(&old_binary_path, b"old binary").expect("write old");
+
+        // Source dir is intentionally left empty/missing so staging copy fails.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let result = install_archive_dir(
+            temp.path(),
+            "nonexistent-dir",
+            &install_dir_to,
+            "nonexistent-dir/mytool",
+            &install_root.path().join("bin").join("mytool"),
+        );
+
+        assert!(result.is_err());
+        // Old install should still be intact.
+        assert!(install_dir_to.exists());
+        assert!(old_binary_path.exists());
+        assert_eq!(fs::read_to_string(&old_binary_path).expect("read"), "old binary");
+    }
+
+    #[test]
+    fn atomic_install_cleanup_leftover_old_backup_before_rename() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let install_root = tempfile::tempdir().expect("install root");
+        let install_dir_to = install_root.path().join("mytool");
+        let old_backup = install_dir_to.with_file_name(format!(
+            "{}.old",
+            install_dir_to.file_name().unwrap().to_str().unwrap()
+        ));
+
+        // Simulate leftover .old from a previous crashed run.
+        fs::create_dir_all(&install_dir_to).expect("create dir");
+        fs::create_dir_all(&old_backup).expect("create leftover backup");
+        fs::write(old_backup.join("stale"), b"stale").expect("write stale");
+
+        let install_to = install_root.path().join("bin").join("mytool");
+        setup_fake_archive_dir(temp.path(), "mytool-v1.0", "mytool").expect("setup");
+        install_archive_dir(
+            temp.path(),
+            "mytool-v1.0",
+            &install_dir_to,
+            "mytool-v1.0/mytool",
+            &install_to,
+        )
+        .expect("install_archive_dir should succeed");
+
+        // After success, .old should be cleaned up.
+        assert!(!old_backup.exists());
+        assert!(install_dir_to.exists());
+    }
+
+    #[test]
+    fn atomic_install_creates_intermediate_dirs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let install_root = tempfile::tempdir().expect("install root");
+
+        // install_to has a deep parent path that doesn't exist.
+        let install_dir_to = install_root.path().join("deep").join("nested").join("mytool");
+        let install_to = install_root.path().join("bin").join("deep").join("mytool");
+
+        setup_fake_archive_dir(temp.path(), "mytool-v1.0", "mytool").expect("setup");
+        install_archive_dir(
+            temp.path(),
+            "mytool-v1.0",
+            &install_dir_to,
+            "mytool-v1.0/mytool",
+            &install_to,
+        )
+        .expect("install_archive_dir should succeed");
+
+        assert!(install_dir_to.exists());
+        #[cfg(unix)]
+        {
+            let link_target = fs::read_link(&install_to).expect("read_link");
+            assert_eq!(link_target, install_dir_to.join("mytool"));
+        }
+    }
+
 }

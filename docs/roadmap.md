@@ -55,8 +55,14 @@ finish active locks, and leave structured handoff notes for the next session.
 
 ### P0 - Atomic Directory Install
 
-Status: proposed
+Status: done
 Category: safety
+
+Spec:
+`docs/superpowers/specs/2026-05-16-p0-atomic-directory-install-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-16-p0-atomic-directory-install.md`
 Current code signal: directory installs exist in `download_binary` but are
 non-atomic through a remove-then-copy pattern.
 
