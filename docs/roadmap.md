@@ -97,8 +97,14 @@ hardlink policy.
 
 ### P1 - Bootstrap Dry Run
 
-Status: proposed
+Status: done
 Category: inspectability
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p1-bootstrap-dry-run-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p1-bootstrap-dry-run.md`
 Current code signal: link dry-run exists; bootstrap dry-run does not.
 
 `link` supports dry-run, but `bootstrap` still mixes dependency installation,
