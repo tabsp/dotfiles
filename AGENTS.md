@@ -34,7 +34,7 @@ make agent-status    # confirm lock
 
 Use `make agent-check` before claiming completion of any phase. Use
 `make agent-advance` to move through the workflow (specified → planned →
-in_progress → verifying). Use `make agent-finish` only after recording
+in_progress → verifying). Use `make agent-set-roadmap-status STATUS=done` to update roadmap status (never use sed). Use `make agent-finish` only after recording
 passing verification with `make agent-record-verification`.
 
 The harness enforces:

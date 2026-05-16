@@ -47,6 +47,10 @@ pub(crate) enum AgentCommand {
         phase: Phase,
     },
     Finish,
+    SetRoadmapStatus {
+        #[arg(long)]
+        status: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -171,6 +175,7 @@ pub(crate) fn run_agent(command: AgentCommand) -> Result<(), String> {
         AgentCommand::Check => check(&repo),
         AgentCommand::Advance { phase } => advance(&repo, phase),
         AgentCommand::Finish => finish(&repo),
+        AgentCommand::SetRoadmapStatus { status } => set_roadmap_status(&repo, &status),
     }
 }
 
@@ -1457,6 +1462,52 @@ fn finished_handoff_path(repo: &Path, state: &AgentState) -> String {
 
     // Fallback
     format!("{base}.md")
+}
+
+
+fn set_roadmap_status(repo: &Path, status: &str) -> Result<(), String> {
+    let state = read_state(repo)?;
+    let roadmap_path = repo.join("docs/roadmap.md");
+    let input = fs::read_to_string(&roadmap_path)
+        .map_err(|err| format!("failed to read roadmap: {err}"))?;
+
+    let status = parse_status_for_update(status)?;
+    let heading = format!("### {}", state.current_epic);
+    let heading_start = input
+        .find(&heading)
+        .ok_or_else(|| format!("epic not found in roadmap: {}", state.current_epic))?;
+
+    // Find the Status: line after this heading
+    let after_heading = &input[heading_start..];
+    let status_line_start = after_heading
+        .find("Status: ")
+        .ok_or_else(|| "Status: line not found after epic heading".to_string())?;
+
+    let status_value_start = heading_start + status_line_start + "Status: ".len();
+    let rest = &input[status_value_start..];
+    let status_value_end = rest.find('\n').unwrap_or(rest.len());
+
+    let mut output = String::with_capacity(input.len());
+    output.push_str(&input[..status_value_start]);
+    output.push_str(&status);
+    output.push_str(&input[status_value_start + status_value_end..]);
+
+    fs::write(&roadmap_path, output)
+        .map_err(|err| format!("failed to write roadmap: {err}"))?;
+    output::progress(format!(
+        "roadmap status updated: {} -> {status}",
+        state.current_epic
+    ));
+    Ok(())
+}
+
+fn parse_status_for_update(value: &str) -> Result<String, String> {
+    match value {
+        "proposed" | "specified" | "planned" | "in_progress" | "done" | "deferred" => {
+            Ok(value.to_string())
+        }
+        _ => Err(format!("invalid roadmap status: {value}")),
+    }
 }
 
 #[cfg(test)]

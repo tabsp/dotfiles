@@ -1424,3 +1424,40 @@ fn agent_commands_do_not_require_dotfile_manifests_in_fixture_repo() {
         "agent check should not require dotfile manifests: {stderr}"
     );
 }
+
+#[test]
+fn agent_set_roadmap_status_updates_only_active_epic() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    dotfiles_agent_fixture(temp.path());
+    // Write a roadmap with multiple epics, some sharing the same status
+    std::fs::write(
+        temp.path().join("docs/roadmap.md"),
+        r#"# Dotman Roadmap
+
+## Active Queue
+
+### P0 - Roadmap Agent Harness
+
+Status: specified
+Category: automation
+
+### P0 - Atomic Directory Install
+
+Status: specified
+Category: safety
+"#,
+    )
+    .expect("roadmap");
+    run_dotman(temp.path(), &["agent", "init"]);
+    run_dotman(
+        temp.path(),
+        &["agent", "start", "--epic", "P0 - Roadmap Agent Harness"],
+    );
+
+    run_dotman(temp.path(), &["agent", "set-roadmap-status", "--status", "planned"]);
+
+    let roadmap = std::fs::read_to_string(temp.path().join("docs/roadmap.md")).expect("roadmap");
+    // Only the harness epic should change; Atomic Directory Install stays specified
+    assert!(roadmap.contains("### P0 - Roadmap Agent Harness\n\nStatus: planned"));
+    assert!(roadmap.contains("### P0 - Atomic Directory Install\n\nStatus: specified"));
+}

@@ -1,4 +1,4 @@
-.PHONY: help bootstrap link doctor shell check lint test ci build build-dotman cargo-preflight agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template agent-advance agent-record-verification agent-finish
+.PHONY: help bootstrap link doctor shell check lint test ci build build-dotman cargo-preflight agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template agent-advance agent-record-verification agent-finish agent-set-roadmap-status
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -108,6 +108,9 @@ agent-advance: build-dotman
 
 agent-record-verification: build-dotman
 	$(DOTMAN) agent record-verification --command "$(COMMAND)" --result $(RESULT) --summary "$(SUMMARY)"
+
+agent-set-roadmap-status: build-dotman
+	$(DOTMAN) agent set-roadmap-status --status $(STATUS)
 
 agent-finish: build-dotman
 	$(DOTMAN) agent finish
