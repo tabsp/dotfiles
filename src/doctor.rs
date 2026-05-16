@@ -2,6 +2,7 @@ use crate::config::{DepsManifest, DotfilesManifest, VersionCheck, VersionStream}
 use crate::path::{expand_home, paths_match, which};
 use crate::platform::Host;
 use regex::Regex;
+use serde::Serialize;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -11,6 +12,7 @@ pub fn run_doctor(
     files: &DotfilesManifest,
     host: &Host,
     repo: &Path,
+    json: bool,
 ) -> Result<(), String> {
     let mut hard_errors = Vec::new();
     let mut warnings = Vec::new();
@@ -82,14 +84,38 @@ pub fn run_doctor(
         }
     }
 
-    for err in &hard_errors {
-        eprintln!("error: {err}");
-    }
-    for warning in &warnings {
-        eprintln!("warn: {warning}");
-    }
-    for ok in &oks {
-        println!("ok: {ok}");
+    if json {
+        let output = DoctorOutput {
+            ok: &oks,
+            warnings: &warnings,
+            errors: &hard_errors,
+            summary: DoctorSummary {
+                ok: oks.len(),
+                warnings: warnings.len(),
+                errors: hard_errors.len(),
+            },
+        };
+        println!(
+            "{}",
+            serde_json::to_string(&output)
+                .map_err(|err| format!("failed to serialize doctor output: {err}"))?
+        );
+    } else {
+        for err in &hard_errors {
+            eprintln!("error: {err}");
+        }
+        for warning in &warnings {
+            eprintln!("warn: {warning}");
+        }
+        for ok in &oks {
+            println!("ok: {ok}");
+        }
+        println!(
+            "doctor: {} ok, {} warning(s), {} error(s)",
+            oks.len(),
+            warnings.len(),
+            hard_errors.len()
+        );
     }
 
     if hard_errors.is_empty() {
@@ -123,6 +149,21 @@ fn extract_version(text: &str, regex: &str) -> Result<String, String> {
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| "version output did not match regex".to_string())
+}
+
+#[derive(Serialize)]
+struct DoctorOutput<'a> {
+    ok: &'a Vec<String>,
+    warnings: &'a Vec<String>,
+    errors: &'a Vec<String>,
+    summary: DoctorSummary,
+}
+
+#[derive(Serialize)]
+struct DoctorSummary {
+    ok: usize,
+    warnings: usize,
+    errors: usize,
 }
 
 #[cfg(test)]

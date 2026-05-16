@@ -41,7 +41,10 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    Doctor,
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
     Shell,
     Check,
 }
@@ -66,7 +69,7 @@ fn run() -> Result<(), String> {
     match cli.command {
         Command::Bootstrap { dry_run } => run_bootstrap(dry_run),
         Command::Link { conflict, dry_run } => run_link(conflict, dry_run),
-        Command::Doctor => run_doctor(),
+        Command::Doctor { json } => run_doctor(json),
         Command::Shell => shell::run_shell(),
         Command::Check => run_check(),
         Command::Agent { command } => agent::run_agent(command),
@@ -108,14 +111,14 @@ fn run_link(conflict: Conflict, dry_run: bool) -> Result<(), String> {
     link::run_link(&files, &host, &repo, conflict, dry_run)
 }
 
-fn run_doctor() -> Result<(), String> {
+fn run_doctor(json: bool) -> Result<(), String> {
     let repo =
         std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
     let deps = config::load_deps(Path::new("deps.toml"))?;
     let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
     let host = platform::detect_host()?;
     match check::run_check(&deps, &files, &host, &repo) {
-        Ok(()) => doctor::run_doctor(&deps, &files, &host, &repo),
+        Ok(()) => doctor::run_doctor(&deps, &files, &host, &repo, json),
         Err(errors) => Err(errors.join("\nerror: ")),
     }
 }
@@ -161,7 +164,7 @@ fn run_bootstrap(dry_run: bool) -> Result<(), String> {
 
     deps::install_missing(&deps_manifest, &host)?;
     link::run_link(&files, &host, &repo, link::Conflict::Backup, false)?;
-    doctor::run_doctor(&deps_manifest, &files, &host, &repo)?;
+    doctor::run_doctor(&deps_manifest, &files, &host, &repo, false)?;
     print_post_bootstrap_hints();
     Ok(())
 }

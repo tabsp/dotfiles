@@ -115,8 +115,14 @@ changes.
 
 ### P1 - Doctor Summary And Machine Output
 
-Status: proposed
+Status: done
 Category: observability
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p1-doctor-summary-machine-output-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p1-doctor-summary-machine-output.md`
 Current code signal: internal ok, warning, and hard-error buckets exist.
 
 Doctor already separates ok, warning, and hard-error states internally, but the
