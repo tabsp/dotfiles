@@ -31,7 +31,10 @@ enum Command {
         #[command(subcommand)]
         command: agent::AgentCommand,
     },
-    Bootstrap,
+    Bootstrap {
+        #[arg(long)]
+        dry_run: bool,
+    },
     Link {
         #[arg(long, default_value = "backup")]
         conflict: Conflict,
@@ -61,7 +64,7 @@ fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Bootstrap => run_bootstrap(),
+        Command::Bootstrap { dry_run } => run_bootstrap(dry_run),
         Command::Link { conflict, dry_run } => run_link(conflict, dry_run),
         Command::Doctor => run_doctor(),
         Command::Shell => shell::run_shell(),
@@ -117,15 +120,43 @@ fn run_doctor() -> Result<(), String> {
     }
 }
 
-fn run_bootstrap() -> Result<(), String> {
+fn run_bootstrap(dry_run: bool) -> Result<(), String> {
     let repo =
         std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
     let deps_manifest = config::load_deps(Path::new("deps.toml"))?;
     let files = config::load_dotfiles(Path::new("dotfiles.toml"))?;
     let host = platform::detect_host()?;
+
+    if dry_run {
+        println!("==> bootstrap (dry-run)");
+        println!("==> check");
+    }
     match check::run_check(&deps_manifest, &files, &host, &repo) {
         Ok(()) => {}
         Err(errors) => return Err(errors.join("\nerror: ")),
+    }
+
+    if dry_run {
+        println!("==> dependencies");
+        for (name, dep) in &deps_manifest.deps {
+            let raw_entries = dep.entries_for(host.platform.key(), host.arch.key());
+            let entries: Vec<_> = raw_entries
+                .iter()
+                .copied()
+                .filter(|entry| entry.matches_distro(&host))
+                .collect();
+            let Some(entry) = entries.first() else {
+                continue;
+            };
+            match installers::is_installed(&dep.command, entry) {
+                Ok(true) => println!("  already installed: {name}"),
+                Ok(false) => println!("  would install: {name}"),
+                Err(err) => println!("  error checking {name}: {err}"),
+            }
+        }
+        link::run_link(&files, &host, &repo, link::Conflict::Backup, true)?;
+        println!("==> dry-run complete (no changes made)");
+        return Ok(());
     }
 
     deps::install_missing(&deps_manifest, &host)?;
