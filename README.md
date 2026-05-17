@@ -11,7 +11,7 @@ macOS and Linux.
 Download and install the latest `dotman` binary without cloning the repo:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/USER/dotfiles/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tabsp/dotfiles/main/scripts/install.sh | sh
 ```
 
 Prerequisites: `curl`, `tar`, and either `shasum` (macOS) or `sha256sum` (Linux).

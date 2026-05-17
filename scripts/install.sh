@@ -5,12 +5,12 @@ set -e
 # Downloads and installs the correct dotman binary for the current platform.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/USER/dotfiles/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/tabsp/dotfiles/main/scripts/install.sh | sh
 #
 # Or with a custom base URL:
 #   BASE_URL=https://example.com/releases sh install.sh
 
-BASE_URL="${BASE_URL:-https://github.com/USER/dotfiles/releases/download}"
+BASE_URL="${BASE_URL:-https://github.com/tabsp/dotfiles/releases/download}"
 
 # Detect OS and architecture
 OS="$(uname -s)"

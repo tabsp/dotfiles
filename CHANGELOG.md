@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-17
+
 ### Added
 - Atomic directory install with staging-then-rename for crash-safe updates.
 - Verified extraction pipeline with path traversal defense and symlink/hardlink rejection.
@@ -26,8 +28,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Removed redundant `use std::os::unix::fs::PermissionsExt` inside `#[cfg(unix)]` test blocks.
-
-## [0.1.0] — unreleased
-
-Initial development version. Core bootstrap, link, doctor, shell, and dependency
-installation workflows.
