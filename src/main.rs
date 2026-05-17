@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod add;
 mod agent;
 mod archive;
 mod check;
@@ -57,6 +58,22 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    Add {
+        #[command(subcommand)]
+        command: AddCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AddCommand {
+    Dep {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Config {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -85,6 +102,7 @@ fn run() -> Result<(), String> {
         Command::Cleanup { execute } => recovery::run_cleanup(execute),
         Command::Update { check } => run_update(check),
         Command::Agent { command } => agent::run_agent(command),
+        Command::Add { command } => add::run_add(command),
     }
 }
 

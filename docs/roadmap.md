@@ -358,6 +358,34 @@ which means dependency installation and configuration coverage can drift apart.
 Outcome: add managed configs for tools that already have dependency entries after
 the core manager flow is safer.
 
+
+### P2 - Guided Add Workflow
+
+Status: done
+Category: usability
+Current code signal: deps and dotfiles are maintained by hand-editing
+`deps.toml` and `dotfiles.toml`. Users must reference `docs/manifest-schema.md`
+to understand field requirements, and typos or missing fields lead to check
+failures.
+
+Spec:
+`docs/superpowers/specs/2026-05-17-guided-add-workflow-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-guided-add-workflow.md`
+
+Depends on: P1 - Quality Gates And Coverage Policy
+
+Hand-editing TOML manifests is error-prone for new users onboarding dotman.
+An interactive guided workflow would shorten the path from "I want to manage
+this tool" to a valid manifest entry that passes `dotman check`.
+
+Outcome: `dotman add dep` interactively builds a valid `deps.toml` entry;
+`dotman add config` interactively builds a valid `dotfiles.toml` entry and
+optionally creates source paths under `config/`. Both support `--dry-run`
+for preview without writing. The guided flow deduplicates entries, preserves
+existing TOML formatting and comments, and validates the result atomically.
+
 ## Handoff Notes
 
 When starting a new session, read this file first, then pick one Active Queue

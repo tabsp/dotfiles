@@ -332,6 +332,7 @@ dependencies = [
  "time",
  "tiny_http",
  "toml",
+ "toml_edit",
  "xz2",
  "zip",
 ]
