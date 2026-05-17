@@ -54,6 +54,8 @@ Install Rust with rustup, then make sure `cargo`, `rustc`, `rustfmt`, and
 - `deps.toml`: dependency installer policy
 - `docs/manifest-schema.md`: authoritative schema reference for `deps.toml` and `dotfiles.toml`
 - `docs/platform-support.md`: platform support policy and Unix-specific code audit
+- `docs/release-policy.md`: versioning, compatibility, and release process
+- `CHANGELOG.md`: project changelog following Keep a Changelog
 - `src/`: Rust backend source
 - `tests/`: CLI integration tests
 

@@ -247,7 +247,12 @@ epic rather than an accidental extension.
 
 ### P2 - Release Readiness
 
-Status: proposed
+Spec:
+`docs/superpowers/specs/2026-05-17-p2-release-readiness-design.md`
+Plan:
+`docs/superpowers/plans/2026-05-17-p2-release-readiness.md`
+
+Status: done
 Category: distribution
 Current code signal: `dotman` is versioned as a Rust package, but release
 process, artifact naming, changelog policy, and upgrade compatibility are not
