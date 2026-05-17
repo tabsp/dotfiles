@@ -1,4 +1,8 @@
-.PHONY: help bootstrap link doctor shell check lint test ci build build-dotman cargo-preflight agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template agent-advance agent-record-verification agent-finish agent-set-roadmap-status uninstall release release-check
+.PHONY: help bootstrap link doctor shell check lint test ci build build-dotman \
+             cargo-preflight \
+             agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template \
+             agent-advance agent-record-verification agent-finish agent-set-roadmap-status \
+             uninstall release release-check
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -117,8 +121,11 @@ uninstall:
 	@echo "Run 'dotman cleanup --execute' to remove stale backup/staging dirs."
 	@echo "See docs/recovery.md for full uninstall instructions."
 
-update-deps-list: build-dotmannt$(DOTMAN) updaten
-update-deps-check: build-dotmannt$(DOTMAN) update --check
+update-deps-list: build-dotman
+	$(DOTMAN) update
+
+update-deps-check: build-dotman
+	$(DOTMAN) update --check
 
 agent-init: build-dotman
 	$(DOTMAN) agent init

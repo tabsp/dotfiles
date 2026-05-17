@@ -43,7 +43,7 @@ The harness enforces:
 - P0 prerequisite ordering
 - Structured handoff notes before finish
 
-Runtime state lives in `docs/superpowers/agent/state.toml`. Handoff notes are
+Runtime state lives in `docs/superpowers/agent/state.toml`. Handoff notes are tracked under `docs/superpowers/agent/handoffs/`.
 
 ## Commit After Each Epic
 

@@ -34,7 +34,8 @@ Requires Rust and Cargo. See [Rust installation](https://rustup.rs/).
 - `make doctor`: inspect installed commands, versions, and linked files.
 - `make shell`: interactively set fish as the login shell.
 - `make check`: validate manifests and host support.
-- `make update-deps-list`: list pinned download_binary depsn- `make update-deps-check`: check for newer GitHub releases
+- `make update-deps-list`: list pinned download_binary deps
+- `make update-deps-check`: check for newer GitHub releases
 - `make lint`: run formatting and static analysis checks.
 - `make test`: run Rust tests.
 - `make ci`: run local verification (`lint` -> `check` -> `test`).
