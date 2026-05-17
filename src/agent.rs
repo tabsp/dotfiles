@@ -1299,15 +1299,20 @@ fn parse_roadmap(input: &str) -> Result<Vec<RoadmapItem>, String> {
     let mut lines_iter = input.lines().peekable();
     while let Some(line) = lines_iter.next() {
         let trimmed = line.trim();
-        if trimmed == "## Active Queue" {
+        if trimmed == "## Active Queue" || trimmed == "## Next Queue" || trimmed == "## Completed Foundation" {
             in_queue = true;
             continue;
         }
         if !in_queue {
             continue;
         }
-        if trimmed.starts_with("## ") && trimmed != "## Active Queue" {
-            break;
+        if trimmed.starts_with("## ") && trimmed != "## Active Queue" && trimmed != "## Next Queue" && trimmed != "## Completed Foundation" {
+            // Flush current item and resume scanning for next queue section
+            if let Some(item) = current.take() {
+                items.push(item);
+            }
+            in_queue = false;
+            continue;
         }
         if let Some(stripped) = trimmed.strip_prefix("### ") {
             if let Some(item) = current.take() {
@@ -1925,5 +1930,30 @@ Category: observability
 
         let third = finished_handoff_path(temp.path(), &state);
         assert!(third.contains("p0-roadmap-agent-harness-3"));
+    }
+
+    #[test]
+    fn parses_next_queue_section() {
+        let roadmap = r#"
+## Next Queue
+
+### P0 - Roadmap Refresh And Agent Queue Reset
+
+Status: proposed
+Category: governance
+
+### P2 - Manifest Schema Migration Tool
+
+Status: proposed
+Category: maintainability
+"#;
+
+        let items = parse_roadmap(roadmap).expect("items");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].title, "P0 - Roadmap Refresh And Agent Queue Reset");
+        assert_eq!(items[0].priority, Priority::P0);
+        assert_eq!(items[0].status, RoadmapStatus::Proposed);
+        assert_eq!(items[1].title, "P2 - Manifest Schema Migration Tool");
+        assert_eq!(items[1].priority, Priority::P2);
     }
 }

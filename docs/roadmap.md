@@ -50,27 +50,6 @@ work is schedulable."
 
 ## Next Queue
 
-### P0 - Roadmap Refresh And Agent Queue Reset
-
-Status: proposed
-Category: governance
-
-Current signal: the previous `Active Queue` contained only `done` items while
-the handoff notes still told new sessions to pick an active item. This blocks
-future agent scheduling and makes completed work look selectable.
-
-Outcome: completed foundation work is archived, the next queue contains only
-real future work, cross-cutting risks are tracked in a risk register, and agents
-have a documented Roadmap Planning Review path when the queue is exhausted.
-
-Scope notes:
-- This is a planning and documentation epic only. This roadmap update records
-  the planning shape; a future harness-driven pass, if needed, should only
-  formalize and verify it rather than repeat the planning work.
-- Do not start implementation of any next-phase product or safety epic as part
-  of this work.
-- Keep it small enough to unlock future roadmap work.
-
 ### P0 - Multi-Agent Review Protocol
 
 Status: proposed
@@ -235,6 +214,7 @@ manifest features.
 | Historical handoffs may be unreliable audit inputs. | Some finished handoffs have stale phase text or formatting issues. | medium | P1 - Handoff And Plan Quality Gates | open |
 | High-risk P0 work could proceed without independent safety/product/workflow review. | Multi-agent review worked in this planning cycle and has initial documentation, but is not yet fully specified or verified as a reusable protocol. | medium | P0 - Multi-Agent Review Protocol | open |
 | Complex product features could expand safety surface before state is explainable. | Templates, secrets, plugins, adopt/unmanage, and cleanup all depend on mature ownership and trust boundaries. | medium | Deferred / Non-Goals | open |
+| No automated release pipeline; artifact matrix workflow requires manual trigger. | Release artifact matrix workflow is manual-only; no CI trigger on tag push. | low | P2 - CI Automation | open |
 
 ## Deferred / Non-Goals
 
@@ -260,6 +240,29 @@ the next roadmap phase.
   trust boundary is hardened.
 
 ## Completed Foundation
+
+### P0 - Roadmap Refresh And Agent Queue Reset
+
+Status: done
+Category: governance
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p0-roadmap-refresh-and-agent-queue-reset-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p0-roadmap-refresh-and-agent-queue-reset.md`
+
+Current signal: the previous `Active Queue` contained only `done` items while
+the handoff notes still told new sessions to pick an active item. This blocks
+future agent scheduling and makes completed work look selectable.
+
+Outcome: agent harness parser fixed to recognize `## Next Queue` and
+`## Completed Foundation` sections; roadmap structure verified (archive, risk
+register, agent scheduling rules already in place); one missing risk register
+entry added; `make agent-next` and `make agent-start` work correctly.
+
+Handoff: `docs/superpowers/agent/handoffs/2026-05-17-p0-roadmap-refresh-and-agent-queue-reset.md`
+
 
 ### P0 - Roadmap Agent Harness
 
