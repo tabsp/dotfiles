@@ -17,3 +17,25 @@ kind = "dir"
 source = "config/tmux.conf"
 target = "~/.tmux.conf"
 kind = "file"
+
+[[files]]
+source = "config/yazi"
+target = "~/.config/yazi"
+kind = "dir"
+
+[[files]]
+source = "config/starship.toml"
+target = "~/.config/starship.toml"
+kind = "file"
+
+[[files]]
+source = "config/lazygit"
+target = "~/.config/lazygit"
+kind = "dir"
+
+# Tools with deps.toml entries but no managed configs:
+# - zoxide: env-var driven (no config file)
+# - eza:     env-var driven (LS_COLORS, EZA_* vars)
+# - fzf:     env-var driven (FZF_DEFAULT_OPTS)
+# - git:     system-scoped (~/.gitconfig managed separately)
+# - make:    no per-user config

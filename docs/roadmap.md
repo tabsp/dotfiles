@@ -308,7 +308,12 @@ or uninstall workflows for state it can safely identify as managed.
 
 ### P3 - Managed Config Coverage
 
-Status: proposed
+Spec:
+`docs/superpowers/specs/2026-05-17-p3-managed-config-coverage-design.md`
+Plan:
+`docs/superpowers/plans/2026-05-17-p3-managed-config-coverage.md`
+
+Status: done
 Category: coverage
 Current code signal: some dependencies have managed configs; others only have
 install entries.
