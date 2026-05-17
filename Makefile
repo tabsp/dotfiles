@@ -1,4 +1,4 @@
-.PHONY: help bootstrap link doctor shell check lint test ci build build-dotman cargo-preflight agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template agent-advance agent-record-verification agent-finish agent-set-roadmap-status release release-check
+.PHONY: help bootstrap link doctor shell check lint test ci build build-dotman cargo-preflight agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template agent-advance agent-record-verification agent-finish agent-set-roadmap-status uninstall release release-check
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -30,7 +30,10 @@ help:
 		'  make check                       Validate manifests and host support' \
 		'  make lint                        Run cargo fmt and clippy checks' \
 		'  make test                        Run Rust tests' \
-		'  make ci                          Run local verification suite'
+		'  make ci                          Run local verification suite' \
+		'  make release                     Build release binary tarball and checksum' \
+		'  make release-check               Build release and verify checksum' \
+		'  make uninstall                   Remove dotman binary and list managed state' \
 
 cargo-preflight:
 	@command -v cargo >/dev/null 2>&1 || { echo "error: cargo is required to build dotman" >&2; echo "hint: install Rust with rustup: https://rustup.rs/" >&2; exit 1; }
@@ -99,6 +102,20 @@ release-check: release
 	TARGET=$$(rustc -vV | grep host | cut -d ' ' -f2); \
 	cd dist && shasum -a 256 -c "dotman-$${TARGET}-$${VERSION}.tar.gz.sha256"
 
+
+uninstall:
+	@echo "==> removing dotman binary..."
+	@rm -f target/debug/dotman target/release/dotman
+	@echo "==> dotman removed"
+	@echo ""
+	@echo "Managed state (not removed):"
+	@echo "  $$HOME/.local/bin/   - installed tools and symlinks"
+	@echo "  $$HOME/.config/...   - linked dotfiles"
+	@echo "  *.dotman-backup      - backup directories from conflict resolution"
+	@echo "  *.dotman-staging     - stale staging directories"
+	@echo ""
+	@echo "Run 'dotman cleanup --execute' to remove stale backup/staging dirs."
+	@echo "See docs/recovery.md for full uninstall instructions."
 
 update-deps-list: build-dotmannt$(DOTMAN) updaten
 update-deps-check: build-dotmannt$(DOTMAN) update --check

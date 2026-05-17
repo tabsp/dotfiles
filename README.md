@@ -74,6 +74,7 @@ Install Rust with rustup, then make sure `cargo`, `rustc`, `rustfmt`, and
 - `docs/platform-support.md`: platform support policy and Unix-specific code audit
 - `docs/release-policy.md`: versioning, compatibility, and release process
 - `CHANGELOG.md`: project changelog following Keep a Changelog
+- `docs/recovery.md`: cleanup, backup, and uninstall procedures
 - `src/`: Rust backend source
 - `tests/`: CLI integration tests
 

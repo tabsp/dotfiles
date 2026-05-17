@@ -287,7 +287,12 @@ installation channels.
 
 ### P3 - Recovery And Cleanup
 
-Status: proposed
+Spec:
+`docs/superpowers/specs/2026-05-17-p3-recovery-and-cleanup-design.md`
+Plan:
+`docs/superpowers/plans/2026-05-17-p3-recovery-and-cleanup.md`
+
+Status: done
 Category: safety
 Current code signal: link conflicts can be backed up, temporary installer
 directories are cleaned up, and README documents that automatic rollback is not

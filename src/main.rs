@@ -11,6 +11,7 @@ mod installers;
 mod link;
 mod output;
 mod path;
+mod recovery;
 mod platform;
 mod process;
 mod shell;
@@ -48,6 +49,10 @@ enum Command {
     },
     Shell,
     Check,
+    Cleanup {
+        #[arg(long)]
+        execute: bool,
+    },
     Update {
         #[arg(long)]
         check: bool,
@@ -77,6 +82,7 @@ fn run() -> Result<(), String> {
         Command::Doctor { json } => run_doctor(json),
         Command::Shell => shell::run_shell(),
         Command::Check => run_check(),
+        Command::Cleanup { execute } => recovery::run_cleanup(execute),
         Command::Update { check } => run_update(check),
         Command::Agent { command } => agent::run_agent(command),
     }
