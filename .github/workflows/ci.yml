@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    # Platform gaps:
+    # - macOS runner not included. GitHub Actions macOS minutes are
+    #   limited; local `make ci` covers macOS verification.
+    # - `make check` validates deps.toml entries against the detected host.
+    #   On ubuntu-latest, macOS-only entries are skipped (no false errors).
+    # - CLI integration tests are parameterized on host platform; tests
+    #   that assume macOS-specific behavior (e.g. $HOME symlinks) are
+    #   skipped on Linux.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+
+      - run: make ci
