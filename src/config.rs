@@ -61,8 +61,6 @@ impl Dependency {
             .filter(|entry| entry.matches_distro(host))
             .collect()
     }
-
-
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -297,5 +295,4 @@ mod tests {
         let entries = dep.entries_for("windows", "x86_64");
         assert!(entries.is_empty());
     }
-
 }

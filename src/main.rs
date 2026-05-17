@@ -5,16 +5,16 @@ mod check;
 mod config;
 mod deps;
 mod doctor;
-mod update;
 mod http;
 mod installers;
 mod link;
 mod output;
 mod path;
-mod recovery;
 mod platform;
 mod process;
+mod recovery;
 mod shell;
+mod update;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::Path;
@@ -162,7 +162,8 @@ fn run_bootstrap(dry_run: bool) -> Result<(), String> {
     if dry_run {
         println!("==> dependencies");
         for (name, dep) in &deps_manifest.deps {
-            let entries: Vec<_> = dep.entries_for(host.platform.key(), host.arch.key())
+            let entries: Vec<_> = dep
+                .entries_for(host.platform.key(), host.arch.key())
                 .into_iter()
                 .filter(|entry| entry.matches_distro(&host))
                 .collect();

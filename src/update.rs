@@ -24,10 +24,7 @@ pub fn list_deps() -> Result<(), String> {
                     .get("sha256")
                     .and_then(|v| v.as_str())
                     .unwrap_or("—");
-                println!(
-                    "{name}: {} ({platform} {arch})",
-                    entry.version
-                );
+                println!("{name}: {} ({platform} {arch})", entry.version);
                 println!("  url: {url}");
                 println!("  sha256: {sha}");
             }
@@ -63,10 +60,7 @@ pub fn check_deps() -> Result<(), String> {
                 match check_github_release(&client, url) {
                     Ok(Some(latest)) => {
                         if latest != entry.version {
-                            println!(
-                                "{name}: {} → {latest} ({platform} {arch})",
-                                entry.version
-                            );
+                            println!("{name}: {} → {latest} ({platform} {arch})", entry.version);
                         } else {
                             println!("{name}: {} (up to date)", entry.version);
                         }
@@ -113,20 +107,18 @@ fn check_github_release(
     let text = resp
         .text()
         .map_err(|e| format!("failed to read GitHub API response: {e}"))?;
-    let body: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("failed to parse GitHub API JSON: {e}"))?;
+    let body: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("failed to parse GitHub API JSON: {e}"))?;
     let tag = body["tag_name"].as_str().unwrap_or("");
     Ok(Some(tag.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn check_github_release_extracts_owner_repo() {
         let url = "https://github.com/eza-community/eza/releases/download/v0.20.0/eza.tar.gz";
-        let client = reqwest::blocking::Client::new();
         // Don't actually call API in tests
         let after = url.split("github.com/").collect::<Vec<_>>();
         assert_eq!(after.len(), 2);
