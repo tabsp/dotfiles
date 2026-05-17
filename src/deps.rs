@@ -5,13 +5,13 @@ use crate::platform::{Host, Platform};
 pub fn install_missing(deps: &DepsManifest, host: &Host) -> Result<(), String> {
     for (name, dep) in &deps.deps {
         let raw_entries = dep.entries_for(host.platform.key(), host.arch.key());
+        let has_raw = !raw_entries.is_empty();
         let entries: Vec<_> = raw_entries
-            .iter()
-            .copied()
+            .into_iter()
             .filter(|entry| entry.matches_distro(host))
             .collect();
         let Some(entry) = entries.first() else {
-            let detail = if host.platform == Platform::Linux && !raw_entries.is_empty() {
+            let detail = if host.platform == Platform::Linux && has_raw {
                 format!(
                     " for distro {}",
                     host.distro.as_deref().unwrap_or("unknown")

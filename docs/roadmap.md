@@ -190,8 +190,14 @@ expectations are documented before adding higher-level schema features.
 
 ### P2 - Manifest Defaults
 
-Status: proposed
+Status: done
 Category: maintainability
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p2-manifest-defaults-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p2-manifest-defaults.md`
 Current code signal: manifest entries are explicit per platform and architecture.
 Depends on: P2 - Manifest Schema Evolution
 

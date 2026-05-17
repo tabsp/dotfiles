@@ -5,16 +5,18 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct DepsManifest {
     pub deps: BTreeMap<String, Dependency>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Dependency {
     pub command: String,
     #[serde(default)]
     pub version_check: Option<VersionCheck>,
+    #[serde(default)]
+    pub default: Option<InstallEntry>,
     #[serde(default)]
     pub mac: BTreeMap<String, InstallEntry>,
     #[serde(default)]
@@ -22,23 +24,48 @@ pub struct Dependency {
 }
 
 impl Dependency {
-    pub fn entries_for(&self, platform: &str, arch: &str) -> Vec<&InstallEntry> {
-        match platform {
-            "mac" => self.mac.get(arch).into_iter().collect(),
-            "linux" => self.linux.get(arch).into_iter().collect(),
-            _ => Vec::new(),
+    fn merge_default<'a>(&'a self, entry: Option<&'a InstallEntry>) -> Option<InstallEntry> {
+        let default = self.default.as_ref()?;
+        let entry = entry?;
+        let mut merged_params = default.params.clone();
+        for (k, v) in &entry.params {
+            merged_params.insert(k.clone(), v.clone());
+        }
+        Some(InstallEntry {
+            installer: entry.installer,
+            version: entry.version.clone(),
+            source: entry.source.clone().or(default.source.clone()),
+            distros: entry.distros.clone().or(default.distros.clone()),
+            params: merged_params,
+        })
+    }
+
+    pub fn entries_for(&self, platform: &str, arch: &str) -> Vec<InstallEntry> {
+        let map = match platform {
+            "mac" => &self.mac,
+            "linux" => &self.linux,
+            _ => return Vec::new(),
+        };
+        if let Some(entry) = map.get(arch) {
+            vec![entry.clone()]
+        } else if self.default.is_some() {
+            vec![self.default.clone().unwrap()]
+        } else {
+            Vec::new()
         }
     }
 
-    pub fn entries_for_host<'a>(&'a self, host: &crate::platform::Host) -> Vec<&'a InstallEntry> {
+    pub fn entries_for_host(&self, host: &crate::platform::Host) -> Vec<InstallEntry> {
         self.entries_for(host.platform.key(), host.arch.key())
             .into_iter()
             .filter(|entry| entry.matches_distro(host))
             .collect()
     }
+
+
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct VersionCheck {
     #[serde(default = "default_version_args")]
     pub args: Vec<String>,
@@ -54,7 +81,7 @@ pub enum VersionStream {
     Stderr,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct InstallEntry {
     pub installer: Installer,
     pub version: String,
@@ -94,12 +121,12 @@ pub enum Installer {
     DownloadBinary,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct DotfilesManifest {
     pub files: Vec<FileEntry>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct FileEntry {
     pub source: String,
     pub target: String,
@@ -197,6 +224,7 @@ mod tests {
         let dep = Dependency {
             command: "fish".to_string(),
             version_check: None,
+            default: None,
             mac: BTreeMap::new(),
             linux,
         };
@@ -204,4 +232,70 @@ mod tests {
         assert_eq!(dep.entries_for_host(&linux_host("debian")).len(), 0);
         assert_eq!(dep.entries_for_host(&linux_host("ubuntu")).len(), 1);
     }
+
+    fn basic_entry() -> InstallEntry {
+        InstallEntry {
+            installer: Installer::DownloadBinary,
+            version: "1.0.0".to_string(),
+            source: None,
+            distros: None,
+            params: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn entries_for_returns_arch_entry_when_present() {
+        let mut mac = BTreeMap::new();
+        mac.insert("arm64".to_string(), basic_entry());
+        let dep = Dependency {
+            command: "test".to_string(),
+            version_check: None,
+            default: None,
+            mac,
+            linux: BTreeMap::new(),
+        };
+        let entries = dep.entries_for("mac", "arm64");
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn entries_for_returns_default_when_no_arch_entry() {
+        let dep = Dependency {
+            command: "test".to_string(),
+            version_check: None,
+            default: Some(basic_entry()),
+            mac: BTreeMap::new(),
+            linux: BTreeMap::new(),
+        };
+        let entries = dep.entries_for("mac", "arm64");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].version, "1.0.0");
+    }
+
+    #[test]
+    fn entries_for_returns_empty_when_no_default_and_no_arch() {
+        let dep = Dependency {
+            command: "test".to_string(),
+            version_check: None,
+            default: None,
+            mac: BTreeMap::new(),
+            linux: BTreeMap::new(),
+        };
+        let entries = dep.entries_for("mac", "arm64");
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn entries_for_returns_empty_for_unknown_platform() {
+        let dep = Dependency {
+            command: "test".to_string(),
+            version_check: None,
+            default: Some(basic_entry()),
+            mac: BTreeMap::new(),
+            linux: BTreeMap::new(),
+        };
+        let entries = dep.entries_for("windows", "x86_64");
+        assert!(entries.is_empty());
+    }
+
 }

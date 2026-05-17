@@ -142,10 +142,8 @@ fn run_bootstrap(dry_run: bool) -> Result<(), String> {
     if dry_run {
         println!("==> dependencies");
         for (name, dep) in &deps_manifest.deps {
-            let raw_entries = dep.entries_for(host.platform.key(), host.arch.key());
-            let entries: Vec<_> = raw_entries
-                .iter()
-                .copied()
+            let entries: Vec<_> = dep.entries_for(host.platform.key(), host.arch.key())
+                .into_iter()
                 .filter(|entry| entry.matches_distro(&host))
                 .collect();
             let Some(entry) = entries.first() else {

@@ -20,6 +20,7 @@ field types, defaults, and validation rules enforced by `make check`.
 |-----|------|----------|---------|-------------|
 | `command` | string | yes | — | CLI command checked via `which`. |
 | `version_check` | table | no | none | Version verification (see below). |
+| `default` | table | no | none | Fallback entry inherited by all arch entries. |
 | `mac` | table | no | `{}` | Per-architecture entries for macOS. |
 | `linux` | table | no | `{}` | Per-architecture entries for Linux. |
 
@@ -29,6 +30,15 @@ Architecture keys under `mac` and `linux`:
 |-----|----------|
 | `arm64` | Apple Silicon / Linux aarch64 |
 | `x86_64` | Intel Mac / Linux amd64 |
+
+### Default inheritance
+
+When a `default` section is present, per-arch entries inherit its fields:
+- `installer` and `version` are used as fallbacks if absent in the per-arch entry.
+- `params` are merged: default params + per-arch params, with per-arch winning.
+- `source` and `distros` are taken from the default if absent in per-arch.
+- If no per-arch entry exists for a platform+arch, the default is used directly.
+- If no default exists, behavior is unchanged.
 
 ### VersionCheck (`[deps.<name>.version_check]`)
 

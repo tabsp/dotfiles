@@ -27,14 +27,14 @@ pub fn run_check(
         reject_distros_on_mac(name, dep, &mut errors);
 
         let raw_entries = dep.entries_for(host.platform.key(), host.arch.key());
+        let has_raw = !raw_entries.is_empty();
         let entries: Vec<_> = raw_entries
-            .iter()
-            .copied()
+            .into_iter()
             .filter(|entry| entry.matches_distro(host))
             .collect();
 
         match entries.as_slice() {
-            [] if host.platform == Platform::Linux && !raw_entries.is_empty() => {
+            [] if host.platform == Platform::Linux && has_raw => {
                 let distro = host.distro.as_deref().unwrap_or("unknown");
                 errors.push(format!(
                     "dependency {name} has no current-host entry for distro {distro}"
