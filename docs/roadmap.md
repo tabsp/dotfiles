@@ -50,33 +50,6 @@ work is schedulable."
 
 ## Next Queue
 
-### P0 - Multi-Agent Review Protocol
-
-Status: proposed
-Category: governance / quality
-
-Depends on: P0 - Roadmap Refresh And Agent Queue Reset
-
-Current signal: this planning cycle benefited from independent safety/release,
-product/community, and roadmap/agent workflow reviews. The pattern now has an
-initial roadmap entry and template, but it is not yet fully specified and
-verified as a reusable gate for future high-risk P0 work.
-
-Outcome: roadmap planning and high-risk epics have a documented multi-agent
-review protocol with fixed reviewer roles, read-only constraints, structured
-outputs, and coordinator synthesis rules. The coordinator remains responsible
-for final judgment; multi-agent review is evidence gathering and risk discovery,
-not a voting mechanism.
-
-Scope notes:
-- Start as documentation and templates, not a new orchestration framework.
-- Use reviewer agents as bounded specialists with isolated context.
-- Require coordinator synthesis of consensus, disagreements, accepted changes,
-  rejected changes, and risk register updates.
-- Apply before implementing safety-sensitive epics such as release installer
-  hardening, recovery ownership, cleanup, symlink, bootstrap, and remote script
-  policy.
-
 ### P0 - Release Installer Trust Boundary Hardening
 
 Status: proposed
@@ -240,6 +213,35 @@ the next roadmap phase.
   trust boundary is hardened.
 
 ## Completed Foundation
+
+### P0 - Multi-Agent Review Protocol
+
+Status: done
+Category: governance / quality
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p0-multi-agent-review-protocol-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p0-multi-agent-review-protocol.md`
+
+Depends on: P0 - Roadmap Refresh And Agent Queue Reset
+
+Current signal: this planning cycle benefited from independent safety/release,
+product/community, and roadmap/agent workflow reviews. The pattern now has an
+initial roadmap entry and template, but it is not yet fully specified and
+verified as a reusable gate for future high-risk P0 work.
+
+Outcome: multi-agent review protocol formalized as a documented,
+reusable gate for high-risk P0 work. Fixed reviewer roles (Safety/Release,
+Product/Community, Workflow/Harness) with read-only constraints and isolated
+context. Coordinator synthesis rules cover consensus, disagreements, accepted
+and rejected changes, and risk register updates. Templates at
+`docs/superpowers/agent/templates/multi-agent-review.md` and
+`roadmap-review.md` updated; AGENTS.md references protocol and template paths.
+
+Handoff: `docs/superpowers/agent/handoffs/2026-05-17-p0-multi-agent-review-protocol.md`
+
 
 ### P0 - Roadmap Refresh And Agent Queue Reset
 

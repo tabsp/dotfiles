@@ -86,6 +86,11 @@ separate reviewer roles for safety/release, product/community, and
 workflow/harness concerns. The coordinating agent must synthesize consensus,
 disagreements, accepted changes, rejected changes, and risk register updates.
 
+**Template:** `docs/superpowers/agent/templates/multi-agent-review.md`
+
+**Protocol:** see `docs/superpowers/specs/2026-05-17-p0-multi-agent-review-protocol-design.md`
+for full trigger criteria, role descriptions, and coordinator synthesis rules.
+
 ## Commit After Each Epic
 
 After `make agent-finish` completes successfully, commit all changes for that

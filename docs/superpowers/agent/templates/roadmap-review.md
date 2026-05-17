@@ -1,8 +1,16 @@
 # Roadmap Planning Review - YYYY-MM-DD
 
+> **Protocol reference:** Roadmap Planning Review follows the
+> [Multi-Agent Review Protocol](multi-agent-review.md). For roadmap refreshes
+> and safety-sensitive P0 work, spawn reviewer agents using the multi-agent
+> review template before writing this document.
+
 ## Trigger
 
-Why this review is happening.
+Why this review is happening. Common triggers:
+- `make agent-next` reports no eligible roadmap epic.
+- All `Next Queue` items are `done` or `deferred`.
+- User explicitly requests a roadmap planning review.
 
 ## Scope
 
