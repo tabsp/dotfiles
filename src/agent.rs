@@ -246,9 +246,9 @@ fn create_template(repo: &Path, kind: TemplateKind) -> Result<(), String> {
     let (template_name, output_path) = match kind {
         TemplateKind::Spec => {
             let path = if state.spec.is_empty() {
-                let slug = slugify_title(&state.current_epic);
+                let items = read_roadmap(repo)?;
                 let today = today_utc();
-                format!("docs/superpowers/specs/{}-{}-design.md", today, slug)
+                default_spec_path(repo, &items, &state.current_epic, &today)
             } else {
                 state.spec.clone()
             };
