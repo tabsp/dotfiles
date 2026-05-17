@@ -171,8 +171,14 @@ suite on relevant changes and documents any platform-specific gaps.
 
 ### P2 - Manifest Schema Evolution
 
-Status: proposed
+Status: done
 Category: maintainability
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p2-manifest-schema-evolution-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p2-manifest-schema-evolution.md`
 Current code signal: `deps.toml` and `dotfiles.toml` schemas are implicit in Rust
 deserialization and validation code.
 
