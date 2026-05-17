@@ -152,8 +152,14 @@ and regression coverage expectations before implementation starts.
 
 ### P2 - CI Automation
 
-Status: proposed
+Status: done
 Category: quality
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p2-ci-automation-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p2-ci-automation.md`
 Current code signal: local `make ci` exists; no repository CI configuration is
 present.
 

@@ -62,8 +62,7 @@ fn validate_entry_path(dest: &Path, entry_path: &Path) -> Result<PathBuf, String
 
     // Additional check: if dest can be canonicalized, verify the resolved path
     // (when canonicalized) stays within dest.
-    if let (Ok(canonical_dest), Ok(canonical_out)) =
-        (dest.canonicalize(), out.canonicalize())
+    if let (Ok(canonical_dest), Ok(canonical_out)) = (dest.canonicalize(), out.canonicalize())
         && !canonical_out.starts_with(&canonical_dest)
     {
         return Err(format!(
@@ -106,7 +105,10 @@ pub fn unpack(bytes: &[u8], kind: &ArchiveKind, dest: &Path) -> Result<Option<Pa
     }
 }
 
-fn unpack_tar_safe<R: std::io::Read>(archive: &mut tar::Archive<R>, dest: &Path) -> Result<(), String> {
+fn unpack_tar_safe<R: std::io::Read>(
+    archive: &mut tar::Archive<R>,
+    dest: &Path,
+) -> Result<(), String> {
     for entry in archive
         .entries()
         .map_err(|err| format!("failed to read tar entries: {err}"))?
@@ -160,7 +162,10 @@ fn unpack_tar_safe<R: std::io::Read>(archive: &mut tar::Archive<R>, dest: &Path)
     Ok(())
 }
 
-fn unpack_zip_safe(archive: &mut zip::ZipArchive<Cursor<&[u8]>>, dest: &Path) -> Result<(), String> {
+fn unpack_zip_safe(
+    archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
+    dest: &Path,
+) -> Result<(), String> {
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -248,7 +253,8 @@ mod tests {
         header.set_size(11);
         header.set_mode(0o755);
         header.set_cksum();
-        ar.append(&header, b"fake binary".as_slice()).expect("append");
+        ar.append(&header, b"fake binary".as_slice())
+            .expect("append");
         let tar_bytes = ar.into_inner().expect("finish");
 
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -258,8 +264,6 @@ mod tests {
         unpack(&gz_bytes, &ArchiveKind::TarGz, dest.path()).expect("unpack");
         assert!(dest.path().join("mytool/mytool").exists());
     }
-
-
 
     #[test]
     fn tar_rejects_symlink() {
@@ -309,7 +313,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn zip_extracts_normal_archive() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -321,9 +324,7 @@ mod tests {
                 .start_file("mytool/mytool", options)
                 .expect("start file");
             writer.write_all(b"fake binary").expect("write");
-            writer
-                .add_directory("mytool/", options)
-                .expect("add dir");
+            writer.add_directory("mytool/", options).expect("add dir");
             writer.finish().expect("finish");
         }
         let zip_bytes = buf.into_inner();
@@ -331,7 +332,6 @@ mod tests {
         unpack(&zip_bytes, &ArchiveKind::Zip, temp.path()).expect("unpack");
         assert!(temp.path().join("mytool/mytool").exists());
     }
-
 
     #[test]
     fn zip_rejects_path_traversal() {
@@ -390,10 +390,7 @@ mod tests {
         let dest = tempfile::tempdir().expect("dest");
         let err =
             validate_entry_path(dest.path(), Path::new("../escape")).expect_err("should fail");
-        assert!(
-            err.contains("AGENT_EXTRACT_PATH_TRAVERSAL"),
-            "got: {err}"
-        );
+        assert!(err.contains("AGENT_EXTRACT_PATH_TRAVERSAL"), "got: {err}");
     }
 
     #[test]
@@ -401,20 +398,20 @@ mod tests {
         let dest = tempfile::tempdir().expect("dest");
         let err = validate_entry_path(dest.path(), Path::new("foo/../../../escape"))
             .expect_err("should fail");
-        assert!(
-            err.contains("AGENT_EXTRACT_PATH_TRAVERSAL"),
-            "got: {err}"
-        );
+        assert!(err.contains("AGENT_EXTRACT_PATH_TRAVERSAL"), "got: {err}");
     }
 
     #[test]
     fn validate_entry_path_accepts_normal_path() {
         let dest = tempfile::tempdir().expect("dest");
-        let resolved = validate_entry_path(dest.path(), Path::new("some/dir/file"))
-            .expect("should succeed");
+        let resolved =
+            validate_entry_path(dest.path(), Path::new("some/dir/file")).expect("should succeed");
         // The resolved path should be dest/some/dir/file.
         // Canonicalize dest to handle macOS /tmp vs /private/tmp.
-        let cd = dest.path().canonicalize().unwrap_or_else(|_| dest.path().to_path_buf());
+        let cd = dest
+            .path()
+            .canonicalize()
+            .unwrap_or_else(|_| dest.path().to_path_buf());
         assert!(resolved.starts_with(&cd) || resolved.starts_with(dest.path()));
     }
 
@@ -425,7 +422,10 @@ mod tests {
             validate_entry_path(dest.path(), Path::new("foo/../bar")).expect("should succeed");
         // The entry path normalizes to bar (depth check passes).
         // The returned path is dest/foo/../bar (literal join).
-        let cd = dest.path().canonicalize().unwrap_or_else(|_| dest.path().to_path_buf());
+        let cd = dest
+            .path()
+            .canonicalize()
+            .unwrap_or_else(|_| dest.path().to_path_buf());
         assert!(resolved.starts_with(&cd) || resolved.starts_with(dest.path()));
         assert!(resolved.ends_with("bar"));
     }

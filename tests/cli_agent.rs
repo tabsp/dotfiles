@@ -652,7 +652,8 @@ fn advance_requires_required_artifacts_and_rejects_phase_skips() {
 
     // Create a plan file so artifact check passes, then verify phase skip is caught
     std::fs::write(
-        temp.path().join("docs/superpowers/plans/2026-05-14-roadmap-agent-harness.md"),
+        temp.path()
+            .join("docs/superpowers/plans/2026-05-14-roadmap-agent-harness.md"),
         "# Plan
 
 ## Verification Commands
@@ -1232,7 +1233,8 @@ Spec:
     .expect("roadmap");
     // Write a spec that is missing required sections
     std::fs::write(
-        temp.path().join("docs/superpowers/specs/2026-05-14-roadmap-agent-harness-design.md"),
+        temp.path()
+            .join("docs/superpowers/specs/2026-05-14-roadmap-agent-harness-design.md"),
         "# Bare Spec\n\nNo required sections.\n",
     )
     .expect("bare spec");
@@ -1288,7 +1290,8 @@ Plan:
     .expect("roadmap");
     // Write a plan that is missing required sections
     std::fs::write(
-        temp.path().join("docs/superpowers/plans/2026-05-14-roadmap-agent-harness.md"),
+        temp.path()
+            .join("docs/superpowers/plans/2026-05-14-roadmap-agent-harness.md"),
         "# Bare Plan\n\nNo required sections.\n",
     )
     .expect("bare plan");
@@ -1395,8 +1398,10 @@ verification = []
         .args(["agent", "template", "--kind", "spec"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("p0-new-epic-2-design.md")
-            .or(predicate::str::contains("p0-new-epic-design.md")));
+        .stdout(
+            predicate::str::contains("p0-new-epic-2-design.md")
+                .or(predicate::str::contains("p0-new-epic-design.md")),
+        );
 }
 
 #[test]
@@ -1454,7 +1459,10 @@ Category: safety
         &["agent", "start", "--epic", "P0 - Roadmap Agent Harness"],
     );
 
-    run_dotman(temp.path(), &["agent", "set-roadmap-status", "--status", "planned"]);
+    run_dotman(
+        temp.path(),
+        &["agent", "set-roadmap-status", "--status", "planned"],
+    );
 
     let roadmap = std::fs::read_to_string(temp.path().join("docs/roadmap.md")).expect("roadmap");
     // Only the harness epic should change; Atomic Directory Install stays specified

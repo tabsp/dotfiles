@@ -901,17 +901,12 @@ fn check_state_consistency(
 
     // Handoff check — current-handoff.md is required for active phases.
     // After finish the file is moved; the durable record is last_handoff.
-    if matches!(state.phase, Phase::InProgress | Phase::Verifying)
-        && !artifacts.handoff_exists
-    {
+    if matches!(state.phase, Phase::InProgress | Phase::Verifying) && !artifacts.handoff_exists {
         report
             .errors
             .push("AGENT_HANDOFF_MISSING: handoff file is missing".to_string());
     }
-    if state.phase == Phase::Done
-        && !artifacts.handoff_exists
-        && state.last_handoff.is_empty()
-    {
+    if state.phase == Phase::Done && !artifacts.handoff_exists && state.last_handoff.is_empty() {
         report
             .errors
             .push("AGENT_HANDOFF_MISSING: no handoff record after finish".to_string());
@@ -1007,9 +1002,9 @@ fn validate_plan_structure(markdown: &str) -> CheckReport {
             .push("AGENT_MISSING_PLAN_SECTION: missing ## Test Level".to_string());
     }
     if !has_heading("regression coverage expectations") {
-        report
-            .errors
-            .push("AGENT_MISSING_PLAN_SECTION: missing ## Regression Coverage Expectations".to_string());
+        report.errors.push(
+            "AGENT_MISSING_PLAN_SECTION: missing ## Regression Coverage Expectations".to_string(),
+        );
     }
 
     // Check for at least one task heading
@@ -1172,9 +1167,10 @@ fn check(repo: &Path) -> Result<(), String> {
 
     // Exception work kinds must have a non-empty exception_reason
     if is_exception_work_kind(&state.work_kind) && state.exception_reason.is_empty() {
-        report
-            .errors
-            .push("AGENT_P0_PREREQUISITE: exception work kind requires a non-empty exception reason".to_string());
+        report.errors.push(
+            "AGENT_P0_PREREQUISITE: exception work kind requires a non-empty exception reason"
+                .to_string(),
+        );
     }
 
     // Validate spec structure if spec exists
@@ -1475,7 +1471,6 @@ fn finished_handoff_path(repo: &Path, state: &AgentState) -> String {
     format!("{base}.md")
 }
 
-
 fn set_roadmap_status(repo: &Path, status: &str) -> Result<(), String> {
     let state = read_state(repo)?;
     let roadmap_path = repo.join("docs/roadmap.md");
@@ -1503,8 +1498,7 @@ fn set_roadmap_status(repo: &Path, status: &str) -> Result<(), String> {
     output.push_str(&status);
     output.push_str(&input[status_value_start + status_value_end..]);
 
-    fs::write(&roadmap_path, output)
-        .map_err(|err| format!("failed to write roadmap: {err}"))?;
+    fs::write(&roadmap_path, output).map_err(|err| format!("failed to write roadmap: {err}"))?;
     output::progress(format!(
         "roadmap status updated: {} -> {status}",
         state.current_epic

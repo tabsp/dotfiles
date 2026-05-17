@@ -344,9 +344,9 @@ fn install_archive_dir(
         return Err(format!("binary_path not found after unpack: {binary_path}"));
     }
 
-    let parent_dir = install_dir_to.parent().ok_or_else(|| {
-        "install_dir_to has no parent directory".to_string()
-    })?;
+    let parent_dir = install_dir_to
+        .parent()
+        .ok_or_else(|| "install_dir_to has no parent directory".to_string())?;
     fs::create_dir_all(parent_dir).map_err(|err| {
         format!(
             "failed to create install directory {}: {err}",
@@ -365,7 +365,9 @@ fn install_archive_dir(
     // Copy into staging. If this fails, the old install is still intact.
     if let Err(err) = copy_dir_recursive(&source_dir, &staging) {
         let _ = fs::remove_dir_all(&staging);
-        return Err(format!("AGENT_ARCHIVE_DIR_STAGE_FAILED: failed to stage directory install: {err}"));
+        return Err(format!(
+            "AGENT_ARCHIVE_DIR_STAGE_FAILED: failed to stage directory install: {err}"
+        ));
     }
 
     let old_path = if install_dir_to.exists() {
@@ -459,7 +461,6 @@ fn install_archive_dir(
 
     Ok(())
 }
-
 
 fn copy_dir_recursive(source: &Path, dest: &Path) -> Result<(), String> {
     fs::create_dir_all(dest)
@@ -1157,17 +1158,22 @@ mod tests {
         );
     }
 
-
     // --- Atomic directory install tests ---
 
-    fn setup_fake_archive_dir(temp: &Path, dir_name: &str, binary_name: &str) -> Result<(), String> {
+    fn setup_fake_archive_dir(
+        temp: &Path,
+        dir_name: &str,
+        binary_name: &str,
+    ) -> Result<(), String> {
         let source = temp.join(dir_name);
         fs::create_dir_all(&source).map_err(|e| format!("create source dir: {e}"))?;
         let bin = source.join(binary_name);
         fs::write(&bin, b"fake binary").map_err(|e| format!("write binary: {e}"))?;
         #[cfg(unix)]
         {
-            let mut perms = fs::metadata(&bin).map_err(|e| format!("metadata: {e}"))?.permissions();
+            let mut perms = fs::metadata(&bin)
+                .map_err(|e| format!("metadata: {e}"))?
+                .permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&bin, perms).map_err(|e| format!("chmod: {e}"))?;
         }
@@ -1193,10 +1199,14 @@ mod tests {
 
         assert!(install_dir_to.exists());
         assert!(install_dir_to.join("mytool").exists());
-        assert!(!install_dir_to.with_file_name(format!(
-            "{}.old",
-            install_dir_to.file_name().unwrap().to_str().unwrap()
-        )).exists());
+        assert!(
+            !install_dir_to
+                .with_file_name(format!(
+                    "{}.old",
+                    install_dir_to.file_name().unwrap().to_str().unwrap()
+                ))
+                .exists()
+        );
         #[cfg(unix)]
         {
             let link_target = fs::read_link(&install_to).expect("read_link");
@@ -1231,10 +1241,14 @@ mod tests {
 
         assert!(install_dir_to.exists());
         // Old backup should be cleaned up.
-        assert!(!install_dir_to.with_file_name(format!(
-            "{}.old",
-            install_dir_to.file_name().unwrap().to_str().unwrap()
-        )).exists());
+        assert!(
+            !install_dir_to
+                .with_file_name(format!(
+                    "{}.old",
+                    install_dir_to.file_name().unwrap().to_str().unwrap()
+                ))
+                .exists()
+        );
         // Symlink should point to new path.
         #[cfg(unix)]
         {
@@ -1267,7 +1281,10 @@ mod tests {
         // Old install should still be intact.
         assert!(install_dir_to.exists());
         assert!(old_binary_path.exists());
-        assert_eq!(fs::read_to_string(&old_binary_path).expect("read"), "old binary");
+        assert_eq!(
+            fs::read_to_string(&old_binary_path).expect("read"),
+            "old binary"
+        );
     }
 
     #[test]
@@ -1307,7 +1324,11 @@ mod tests {
         let install_root = tempfile::tempdir().expect("install root");
 
         // install_to has a deep parent path that doesn't exist.
-        let install_dir_to = install_root.path().join("deep").join("nested").join("mytool");
+        let install_dir_to = install_root
+            .path()
+            .join("deep")
+            .join("nested")
+            .join("mytool");
         let install_to = install_root.path().join("bin").join("deep").join("mytool");
 
         setup_fake_archive_dir(temp.path(), "mytool-v1.0", "mytool").expect("setup");
@@ -1327,5 +1348,4 @@ mod tests {
             assert_eq!(link_target, install_dir_to.join("mytool"));
         }
     }
-
 }
