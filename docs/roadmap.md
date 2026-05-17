@@ -292,6 +292,30 @@ empty machine to a configured environment.
 Outcome: publish versioned `dotman` release artifacts and define supported
 installation channels.
 
+### P3 - Release Artifact Matrix
+
+Status: done
+Category: distribution
+Current code signal: `make release` creates only the current host artifact, but
+the install script supports macOS Apple Silicon, macOS Intel, and Linux x86_64.
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p3-release-artifact-matrix-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p3-release-artifact-matrix.md`
+
+Depends on: P3 - Release Distribution
+
+The first manual release cut produced a local Apple Silicon macOS artifact, but
+the documented installer can also select Intel macOS and Linux x86_64 tarballs.
+Release builds should use native GitHub-hosted runners for each supported
+release target instead of relying on fragile local cross-compilation.
+
+Outcome: a manual GitHub Actions workflow builds and verifies all supported
+release artifacts for an input tag, uploads them as workflow artifacts, and can
+publish them to the matching GitHub Release.
+
 ### P3 - Recovery And Cleanup
 
 Status: done

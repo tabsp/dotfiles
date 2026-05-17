@@ -1,0 +1,66 @@
+name: Release Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build, for example v0.1.0
+        required: true
+        type: string
+      publish_release:
+        description: Upload artifacts to the GitHub Release for this tag
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - run: make release-check
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dotman-${{ matrix.target }}
+          path: |
+            dist/dotman-${{ matrix.target }}-*.tar.gz
+            dist/dotman-${{ matrix.target }}-*.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    if: ${{ inputs.publish_release }}
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256

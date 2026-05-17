@@ -39,6 +39,14 @@ Requires Rust and Cargo. See [Rust installation](https://rustup.rs/).
 - `make lint`: run formatting and static analysis checks.
 - `make test`: run Rust tests.
 - `make ci`: run local verification (`lint` -> `check` -> `test`).
+- `make release-check`: build the current host release artifact and verify its checksum.
+
+### Release artifacts
+
+`make release-check` builds and verifies the current host artifact locally.
+For a tagged release, run the **Release Artifacts** GitHub Actions workflow with
+the release tag to build the supported macOS and Linux tarballs on native
+runners and optionally attach them to the GitHub Release.
 
 ## Development Dependencies
 
