@@ -82,6 +82,9 @@ test: cargo-preflight
 
 ci: lint check test
 
+update-deps-list: build-dotmannt$(DOTMAN) updaten
+update-deps-check: build-dotmannt$(DOTMAN) update --check
+
 agent-init: build-dotman
 	$(DOTMAN) agent init
 

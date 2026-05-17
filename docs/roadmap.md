@@ -209,8 +209,14 @@ platform or architecture.
 
 ### P2 - Dependency Update Workflow
 
-Status: proposed
+Status: done
 Category: maintainability
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p2-dependency-update-workflow-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p2-dependency-update-workflow.md`
 Current code signal: pinned Linux binary metadata is stored directly in
 `deps.toml`.
 

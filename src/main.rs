@@ -5,6 +5,7 @@ mod check;
 mod config;
 mod deps;
 mod doctor;
+mod update;
 mod http;
 mod installers;
 mod link;
@@ -47,6 +48,10 @@ enum Command {
     },
     Shell,
     Check,
+    Update {
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -72,7 +77,16 @@ fn run() -> Result<(), String> {
         Command::Doctor { json } => run_doctor(json),
         Command::Shell => shell::run_shell(),
         Command::Check => run_check(),
+        Command::Update { check } => run_update(check),
         Command::Agent { command } => agent::run_agent(command),
+    }
+}
+
+fn run_update(check: bool) -> Result<(), String> {
+    if check {
+        update::check_deps()
+    } else {
+        update::list_deps()
     }
 }
 
