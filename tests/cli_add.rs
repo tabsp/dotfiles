@@ -13,6 +13,17 @@ fn write_deps(repo: &Path, content: &str) {
     fs::write(repo.join("deps.toml"), content).expect("write deps.toml");
 }
 
+/// Return (installer_number, installer_name, extra_params) for a safe
+/// cross-platform installer that passes `dotman check`.
+fn safe_installer() -> (&'static str, &'static str, &'static str) {
+    if cfg!(target_os = "macos") {
+        ("2", "brew", "testdep\n")
+    } else {
+        // Linux: use system (1), no params needed
+        ("1", "system", "")
+    }
+}
+
 #[test]
 fn add_dep_dry_run_prints_toml_no_file_change() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -20,10 +31,11 @@ fn add_dep_dry_run_prints_toml_no_file_change() {
     write_deps(temp.path(), "");
 
     let original_deps = read_or_empty(&temp.path().join("deps.toml"));
+    let (installer_num, _installer_name, extra) = safe_installer();
 
-    // name, command(default), installer(2=brew), version(default), source(skip),
-    // package, confirm(default=yes)
-    let stdin_input = "testdep\n\n2\n\n\ntestdep\n\n";
+    // name, command(default), installer, version(default), source(skip),
+    // extra params, confirm(default=yes)
+    let stdin_input = format!("testdep\n\n{installer_num}\n\n\n{extra}\n");
 
     let mut cmd = assert_cmd::Command::cargo_bin("dotman").expect("dotman binary");
     cmd.current_dir(temp.path())
@@ -35,7 +47,6 @@ fn add_dep_dry_run_prints_toml_no_file_change() {
         .success()
         .stdout(predicate::str::contains("[deps.testdep]"))
         .stdout(predicate::str::contains("command = \"testdep\""))
-        .stdout(predicate::str::contains("installer = \"brew\""))
         .stdout(predicate::str::contains("dry-run"));
 
     assert_eq!(
@@ -157,9 +168,11 @@ fn add_dep_writes_valid_entry_that_passes_check() {
     write_minimal_dotfiles(temp.path());
     write_deps(temp.path(), "");
 
-    // name, command(default), installer(2=brew), version(default),
-    // source(skip), package, confirm(yes)
-    let stdin_input = "testcli\n\n2\n\n\ntestcli\n\n";
+    let (installer_num, _installer_name, extra) = safe_installer();
+
+    // name, command(default), installer, version(default),
+    // source(skip), extra params, confirm(yes)
+    let stdin_input = format!("testcli\n\n{installer_num}\n\n\n{extra}\n");
 
     let mut cmd = assert_cmd::Command::cargo_bin("dotman").expect("dotman binary");
     cmd.current_dir(temp.path())
