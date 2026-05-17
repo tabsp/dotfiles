@@ -1,4 +1,4 @@
-.PHONY: help bootstrap link doctor shell check lint test ci build build-dotman cargo-preflight agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template agent-advance agent-record-verification agent-finish agent-set-roadmap-status
+.PHONY: help bootstrap link doctor shell check lint test ci build build-dotman cargo-preflight agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template agent-advance agent-record-verification agent-finish agent-set-roadmap-status release release-check
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -81,6 +81,24 @@ test: cargo-preflight
 	cargo test
 
 ci: lint check test
+
+release: cargo-preflight
+	@mkdir -p dist
+	@VERSION=$$(awk -F'"' '/^version/{print $$2; exit}' Cargo.toml); \
+	TARGET=$$(rustc -vV | grep host | cut -d ' ' -f2); \
+	echo "==> building dotman $${VERSION} for $${TARGET}"; \
+	cargo build --release; \
+	cp target/release/dotman dist/dotman; \
+	tar -czf "dist/dotman-$${TARGET}-$${VERSION}.tar.gz" -C dist dotman; \
+	rm dist/dotman; \
+	cd dist && shasum -a 256 "dotman-$${TARGET}-$${VERSION}.tar.gz" > "dotman-$${TARGET}-$${VERSION}.tar.gz.sha256"; \
+	echo "==> release: dist/dotman-$${TARGET}-$${VERSION}.tar.gz"
+
+release-check: release
+	@VERSION=$$(awk -F'"' '/^version/{print $$2; exit}' Cargo.toml); \
+	TARGET=$$(rustc -vV | grep host | cut -d ' ' -f2); \
+	cd dist && shasum -a 256 -c "dotman-$${TARGET}-$${VERSION}.tar.gz.sha256"
+
 
 update-deps-list: build-dotmannt$(DOTMAN) updaten
 update-deps-check: build-dotmannt$(DOTMAN) update --check

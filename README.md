@@ -3,6 +3,24 @@
 Personal dotfiles managed by `dotman`, a safety-first bootstrap manager for
 macOS and Linux.
 
+
+## Install
+
+### Quick install (recommended)
+
+Download and install the latest `dotman` binary without cloning the repo:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/USER/dotfiles/main/scripts/install.sh | sh
+```
+
+Prerequisites: `curl`, `tar`, and either `shasum` (macOS) or `sha256sum` (Linux).
+No Rust toolchain required.
+
+### Build from source
+
+Requires Rust and Cargo. See [Rust installation](https://rustup.rs/).
+
 ## Commands
 
 - `make help`: print the available public commands.

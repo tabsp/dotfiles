@@ -267,7 +267,12 @@ backward compatibility policy are documented and verified.
 
 ### P3 - Release Distribution
 
-Status: proposed
+Spec:
+`docs/superpowers/specs/2026-05-17-p3-release-distribution-design.md`
+Plan:
+`docs/superpowers/plans/2026-05-17-p3-release-distribution.md`
+
+Status: done
 Category: distribution
 Current code signal: `dotman` is built locally through Cargo and wrapped by
 Makefile workflows.
