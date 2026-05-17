@@ -227,7 +227,13 @@ update pinned release metadata.
 
 ### P2 - Cross-Platform Support Strategy
 
-Status: proposed
+Spec:
+`docs/superpowers/specs/2026-05-17-p2-cross-platform-support-strategy-design.md`
+Plan:
+`docs/superpowers/plans/2026-05-17-p2-cross-platform-support-strategy.md`
+
+
+Status: done
 Category: portability
 Current code signal: runtime host support is limited to macOS and Linux, with
 some Unix-specific filesystem operations.
