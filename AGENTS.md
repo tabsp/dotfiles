@@ -45,6 +45,47 @@ The harness enforces:
 
 Runtime state lives in `docs/superpowers/agent/state.toml`. Handoff notes are tracked under `docs/superpowers/agent/handoffs/`.
 
+## Roadmap Planning Review
+
+If `make agent-next` reports no eligible roadmap epic, or if every selectable
+queue item is `done` or `deferred`, do not force-start a completed epic.
+
+Perform a read-only Roadmap Planning Review instead. Read the current roadmap,
+README, relevant specs and plans, handoffs, release/install/recovery docs, CI,
+and source code signals needed to verify roadmap state.
+
+A Roadmap Planning Review may propose:
+
+- next roadmap queue items
+- completed item archival
+- risk register entries
+- deferred or non-goal items
+- roadmap structure changes
+- planning lessons for future reviews
+
+It must not:
+
+- implement code
+- modify files unless the user explicitly requests a roadmap update
+- run `agent-start`, `agent-advance`, or `agent-finish`
+- convert roadmap items directly into implementation work
+
+After the review, ask for confirmation before editing roadmap files or starting
+normal roadmap execution.
+
+## Multi-Agent Review
+
+For roadmap refreshes and safety-sensitive epics, use multi-agent review before
+writing the implementation spec or plan. Safety-sensitive epics include release
+installation, bootstrap, dependency installation, archive extraction, symlinks,
+remote scripts, cleanup, uninstall, recovery, and agent workflow changes.
+
+Multi-agent review is a bounded planning review, not implementation. Reviewer
+agents must be read-only unless the user explicitly authorizes file edits. Use
+separate reviewer roles for safety/release, product/community, and
+workflow/harness concerns. The coordinating agent must synthesize consensus,
+disagreements, accepted changes, rejected changes, and risk register updates.
+
 ## Commit After Each Epic
 
 After `make agent-finish` completes successfully, commit all changes for that
