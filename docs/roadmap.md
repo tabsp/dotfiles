@@ -133,8 +133,14 @@ automation.
 
 ### P1 - Quality Gates And Coverage Policy
 
-Status: proposed
+Status: done
 Category: quality
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p1-quality-gates-coverage-policy-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p1-quality-gates-coverage-policy.md`
 Current code signal: Rust unit and CLI integration tests exist and pass locally.
 
 The project has useful tests around manifest validation, link behavior, doctor,

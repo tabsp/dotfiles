@@ -963,6 +963,7 @@ fn validate_spec_structure(markdown: &str) -> CheckReport {
         "## Design",
         "## Error Handling",
         "## Verification Strategy",
+        "## Regression Coverage Expectations",
     ];
     let lower = markdown.to_lowercase();
     for heading in &required {
@@ -999,6 +1000,16 @@ fn validate_plan_structure(markdown: &str) -> CheckReport {
         report
             .errors
             .push("AGENT_MISSING_PLAN_SECTION: missing ## Expected Outcomes".to_string());
+    }
+    if !has_heading("test level") {
+        report
+            .errors
+            .push("AGENT_MISSING_PLAN_SECTION: missing ## Test Level".to_string());
+    }
+    if !has_heading("regression coverage expectations") {
+        report
+            .errors
+            .push("AGENT_MISSING_PLAN_SECTION: missing ## Regression Coverage Expectations".to_string());
     }
 
     // Check for at least one task heading

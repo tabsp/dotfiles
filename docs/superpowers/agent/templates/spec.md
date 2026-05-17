@@ -24,3 +24,8 @@ Describe the workflow, data model, and constraints.
 
 - `cargo test <test_name>`
 - `cargo test`
+
+## Regression Coverage Expectations
+
+- Describe behaviors that must NOT regress (e.g., "path traversal rejection",
+  "checksum mismatch detection").

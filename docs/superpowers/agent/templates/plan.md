@@ -37,6 +37,16 @@ fn names_expected_behavior() {
 - `cargo test`
 - `make check`
 
+## Test Level
+
+- Unit tests: `cargo test <module>`
+- Integration tests: `cargo test --test <name>`
+- Manual smoke test: `cargo run -- <command>`
+
+## Regression Coverage Expectations
+
+- Behaviors that must remain passing.
+
 ## Expected Outcomes
 
 - Describe the observable state after the plan is implemented.
