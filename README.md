@@ -17,6 +17,14 @@ curl -fsSL https://raw.githubusercontent.com/tabsp/dotfiles/main/scripts/install
 Prerequisites: `curl`, `tar`, and either `shasum` (macOS) or `sha256sum` (Linux).
 No Rust toolchain required.
 
+The installer also downloads the matching dotfiles source into
+`~/.local/share/dotman/dotfiles`. Run `dotman bootstrap` from that directory:
+
+```sh
+cd ~/.local/share/dotman/dotfiles
+dotman bootstrap
+```
+
 ### Build from source
 
 Requires Rust and Cargo. See [Rust installation](https://rustup.rs/).

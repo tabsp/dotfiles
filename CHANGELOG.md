@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Install script now downloads the matching dotfiles source and points bootstrap
+  at that directory.
+
 ## [0.1.0] - 2026-05-17
 
 ### Added
