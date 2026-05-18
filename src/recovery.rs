@@ -5,8 +5,8 @@ use crate::config;
 use crate::path::expand_home;
 
 pub fn run_cleanup(execute: bool) -> Result<(), String> {
-    let repo = std::env::current_dir()
-        .map_err(|err| format!("failed to read current dir: {err}"))?;
+    let repo =
+        std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
     let bin_dir = expand_home("~/.local/bin")?;
 
     let mut stale: Vec<StaleItem> = Vec::new();
@@ -61,9 +61,7 @@ pub fn run_cleanup(execute: bool) -> Result<(), String> {
                         continue;
                     };
                     if name.starts_with(&prefix)
-                        && name[prefix.len()..]
-                            .chars()
-                            .all(|c| c.is_ascii_digit())
+                        && name[prefix.len()..].chars().all(|c| c.is_ascii_digit())
                     {
                         stale.push(StaleItem {
                             path,

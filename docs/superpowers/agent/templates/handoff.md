@@ -31,3 +31,17 @@
 ## Next Step
 
 Record the next concrete action.
+
+## Machine State Verification
+
+- Dry-run tested: not recorded
+- Failure paths covered: not recorded
+- Recovery notes documented: not recorded
+- Manual smoke checks passed: not recorded
+
+## Machine State Verification
+
+- Dry-run tested: not recorded
+- Failure paths covered: not recorded
+- Recovery notes documented: not recorded
+- Manual smoke checks passed: not recorded

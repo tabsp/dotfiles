@@ -139,8 +139,14 @@ templates can follow after the safety baseline is clear.
 
 ### P1 - Handoff And Plan Quality Gates
 
-Status: proposed
+Status: done
 Category: automation / quality
+
+Spec:
+`docs/superpowers/specs/2026-05-18-p1-handoff-and-plan-quality-gates-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-18-p1-handoff-and-plan-quality-gates.md`
 
 Depends on: P0 - Roadmap Refresh And Agent Queue Reset
 

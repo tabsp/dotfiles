@@ -1083,6 +1083,24 @@ fn validate_plan_structure(markdown: &str) -> CheckReport {
         }
     }
 
+    // Machine State Safety: required when plan has tasks (implementation plan)
+    let has_tasks = markdown.lines().any(|l| {
+        let t = l.trim();
+        t.starts_with("## Task") || t.starts_with("### Task")
+    });
+    let has_checkboxes = markdown
+        .lines()
+        .any(|l| l.trim().starts_with("- [ ]") || l.trim().starts_with("- [x]"));
+    if has_tasks && has_checkboxes {
+        let has_machine_safety = markdown.to_lowercase().contains("## machine state safety");
+        if !has_machine_safety {
+            report.errors.push(
+                "AGENT_MISSING_PLAN_SECTION: missing ## Machine State Safety (required for implementation plans)"
+                    .to_string(),
+            );
+        }
+    }
+
     report
 }
 
@@ -1098,6 +1116,65 @@ fn validate_handoff_structure(markdown: &str) -> CheckReport {
             break;
         }
     }
+    report
+}
+
+fn validate_review_structure(markdown: &str) -> CheckReport {
+    let mut report = CheckReport::default();
+    let gate_names = ["## Gate 1", "## Gate 2", "## Gate 3"];
+    let role_names = [
+        "Safety / Release",
+        "Product / Community",
+        "Workflow / Harness",
+    ];
+
+    for gate_name in &gate_names {
+        let gate_start = match markdown.find(gate_name) {
+            Some(pos) => pos,
+            None => {
+                report.errors.push(format!(
+                    "AGENT_REVIEW_INCOMPLETE: missing review gate {gate_name}"
+                ));
+                continue;
+            }
+        };
+
+        let gate_end = gate_names
+            .iter()
+            .filter_map(|g| {
+                let offset = markdown[gate_start + gate_name.len()..].find(g);
+                offset.map(|o| gate_start + gate_name.len() + o)
+            })
+            .min()
+            .unwrap_or(markdown.len());
+
+        let gate_section = &markdown[gate_start..gate_end];
+
+        for role_name in &role_names {
+            let has_completed = gate_section.lines().any(|line| {
+                let trimmed = line.trim();
+                if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+                    return false;
+                }
+                if !trimmed.contains(role_name) {
+                    return false;
+                }
+                let cols: Vec<&str> = trimmed.split('|').collect();
+                if let Some(status_col) = cols.iter().rev().find(|c| !c.trim().is_empty()) {
+                    !status_col.trim().eq_ignore_ascii_case("pending")
+                } else {
+                    false
+                }
+            });
+
+            if !has_completed {
+                report.errors.push(format!(
+                    "AGENT_REVIEW_INCOMPLETE: gate {gate_name} role {role_name} has pending status"
+                ));
+            }
+        }
+    }
+
     report
 }
 
@@ -1201,6 +1278,16 @@ fn review_check(repo: &Path) -> Result<(), String> {
     if review_content.trim().is_empty() {
         return Err("AGENT_REVIEW_MISSING: review document is empty".to_string());
     }
+    let review_report = validate_review_structure(&review_content);
+    if !review_report.errors.is_empty() {
+        for err in &review_report.errors {
+            output::warn(err);
+        }
+        return Err(
+            "AGENT_REVIEW_INCOMPLETE: review document has pending gates or incomplete roles"
+                .to_string(),
+        );
+    }
     output::progress(format!("review document: {}", state.review));
     Ok(())
 }
@@ -1210,6 +1297,14 @@ fn check(repo: &Path) -> Result<(), String> {
     let items = read_roadmap(repo)?;
     let artifacts = artifact_status_from_repo(repo, &state);
     let mut report = check_state_consistency(&state, &items, &artifacts);
+
+    // Validate review structure if it exists (not just existence check)
+    if artifacts.review_exists
+        && let Ok(review_content) = fs::read_to_string(repo.join(&state.review))
+    {
+        let review_report = validate_review_structure(&review_content);
+        report.errors.extend(review_report.errors);
+    }
 
     // Exception work kinds must have a non-empty exception_reason
     if is_exception_work_kind(&state.work_kind) && state.exception_reason.is_empty() {
@@ -1336,13 +1431,12 @@ fn advance(repo: &Path, target: Phase) -> Result<(), String> {
     if state.work_kind == WorkKind::Roadmap
         && matches!(target, Phase::InProgress | Phase::Verifying)
         && state.current_epic != "P0 - Roadmap Agent Harness"
+        && (state.review.is_empty() || !repo.join(&state.review).exists())
     {
-        if state.review.is_empty() || !repo.join(&state.review).exists() {
-            return Err(
-                "AGENT_REVIEW_MISSING: multi-agent review document required before implementation"
-                    .to_string(),
-            );
-        }
+        return Err(
+            "AGENT_REVIEW_MISSING: multi-agent review document required before implementation"
+                .to_string(),
+        );
     }
 
     state.phase = target;
@@ -1359,14 +1453,21 @@ fn parse_roadmap(input: &str) -> Result<Vec<RoadmapItem>, String> {
     let mut lines_iter = input.lines().peekable();
     while let Some(line) = lines_iter.next() {
         let trimmed = line.trim();
-        if trimmed == "## Active Queue" || trimmed == "## Next Queue" || trimmed == "## Completed Foundation" {
+        if trimmed == "## Active Queue"
+            || trimmed == "## Next Queue"
+            || trimmed == "## Completed Foundation"
+        {
             in_queue = true;
             continue;
         }
         if !in_queue {
             continue;
         }
-        if trimmed.starts_with("## ") && trimmed != "## Active Queue" && trimmed != "## Next Queue" && trimmed != "## Completed Foundation" {
+        if trimmed.starts_with("## ")
+            && trimmed != "## Active Queue"
+            && trimmed != "## Next Queue"
+            && trimmed != "## Completed Foundation"
+        {
             // Flush current item and resume scanning for next queue section
             if let Some(item) = current.take() {
                 items.push(item);
@@ -1784,8 +1885,8 @@ mod tests {
                     spec_exists: true,
                     plan_exists: true,
                     handoff_exists: true,
-            review_exists: false,
-        },
+                    review_exists: false,
+                },
             );
             assert!(
                 report.errors.iter().any(|e| e.contains("AGENT_")),
@@ -1802,8 +1903,8 @@ mod tests {
                 spec_exists: true,
                 plan_exists: true,
                 handoff_exists: true,
-            review_exists: false,
-        },
+                review_exists: false,
+            },
         );
         assert!(
             warn_report
@@ -1819,8 +1920,8 @@ mod tests {
                 spec_exists: true,
                 plan_exists: true,
                 handoff_exists: true,
-            review_exists: false,
-        },
+                review_exists: false,
+            },
         );
         assert!(pass_report.errors.is_empty());
     }
@@ -2026,5 +2127,178 @@ Category: maintainability
         assert_eq!(items[0].status, RoadmapStatus::Proposed);
         assert_eq!(items[1].title, "P2 - Manifest Schema Migration Tool");
         assert_eq!(items[1].priority, Priority::P2);
+    }
+
+    #[test]
+    fn review_structure_accepts_all_gates_completed() {
+        let review = r#"# Multi-Agent Review
+
+## Gate 1: Design Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | Dirac | completed |
+
+## Gate 2: Approach Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | Dirac | completed |
+
+## Gate 3: Code Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | Dirac | completed |
+"#;
+
+        let report = validate_review_structure(review);
+        assert!(
+            report.errors.is_empty(),
+            "expected no errors, got: {:?}",
+            report.errors
+        );
+    }
+
+    #[test]
+    fn review_structure_rejects_pending_gate() {
+        let review = r#"# Multi-Agent Review
+
+## Gate 1: Design Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | Dirac | completed |
+
+## Gate 2: Approach Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | Dirac | completed |
+
+## Gate 3: Code Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | | pending |
+| Product / Community | | pending |
+| Workflow / Harness | | pending |
+"#;
+
+        let report = validate_review_structure(review);
+        assert!(
+            !report.errors.is_empty(),
+            "expected errors for pending Gate 3"
+        );
+        assert!(
+            report.errors.iter().any(|e| e.contains("Gate 3")),
+            "expected Gate 3 in errors: {:?}",
+            report.errors
+        );
+    }
+
+    #[test]
+    fn review_structure_rejects_missing_gate() {
+        let review = r#"# Multi-Agent Review
+
+## Gate 1: Design Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | Dirac | completed |
+
+## Gate 2: Approach Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | Dirac | completed |
+"#;
+
+        let report = validate_review_structure(review);
+        assert!(
+            report.errors.iter().any(|e| e.contains("Gate 3")),
+            "expected missing Gate 3 error: {:?}",
+            report.errors
+        );
+    }
+
+    #[test]
+    fn review_structure_rejects_partial_gate() {
+        let review = r#"# Multi-Agent Review
+
+## Gate 1: Design Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | | pending |
+
+## Gate 2: Approach Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | | skipped |
+
+## Gate 3: Code Review
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | Ohm | completed |
+| Product / Community | Euler | completed |
+| Workflow / Harness | Dirac | completed |
+"#;
+
+        let report = validate_review_structure(review);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("Workflow / Harness") && e.contains("Gate 1")),
+            "expected Gate 1 Workflow/Harness pending error: {:?}",
+            report.errors
+        );
+        assert!(
+            !report.errors.iter().any(|e| e.contains("Gate 2")),
+            "Gate 2 should pass (skipped is non-pending)"
+        );
     }
 }

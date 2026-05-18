@@ -52,8 +52,8 @@ pub(crate) struct SourceCheckoutEntry {
 }
 
 pub fn run_status(json: bool) -> Result<(), String> {
-    let repo = std::env::current_dir()
-        .map_err(|err| format!("failed to read current dir: {err}"))?;
+    let repo =
+        std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
 
     if !repo.join("deps.toml").exists() || !repo.join("dotfiles.toml").exists() {
         return Err(
@@ -105,9 +105,7 @@ pub fn run_status(json: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn collect_tools(
-    deps: &BTreeMap<String, crate::config::Dependency>,
-) -> Vec<ToolEntry> {
+fn collect_tools(deps: &BTreeMap<String, crate::config::Dependency>) -> Vec<ToolEntry> {
     let mut tools: Vec<ToolEntry> = Vec::new();
 
     for (name, dep) in deps {
@@ -140,9 +138,10 @@ fn param_str(entry: &InstallEntry, key: &str) -> Option<String> {
 fn tool_from_entry(name: &str, entry: &InstallEntry) -> Option<ToolEntry> {
     match entry.installer {
         Installer::DownloadBinary | Installer::OfficialScript => {
-            if let (Some(install_to), Some(install_dir_to)) =
-                (param_str(entry, "install_to"), param_str(entry, "install_dir_to"))
-            {
+            if let (Some(install_to), Some(install_dir_to)) = (
+                param_str(entry, "install_to"),
+                param_str(entry, "install_dir_to"),
+            ) {
                 let install_to_path = expand_home(&install_to).ok()?;
                 let install_dir = expand_home(&install_dir_to).ok()?;
 
@@ -190,9 +189,7 @@ fn tool_from_entry(name: &str, entry: &InstallEntry) -> Option<ToolEntry> {
                 return None;
             }
 
-            if entry.installer == Installer::OfficialScript
-                && crate::path::which(name).is_some()
-            {
+            if entry.installer == Installer::OfficialScript && crate::path::which(name).is_some() {
                 return Some(ToolEntry {
                     name: name.to_string(),
                     path: format!("(on PATH: {name})"),
@@ -207,10 +204,7 @@ fn tool_from_entry(name: &str, entry: &InstallEntry) -> Option<ToolEntry> {
     }
 }
 
-fn collect_dotfiles(
-    files: &crate::config::DotfilesManifest,
-    repo: &Path,
-) -> Vec<DotfileEntry> {
+fn collect_dotfiles(files: &crate::config::DotfilesManifest, repo: &Path) -> Vec<DotfileEntry> {
     let mut dotfiles: Vec<DotfileEntry> = Vec::new();
 
     for file in &files.files {
@@ -245,7 +239,8 @@ fn collect_dotfiles(
     dotfiles
 }
 
-pub(crate) fn collect_backups_and_staging() -> Result<(Vec<BackupEntry>, Vec<StagingEntry>), String> {
+pub(crate) fn collect_backups_and_staging() -> Result<(Vec<BackupEntry>, Vec<StagingEntry>), String>
+{
     let bin_dir = expand_home("~/.local/bin")?;
     let mut backups: Vec<BackupEntry> = Vec::new();
     let mut staging: Vec<StagingEntry> = Vec::new();

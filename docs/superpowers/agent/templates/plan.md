@@ -50,3 +50,35 @@ fn names_expected_behavior() {
 ## Expected Outcomes
 
 - Describe the observable state after the plan is implemented.
+
+## Machine State Safety
+
+> **Required for implementation plans.** Skip this section for documentation-only
+> or governance epics with no code or machine state changes.
+
+- **Dry-run / preview path:** Describe how to preview changes without applying
+  (e.g., `--dry-run`, `DRY_RUN=1`, `dotman status`).
+- **Failure-path tests:** List specific tests that cover failure scenarios
+  (e.g., permission errors, missing files, partial state).
+- **Recovery notes:** Describe rollback or recovery steps if something goes
+  wrong (e.g., restore from `.dotman-backup`, re-run bootstrap).
+- **Manual smoke checks:** List manual verification steps beyond automated
+  tests (e.g., `dotman cleanup` on a clean system, `make smoke-test`).
+- **Non-destructive scope:** Confirm no destructive operations run without
+  explicit confirmation or `--execute` flag.
+
+## Machine State Safety
+
+> **Required for implementation plans.** Skip this section for documentation-only
+> or governance epics with no code or machine state changes.
+
+- **Dry-run / preview path:** Describe how to preview changes without applying
+  (e.g., `--dry-run`, `DRY_RUN=1`, `dotman status`).
+- **Failure-path tests:** List specific tests that cover failure scenarios
+  (e.g., permission errors, missing files, partial state).
+- **Recovery notes:** Describe rollback or recovery steps if something goes
+  wrong (e.g., restore from `.dotman-backup`, re-run bootstrap).
+- **Manual smoke checks:** List manual verification steps beyond automated
+  tests (e.g., `dotman cleanup` on a clean system, `make smoke-test`).
+- **Non-destructive scope:** Confirm no destructive operations run without
+  explicit confirmation or `--execute` flag.

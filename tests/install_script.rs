@@ -84,11 +84,8 @@ fn install_script_installs_dotfiles_source_and_prints_bootstrap_directory() {
         .assert()
         .success();
     let (_sdigest, schecksum) = checksum_file(&source_archive, "dotfiles-0.1.0.tar.gz");
-    std::fs::write(
-        releases.join("dotfiles-0.1.0.tar.gz.sha256"),
-        schecksum,
-    )
-    .expect("source checksum");
+    std::fs::write(releases.join("dotfiles-0.1.0.tar.gz.sha256"), schecksum)
+        .expect("source checksum");
 
     let home = temp.path().join("home");
     std::fs::create_dir_all(&home).expect("home");
@@ -184,8 +181,11 @@ fn install_script_fails_on_binary_checksum_mismatch() {
     let wrong_checksum = format!(
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  {archive_name}\n"
     );
-    std::fs::write(releases.join(format!("{archive_name}.sha256")), wrong_checksum)
-        .expect("wrong checksum");
+    std::fs::write(
+        releases.join(format!("{archive_name}.sha256")),
+        wrong_checksum,
+    )
+    .expect("wrong checksum");
 
     let home = temp.path().join("home");
     std::fs::create_dir_all(&home).expect("home");

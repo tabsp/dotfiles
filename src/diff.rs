@@ -61,8 +61,8 @@ struct DiffSummary {
 }
 
 pub fn run_diff(json: bool) -> Result<(), String> {
-    let repo = std::env::current_dir()
-        .map_err(|err| format!("failed to read current dir: {err}"))?;
+    let repo =
+        std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
 
     if !repo.join("deps.toml").exists() || !repo.join("dotfiles.toml").exists() {
         return Err(
@@ -255,10 +255,7 @@ fn diff_one_tool(
     })
 }
 
-fn diff_dotfiles(
-    files: &crate::config::DotfilesManifest,
-    repo: &Path,
-) -> Vec<DotfileDiffEntry> {
+fn diff_dotfiles(files: &crate::config::DotfilesManifest, repo: &Path) -> Vec<DotfileDiffEntry> {
     let mut results: Vec<DotfileDiffEntry> = Vec::new();
 
     for file in &files.files {
@@ -332,10 +329,7 @@ fn print_human_diff(
                     );
                 }
                 "version_unknown" => {
-                    println!(
-                        "  {:<12} {:<30} version_unknown",
-                        t.name, t.path
-                    );
+                    println!("  {:<12} {:<30} version_unknown", t.name, t.path);
                 }
                 _ => {
                     println!("  {:<12} {:<30} {}", t.name, t.path, t.status);
@@ -514,8 +508,7 @@ target = "~/.nonexistent-dotman-test-dir/nvim"
 "#;
         fs::write(repo.join("dotfiles.toml"), dotfiles_toml).expect("write");
 
-        let files =
-            config::load_dotfiles(Path::new(&repo.join("dotfiles.toml"))).expect("load");
+        let files = config::load_dotfiles(Path::new(&repo.join("dotfiles.toml"))).expect("load");
         let results = diff_dotfiles(&files, repo);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "missing");
