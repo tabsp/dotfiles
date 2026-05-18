@@ -180,8 +180,14 @@ snippet-generating until ownership, backup, and recovery semantics are mature.
 
 ### P2 - Manifest Compatibility Guardrails
 
-Status: proposed
+Status: done
 Category: maintainability
+
+Spec:
+`docs/superpowers/specs/2026-05-19-p2-manifest-compatibility-guardrails-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-19-p2-manifest-compatibility-guardrails.md`
 
 Current signal: manifest schema documentation, defaults, and compatibility
 policy exist. The next need is not broad schema expansion, but small guardrails

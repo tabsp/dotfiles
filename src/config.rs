@@ -7,6 +7,8 @@ use std::path::Path;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DepsManifest {
+    #[serde(default)]
+    pub schema_version: Option<u32>,
     pub deps: BTreeMap<String, Dependency>,
 }
 
@@ -121,6 +123,8 @@ pub enum Installer {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DotfilesManifest {
+    #[serde(default)]
+    pub schema_version: Option<u32>,
     pub files: Vec<FileEntry>,
 }
 
@@ -145,16 +149,37 @@ pub enum FileKind {
     Dir,
 }
 
+fn validate_schema_version(version: Option<u32>, path: &Path) -> Result<u32, String> {
+    match version {
+        None => Ok(1),
+        Some(1) => Ok(1),
+        Some(v) if v > 1 => Err(format!(
+            "{}: manifest requires schema version {v} but dotman supports up to 1. Upgrade dotman or use an older manifest.",
+            path.display()
+        )),
+        Some(v) => Err(format!(
+            "{}: manifest schema version {v} is not supported (minimum: 1).",
+            path.display()
+        )),
+    }
+}
+
 pub fn load_deps(path: &Path) -> Result<DepsManifest, String> {
     let raw = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-    toml::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
+    let manifest: DepsManifest =
+        toml::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+    validate_schema_version(manifest.schema_version, path)?;
+    Ok(manifest)
 }
 
 pub fn load_dotfiles(path: &Path) -> Result<DotfilesManifest, String> {
     let raw = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-    toml::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
+    let manifest: DotfilesManifest =
+        toml::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+    validate_schema_version(manifest.schema_version, path)?;
+    Ok(manifest)
 }
 
 fn default_enabled() -> bool {
@@ -294,5 +319,97 @@ mod tests {
         };
         let entries = dep.entries_for("windows", "x86_64");
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn manifest_with_schema_version_1_parses() {
+        let toml_str = r#"
+schema_version = 1
+
+[deps.bat]
+command = "bat"
+version_check = { args = ["--version"], regex = "bat ([0-9.]+)" }
+
+[bat.default]
+installer = "download-binary"
+version = "0.24.0"
+source = "https://example.com/bat-{version}-{target}.tar.gz"
+params = { install_to = "bat", install_dir_to = "~/.local/bin" }
+"#;
+        let manifest: DepsManifest = toml::from_str(toml_str).expect("parse");
+        assert_eq!(manifest.schema_version, Some(1));
+        assert!(manifest.deps.contains_key("bat"));
+    }
+
+    #[test]
+    fn manifest_without_schema_version_defaults_to_none() {
+        let toml_str = r#"
+[deps.fd]
+command = "fd"
+"#;
+        let manifest: DepsManifest = toml::from_str(toml_str).expect("parse");
+        assert_eq!(manifest.schema_version, None);
+    }
+
+    #[test]
+    fn validate_schema_version_accepts_none() {
+        let result = validate_schema_version(None, Path::new("deps.toml"));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
+    }
+
+    #[test]
+    fn validate_schema_version_accepts_1() {
+        let result = validate_schema_version(Some(1), Path::new("deps.toml"));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_schema_version_rejects_99() {
+        let result = validate_schema_version(Some(99), Path::new("deps.toml"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("supports up to 1"));
+    }
+
+    #[test]
+    fn validate_schema_version_rejects_0() {
+        let result = validate_schema_version(Some(0), Path::new("deps.toml"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not supported"));
+    }
+
+    #[test]
+    fn schema_version_99_manifest_fails_to_load() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let deps_path = tmp.path().join("deps.toml");
+        std::fs::write(
+            &deps_path,
+            r#"schema_version = 99
+
+[deps.bat]
+command = "bat"
+"#,
+        )
+        .expect("write");
+        let result = load_deps(&deps_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("supports up to 1"));
+    }
+
+    #[test]
+    fn schema_version_1_manifest_loads() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let deps_path = tmp.path().join("deps.toml");
+        std::fs::write(
+            &deps_path,
+            r#"schema_version = 1
+
+[deps.bat]
+command = "bat"
+"#,
+        )
+        .expect("write");
+        let result = load_deps(&deps_path);
+        assert!(result.is_ok());
     }
 }

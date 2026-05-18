@@ -78,6 +78,7 @@ fn add_dep(dry_run: bool) -> Result<(), String> {
     let deps_path = repo.join("deps.toml");
 
     let existing = config::load_deps(&deps_path).unwrap_or(DepsManifest {
+        schema_version: None,
         deps: BTreeMap::new(),
     });
 
@@ -436,8 +437,10 @@ fn add_config(dry_run: bool) -> Result<(), String> {
     let repo = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
     let dotfiles_path = repo.join("dotfiles.toml");
 
-    let existing =
-        config::load_dotfiles(&dotfiles_path).unwrap_or(DotfilesManifest { files: Vec::new() });
+    let existing = config::load_dotfiles(&dotfiles_path).unwrap_or(DotfilesManifest {
+        schema_version: None,
+        files: Vec::new(),
+    });
 
     // 1. Source
     let source = prompt_required(
@@ -630,8 +633,10 @@ fn append_and_validate_deps(deps_path: &Path, snippet: &str, repo: &Path) -> Res
     std::fs::write(&tmp_path, &merged).map_err(|e| format!("failed to write tmp: {e}"))?;
 
     let deps = config::load_deps(&tmp_path)?;
-    let files = config::load_dotfiles(&repo.join("dotfiles.toml"))
-        .unwrap_or(DotfilesManifest { files: Vec::new() });
+    let files = config::load_dotfiles(&repo.join("dotfiles.toml")).unwrap_or(DotfilesManifest {
+        schema_version: None,
+        files: Vec::new(),
+    });
     let host = platform::detect_host()?;
     if let Err(errors) = crate::check::run_check(&deps, &files, &host, repo) {
         let _ = std::fs::remove_file(&tmp_path);
@@ -662,6 +667,7 @@ fn append_and_validate_dotfiles(
 
     let files = config::load_dotfiles(&tmp_path)?;
     let deps = config::load_deps(&repo.join("deps.toml")).unwrap_or(DepsManifest {
+        schema_version: None,
         deps: BTreeMap::new(),
     });
     let host = platform::detect_host()?;
