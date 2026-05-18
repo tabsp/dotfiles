@@ -97,8 +97,14 @@ read-only prerequisite for diff, reconcile, cleanup, adopt, and unmanage.
 
 ### P1 - Release Install Smoke Verification
 
-Status: proposed
+Status: done
 Category: quality / distribution
+
+Spec:
+`docs/superpowers/specs/2026-05-18-p1-release-install-smoke-verification-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-18-p1-release-install-smoke-verification.md`
 
 Depends on: P0 - Release Installer Trust Boundary Hardening
 

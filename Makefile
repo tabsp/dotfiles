@@ -2,7 +2,7 @@
              cargo-preflight \
              agent-init agent-next agent-start agent-status agent-check agent-review-check agent-handoff agent-template \
              agent-advance agent-record-verification agent-finish agent-set-roadmap-status \
-             uninstall release release-check
+             uninstall release release-check smoke-test
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -38,6 +38,7 @@ help:
 		'  make ci                          Run local verification suite' \
 		'  make release                     Build release binary tarball and checksum' \
 		'  make release-check               Build release and verify checksum' \
+		'  make smoke-test                 End-to-end release install chain validation' \
 		'  make uninstall                   Remove dotman binary and list managed state' \
 
 cargo-preflight:
@@ -106,6 +107,11 @@ release-check: release
 	@VERSION=$$(awk -F'"' '/^version/{print $$2; exit}' Cargo.toml); \
 	TARGET=$$(rustc -vV | grep host | cut -d ' ' -f2); \
 	cd dist && shasum -a 256 -c "dotman-$${TARGET}-$${VERSION}.tar.gz.sha256"
+
+smoke-test: release-check
+	@VERSION=$$(awk -F'"' '/^version/{print $$2; exit}' Cargo.toml); \
+	TARGET=$$(rustc -vV | grep host | cut -d ' ' -f2); \
+	scripts/smoke-test.sh "$$VERSION" "$$TARGET"
 
 
 uninstall:
