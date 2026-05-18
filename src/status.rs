@@ -32,23 +32,23 @@ struct DotfileEntry {
 }
 
 #[derive(Debug, Serialize)]
-struct BackupEntry {
-    path: String,
-    kind: String,
-    certainty: String,
+pub(crate) struct BackupEntry {
+    pub(crate) path: String,
+    pub(crate) kind: String,
+    pub(crate) certainty: String,
 }
 
 #[derive(Debug, Serialize)]
-struct StagingEntry {
-    path: String,
-    certainty: String,
+pub(crate) struct StagingEntry {
+    pub(crate) path: String,
+    pub(crate) certainty: String,
 }
 
 #[derive(Debug, Serialize)]
-struct SourceCheckoutEntry {
-    path: String,
-    certainty: String,
-    is_git_repo: bool,
+pub(crate) struct SourceCheckoutEntry {
+    pub(crate) path: String,
+    pub(crate) certainty: String,
+    pub(crate) is_git_repo: bool,
 }
 
 pub fn run_status(json: bool) -> Result<(), String> {
@@ -245,7 +245,7 @@ fn collect_dotfiles(
     dotfiles
 }
 
-fn collect_backups_and_staging() -> Result<(Vec<BackupEntry>, Vec<StagingEntry>), String> {
+pub(crate) fn collect_backups_and_staging() -> Result<(Vec<BackupEntry>, Vec<StagingEntry>), String> {
     let bin_dir = expand_home("~/.local/bin")?;
     let mut backups: Vec<BackupEntry> = Vec::new();
     let mut staging: Vec<StagingEntry> = Vec::new();
@@ -279,7 +279,7 @@ fn collect_backups_and_staging() -> Result<(Vec<BackupEntry>, Vec<StagingEntry>)
     Ok((backups, staging))
 }
 
-fn collect_source_checkout() -> Option<SourceCheckoutEntry> {
+pub(crate) fn collect_source_checkout() -> Option<SourceCheckoutEntry> {
     let path = expand_home("~/.local/share/dotman/dotfiles").ok()?;
     if !path.exists() {
         return None;
@@ -444,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_source_checkout_returns_none_when_missing() {
+    pub(crate) fn collect_source_checkout_returns_none_when_missing() {
         let result = collect_source_checkout_at("/nonexistent/path/should/not/exist");
         assert!(result.is_none());
     }
@@ -495,7 +495,7 @@ mod tests {
         (backups, staging)
     }
 
-    fn collect_source_checkout_at(path_str: &str) -> Option<SourceCheckoutEntry> {
+    pub(crate) fn collect_source_checkout_at(path_str: &str) -> Option<SourceCheckoutEntry> {
         let path = PathBuf::from(path_str);
         if !path.exists() {
             return None;

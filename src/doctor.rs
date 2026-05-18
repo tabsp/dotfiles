@@ -125,7 +125,7 @@ pub fn run_doctor(
     }
 }
 
-fn read_version(command: &Path, check: &VersionCheck) -> Result<String, String> {
+pub(crate) fn read_version(command: &Path, check: &VersionCheck) -> Result<String, String> {
     let output = Command::new(command)
         .args(&check.args)
         .output()

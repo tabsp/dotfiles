@@ -3,8 +3,8 @@
 ## Goal
 
 Formalize the multi-agent review pattern used in the roadmap planning cycle into
-a documented, reusable protocol. High-risk P0 epics and roadmap refreshes must
-pass a structured multi-agent review before implementation begins.
+a documented, reusable protocol. All roadmap epics (P0, P1, P2, P3) and roadmap refreshes must
+pass a structured multi-agent review before implementation begins. The harness enforces this for every roadmap work item via `AGENT_REVIEW_MISSING` checks on advance to `in_progress` and `verifying` phases.
 
 ## Scope
 
@@ -26,7 +26,7 @@ pass a structured multi-agent review before implementation begins.
 - Running reviewer agents in production automatically without human oversight.
 - Creating new MCP tools or plugin infrastructure.
 - Enforcing review gates programmatically in the agent harness.
-- Requiring multi-agent review for non-safety-sensitive epics (P1, P2, P3).
+
 
 ## Design
 
@@ -42,10 +42,12 @@ pass a structured multi-agent review before implementation begins.
 
 Multi-agent review is required for:
 
+- All roadmap epics (P0, P1, P2, P3) across all three gates (design, approach, code).
 - Roadmap refreshes (Roadmap Planning Review).
-- Safety-sensitive P0 epics: release installer, recovery, cleanup, symlink,
-  bootstrap, archive extraction, remote script policy, uninstall.
 - Any epic that modifies agent harness safety gates.
+
+P1/P2/P3 epics may use lighter review rounds (fewer findings, shorter synthesis)
+but must still produce a review document with all three roles addressed.
 
 ### Review Protocol
 

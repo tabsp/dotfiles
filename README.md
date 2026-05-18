@@ -50,6 +50,8 @@ Requires Rust and Cargo. See [Rust installation](https://rustup.rs/).
 - `make link CONFLICT=overwrite`: overwrite target conflicts before linking.
 - `make doctor`: inspect installed commands, versions, and linked files.
 - `dotman status`: print a read-only inventory of all managed state.
+- `dotman diff`: compare manifests to machine state, reporting missing, drifted, and stale items.
+- `dotman diff --json`: machine-readable diff output.
 - `dotman cleanup`: list and optionally remove stale backup and staging directories.
 - `make uninstall`: remove dotman binary and list remaining managed state.
 - `make shell`: interactively set fish as the login shell.

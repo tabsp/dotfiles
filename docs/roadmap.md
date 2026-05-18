@@ -75,8 +75,14 @@ work.
 
 ### P1 - Managed State Inventory And Status
 
-Status: proposed
+Status: done
 Category: inspectability
+
+Spec:
+`docs/superpowers/specs/2026-05-18-p1-managed-state-inventory-and-status-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-18-p1-managed-state-inventory-and-status.md`
 
 Depends on: P0 - Recovery Safety And Ownership Model
 
@@ -138,6 +144,12 @@ tests, recovery notes, manual smoke checks, and non-destructive scope limits.
 
 Status: proposed
 Category: inspectability
+
+Spec:
+`docs/superpowers/specs/2026-05-18-p1-managed-state-inventory-and-status-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-18-p1-managed-state-inventory-and-status.md`
 
 Depends on: P1 - Managed State Inventory And Status
 
@@ -329,6 +341,12 @@ hardlink rejection policy.
 
 Status: done
 Category: inspectability
+
+Spec:
+`docs/superpowers/specs/2026-05-18-p1-managed-state-inventory-and-status-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-18-p1-managed-state-inventory-and-status.md`
 Spec: `docs/superpowers/specs/2026-05-17-p1-bootstrap-dry-run-design.md`
 Plan: `docs/superpowers/plans/2026-05-17-p1-bootstrap-dry-run.md`
 Handoff: `docs/superpowers/agent/handoffs/2026-05-16-p1-bootstrap-dry-run.md`

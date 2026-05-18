@@ -5,6 +5,7 @@ mod archive;
 mod check;
 mod config;
 mod deps;
+mod diff;
 mod doctor;
 mod http;
 mod installers;
@@ -59,6 +60,10 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    Diff {
+        #[arg(long)]
+        json: bool,
+    },
     Update {
         #[arg(long)]
         check: bool,
@@ -106,6 +111,7 @@ fn run() -> Result<(), String> {
         Command::Check => run_check(),
         Command::Cleanup { execute } => recovery::run_cleanup(execute),
         Command::Status { json } => status::run_status(json),
+        Command::Diff { json } => diff::run_diff(json),
         Command::Update { check } => run_update(check),
         Command::Agent { command } => agent::run_agent(command),
         Command::Add { command } => add::run_add(command),
