@@ -50,25 +50,6 @@ work is schedulable."
 
 ## Next Queue
 
-### P0 - Release Installer Trust Boundary Hardening
-
-Status: proposed
-Category: safety / distribution
-
-Depends on: P0 - Multi-Agent Review Protocol
-
-Current signal: Rust `download_binary` installs have checksum and archive safety
-guards, but the external `scripts/install.sh` entry point is less strict. The
-installer defaults to a fixed version while README describes a latest install
-path, treats missing checksum downloads as non-fatal, verifies checksums only
-when available, and downloads the dotfiles source archive without the same trust
-boundary as release artifacts.
-
-Outcome: the release installer has an explicit trust contract. Checksums are
-required and verified, checksum tooling failures are fatal, dotfiles source
-retrieval is verified or otherwise made explicit, and version/tag/artifact/source
-consistency is covered by release smoke verification.
-
 ### P0 - Recovery Safety And Ownership Model
 
 Status: proposed
@@ -213,6 +194,40 @@ the next roadmap phase.
   trust boundary is hardened.
 
 ## Completed Foundation
+
+### P0 - Release Installer Trust Boundary Hardening
+
+Status: done
+Category: safety / distribution
+
+Depends on: P0 - Multi-Agent Review Protocol
+
+Spec:
+`docs/superpowers/specs/2026-05-17-p0-release-installer-trust-boundary-hardening-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-17-p0-release-installer-trust-boundary-hardening.md`
+
+Current signal: Rust `download_binary` installs have checksum and archive safety
+guards, but the external `scripts/install.sh` entry point is less strict. The
+installer defaults to a fixed version while README describes a latest install
+path, treats missing checksum downloads as non-fatal, verifies checksums only
+when available, and downloads the dotfiles source archive without the same trust
+boundary as release artifacts.
+
+Outcome: the release installer has an explicit trust contract. Checksums are
+required and verified, checksum tooling failures are fatal, dotfiles source
+retrieval is verified or otherwise made explicit, and version/tag/artifact/source
+consistency is covered by release smoke verification.
+
+
+Outcome: installer enforces mandatory checksum verification for both dotman
+binary and dotfiles source archive. Checksum download failures are fatal.
+Checksum tool (shasum/sha256sum) detection is early and mandatory. Two failure
+path tests added (missing checksum, checksum mismatch).
+
+Handoff: `docs/superpowers/agent/handoffs/2026-05-17-p0-release-installer-trust-boundary-hardening.md`
+
 
 ### P0 - Multi-Agent Review Protocol
 

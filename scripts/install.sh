@@ -38,19 +38,30 @@ case "$OS" in
         ;;
 esac
 
-# Determine latest version
+# Determine version
 if [ -n "$DOTMAN_VERSION" ]; then
     VERSION="$DOTMAN_VERSION"
 else
-    # If no version specified, use the latest release
     VERSION="0.1.0"
+fi
+
+# Find checksum tool early; fail if unavailable
+if command -v shasum >/dev/null 2>&1; then
+    CHECKSUM_TOOL="shasum -a 256"
+elif command -v sha256sum >/dev/null 2>&1; then
+    CHECKSUM_TOOL="sha256sum"
+else
+    echo "error: shasum or sha256sum required for checksum verification" >&2
+    exit 1
 fi
 
 ARCHIVE="dotman-${TARGET}-${VERSION}.tar.gz"
 CHECKSUM="${ARCHIVE}.sha256"
 URL="${BASE_URL}/v${VERSION}/${ARCHIVE}"
 CHECKSUM_URL="${BASE_URL}/v${VERSION}/${CHECKSUM}"
-DOTFILES_ARCHIVE_URL="${DOTFILES_ARCHIVE_URL:-https://github.com/tabsp/dotfiles/archive/refs/tags/v${VERSION}.tar.gz}"
+DOTFILES_SOURCE_ARCHIVE="dotfiles-${VERSION}.tar.gz"
+DOTFILES_SOURCE_URL="${DOTFILES_ARCHIVE_URL:-https://github.com/tabsp/dotfiles/releases/download/v${VERSION}/${DOTFILES_SOURCE_ARCHIVE}}"
+DOTFILES_SOURCE_CHECKSUM_URL="${BASE_URL}/v${VERSION}/${DOTFILES_SOURCE_ARCHIVE}.sha256"
 
 INSTALL_DIR="${HOME}/.local/bin"
 mkdir -p "$INSTALL_DIR"
@@ -60,51 +71,50 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 echo "==> downloading dotman ${VERSION} for ${TARGET}..."
 
-# Download archive and checksum
+# Download binary archive and checksum
 if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$URL" -o "$TMPDIR/$ARCHIVE"
-    curl -fsSL "$CHECKSUM_URL" -o "$TMPDIR/$CHECKSUM" 2>/dev/null || true
+    curl -fsSL "$CHECKSUM_URL" -o "$TMPDIR/$CHECKSUM"
 elif command -v wget >/dev/null 2>&1; then
     wget -q "$URL" -O "$TMPDIR/$ARCHIVE"
-    wget -q "$CHECKSUM_URL" -O "$TMPDIR/$CHECKSUM" 2>/dev/null || true
+    wget -q "$CHECKSUM_URL" -O "$TMPDIR/$CHECKSUM"
 else
     echo "error: curl or wget required to download dotman" >&2
     exit 1
 fi
 
-# Verify checksum if available
-if [ -f "$TMPDIR/$CHECKSUM" ]; then
-    if command -v shasum >/dev/null 2>&1; then
-        (cd "$TMPDIR" && shasum -a 256 -c "$CHECKSUM") || {
-            echo "error: checksum verification failed" >&2
-            exit 1
-        }
-    elif command -v sha256sum >/dev/null 2>&1; then
-        (cd "$TMPDIR" && sha256sum -c "$CHECKSUM") || {
-            echo "error: checksum verification failed" >&2
-            exit 1
-        }
-    fi
-    echo "==> checksum verified"
-fi
+# Verify binary checksum
+(cd "$TMPDIR" && $CHECKSUM_TOOL -c "$CHECKSUM") || {
+    echo "error: checksum verification failed for dotman binary" >&2
+    exit 1
+}
+echo "==> binary checksum verified"
 
-# Extract
+# Extract and install binary
 tar -xzf "$TMPDIR/$ARCHIVE" -C "$TMPDIR"
 cp "$TMPDIR/dotman" "$INSTALL_DIR/dotman"
 chmod +x "$INSTALL_DIR/dotman"
 
+# Download dotfiles source archive and checksum
 echo "==> downloading dotfiles source ${VERSION}..."
 if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$DOTFILES_ARCHIVE_URL" -o "$TMPDIR/dotfiles-source.tar.gz"
+    curl -fsSL "$DOTFILES_SOURCE_URL" -o "$TMPDIR/$DOTFILES_SOURCE_ARCHIVE"
+    curl -fsSL "$DOTFILES_SOURCE_CHECKSUM_URL" -o "$TMPDIR/$DOTFILES_SOURCE_ARCHIVE.sha256"
 elif command -v wget >/dev/null 2>&1; then
-    wget -q "$DOTFILES_ARCHIVE_URL" -O "$TMPDIR/dotfiles-source.tar.gz"
-else
-    echo "error: curl or wget required to download dotfiles source" >&2
-    exit 1
+    wget -q "$DOTFILES_SOURCE_URL" -O "$TMPDIR/$DOTFILES_SOURCE_ARCHIVE"
+    wget -q "$DOTFILES_SOURCE_CHECKSUM_URL" -O "$TMPDIR/$DOTFILES_SOURCE_ARCHIVE.sha256"
 fi
 
-tar -xzf "$TMPDIR/dotfiles-source.tar.gz" -C "$TMPDIR"
-SOURCE_ROOT="$(tar -tzf "$TMPDIR/dotfiles-source.tar.gz" | sed -n '1p' | cut -d/ -f1)"
+# Verify dotfiles source checksum
+(cd "$TMPDIR" && $CHECKSUM_TOOL -c "$DOTFILES_SOURCE_ARCHIVE.sha256") || {
+    echo "error: checksum verification failed for dotfiles source" >&2
+    exit 1
+}
+echo "==> dotfiles source checksum verified"
+
+# Extract and install dotfiles source
+tar -xzf "$TMPDIR/$DOTFILES_SOURCE_ARCHIVE" -C "$TMPDIR"
+SOURCE_ROOT="$(tar -tzf "$TMPDIR/$DOTFILES_SOURCE_ARCHIVE" | sed -n '1p' | cut -d/ -f1)"
 if [ -z "$SOURCE_ROOT" ] || [ ! -d "$TMPDIR/$SOURCE_ROOT" ]; then
     echo "error: failed to locate dotfiles source root in archive" >&2
     exit 1

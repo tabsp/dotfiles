@@ -35,6 +35,12 @@ fn sha256(path: &std::path::Path) -> String {
         .to_string()
 }
 
+fn checksum_file(path: &std::path::Path, filename: &str) -> (String, String) {
+    let digest = sha256(path);
+    let content = format!("{digest}  {filename}\n");
+    (digest, content)
+}
+
 #[test]
 fn install_script_installs_dotfiles_source_and_prints_bootstrap_directory() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -60,19 +66,15 @@ fn install_script_installs_dotfiles_source_and_prints_bootstrap_directory() {
         .arg("dotman")
         .assert()
         .success();
-    let digest = sha256(&archive_path);
-    std::fs::write(
-        releases.join(format!("{archive_name}.sha256")),
-        format!("{digest}  {archive_name}\n"),
-    )
-    .expect("checksum");
+    let (_digest, checksum) = checksum_file(&archive_path, &archive_name);
+    std::fs::write(releases.join(format!("{archive_name}.sha256")), checksum).expect("checksum");
 
     let source = temp.path().join("source/dotfiles-0.1.0");
     std::fs::create_dir_all(source.join("config")).expect("source config");
     std::fs::write(source.join("deps.toml"), "[deps]\n").expect("deps");
     std::fs::write(source.join("dotfiles.toml"), "files = []\n").expect("dotfiles");
     std::fs::write(source.join("config/example"), "example\n").expect("config file");
-    let source_archive = temp.path().join("dotfiles-source.tar.gz");
+    let source_archive = temp.path().join("dotfiles-0.1.0.tar.gz");
     Command::new("tar")
         .arg("-czf")
         .arg(&source_archive)
@@ -81,6 +83,12 @@ fn install_script_installs_dotfiles_source_and_prints_bootstrap_directory() {
         .arg("dotfiles-0.1.0")
         .assert()
         .success();
+    let (_sdigest, schecksum) = checksum_file(&source_archive, "dotfiles-0.1.0.tar.gz");
+    std::fs::write(
+        releases.join("dotfiles-0.1.0.tar.gz.sha256"),
+        schecksum,
+    )
+    .expect("source checksum");
 
     let home = temp.path().join("home");
     std::fs::create_dir_all(&home).expect("home");
@@ -108,4 +116,87 @@ fn install_script_installs_dotfiles_source_and_prints_bootstrap_directory() {
     assert!(expected_repo.join("deps.toml").exists());
     assert!(expected_repo.join("dotfiles.toml").exists());
     assert!(expected_repo.join("config/example").exists());
+}
+
+#[test]
+fn install_script_fails_on_missing_binary_checksum() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let releases = temp.path().join("releases/download/v0.1.0");
+    std::fs::create_dir_all(&releases).expect("release dir");
+
+    let payload = temp.path().join("payload");
+    std::fs::create_dir_all(&payload).expect("payload dir");
+    let dotman = payload.join("dotman");
+    std::fs::write(&dotman, "#!/bin/sh\necho fake\n").expect("fake dotman");
+    std::fs::set_permissions(&dotman, PermissionsExt::from_mode(0o755)).expect("chmod");
+
+    let target = current_target();
+    let archive_name = format!("dotman-{target}-0.1.0.tar.gz");
+    let archive_path = releases.join(&archive_name);
+    Command::new("tar")
+        .arg("-czf")
+        .arg(&archive_path)
+        .arg("-C")
+        .arg(&payload)
+        .arg("dotman")
+        .assert()
+        .success();
+    // No checksum file written — installer should fail
+
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&home).expect("home");
+
+    assert_cmd::Command::new("sh")
+        .arg("scripts/install.sh")
+        .env("HOME", &home)
+        .env(
+            "BASE_URL",
+            format!("file://{}", temp.path().join("releases/download").display()),
+        )
+        .assert()
+        .failure();
+}
+
+#[test]
+fn install_script_fails_on_binary_checksum_mismatch() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let releases = temp.path().join("releases/download/v0.1.0");
+    std::fs::create_dir_all(&releases).expect("release dir");
+
+    let payload = temp.path().join("payload");
+    std::fs::create_dir_all(&payload).expect("payload dir");
+    let dotman = payload.join("dotman");
+    std::fs::write(&dotman, "#!/bin/sh\necho fake\n").expect("fake dotman");
+    std::fs::set_permissions(&dotman, PermissionsExt::from_mode(0o755)).expect("chmod");
+
+    let target = current_target();
+    let archive_name = format!("dotman-{target}-0.1.0.tar.gz");
+    let archive_path = releases.join(&archive_name);
+    Command::new("tar")
+        .arg("-czf")
+        .arg(&archive_path)
+        .arg("-C")
+        .arg(&payload)
+        .arg("dotman")
+        .assert()
+        .success();
+    // Write a deliberately wrong checksum
+    let wrong_checksum = format!(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  {archive_name}\n"
+    );
+    std::fs::write(releases.join(format!("{archive_name}.sha256")), wrong_checksum)
+        .expect("wrong checksum");
+
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&home).expect("home");
+
+    assert_cmd::Command::new("sh")
+        .arg("scripts/install.sh")
+        .env("HOME", &home)
+        .env(
+            "BASE_URL",
+            format!("file://{}", temp.path().join("releases/download").display()),
+        )
+        .assert()
+        .failure();
 }
