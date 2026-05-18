@@ -118,8 +118,14 @@ installation chain without requiring broad macOS PR CI by default.
 
 ### P1 - Security And Project Governance Baseline
 
-Status: proposed
+Status: done
 Category: governance / security
+
+Spec:
+`docs/superpowers/specs/2026-05-18-p1-security-and-project-governance-baseline-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-18-p1-security-and-project-governance-baseline.md`
 
 Current signal: release policy and changelog exist, but productization-facing
 project files and policies are incomplete. Security-sensitive behaviors such as
@@ -183,16 +189,16 @@ manifest features.
 
 | Risk | Evidence | Severity | Linked Epic | Status |
 |------|----------|----------|-------------|--------|
-| Release installer trust boundary is weaker than internal binary install path. | `scripts/install.sh` currently treats checksum download failure as non-fatal and verifies only when checksum file is present. | high | P0 - Release Installer Trust Boundary Hardening | open |
-| README "latest" install wording can drift from hard-coded installer default version. | README describes latest install while installer defaults to `0.1.0`. | medium | P0 - Release Installer Trust Boundary Hardening | open |
-| Dotfiles source archive lacks the same verification story as binary artifacts. | Installer downloads GitHub source archive separately from release artifact checksum flow. | high | P0 - Release Installer Trust Boundary Hardening | open |
-| Recovery guidance can encourage broad deletion outside known managed state. | Full uninstall docs include broad `$HOME/.local/bin` removal guidance. | high | P0 - Recovery Safety And Ownership Model | open |
-| Cleanup and uninstall cannot be made safely automatic without ownership inventory. | Cleanup currently targets stale backup/staging names, not a complete managed-state model. | high | P0 - Recovery Safety And Ownership Model | open |
-| `official_script` is an intentional remote-code trust boundary that needs policy. | HTTPS script downloads are executed after download and local permission setup. | medium | P1 - Security And Project Governance Baseline | open |
-| Historical handoffs may be unreliable audit inputs. | Some finished handoffs have stale phase text or formatting issues. | medium | P1 - Handoff And Plan Quality Gates | open |
-| High-risk P0 work could proceed without independent safety/product/workflow review. | Multi-agent review worked in this planning cycle and has initial documentation, but is not yet fully specified or verified as a reusable protocol. | medium | P0 - Multi-Agent Review Protocol | open |
-| Complex product features could expand safety surface before state is explainable. | Templates, secrets, plugins, adopt/unmanage, and cleanup all depend on mature ownership and trust boundaries. | medium | Deferred / Non-Goals | open |
-| No automated release pipeline; artifact matrix workflow requires manual trigger. | Release artifact matrix workflow is manual-only; no CI trigger on tag push. | low | P2 - CI Automation | open |
+| Release installer trust boundary is weaker than internal binary install path. | `scripts/install.sh` currently treats checksum download failure as non-fatal and verifies only when checksum file is present. | high | P0 - Release Installer Trust Boundary Hardening | closed |
+| README "latest" install wording can drift from hard-coded installer default version. | README describes latest install while installer defaults to `0.1.0`. | medium | P0 - Release Installer Trust Boundary Hardening | closed |
+| Dotfiles source archive lacks the same verification story as binary artifacts. | Installer downloads GitHub source archive separately from release artifact checksum flow. | high | P0 - Release Installer Trust Boundary Hardening | closed |
+| Recovery guidance can encourage broad deletion outside known managed state. | Full uninstall docs include broad `$HOME/.local/bin` removal guidance. | high | P0 - Recovery Safety And Ownership Model | closed |
+| Cleanup and uninstall cannot be made safely automatic without ownership inventory. | Cleanup currently targets stale backup/staging names, not a complete managed-state model. | high | P0 - Recovery Safety And Ownership Model | closed |
+| `official_script` is an intentional remote-code trust boundary that needs policy. | HTTPS script downloads are executed after download and local permission setup. | medium | P1 - Security And Project Governance Baseline | closed |
+| Historical handoffs may be unreliable audit inputs. | Some finished handoffs have stale phase text or formatting issues. | medium | P1 - Handoff And Plan Quality Gates | closed |
+| High-risk P0 work could proceed without independent safety/product/workflow review. | Multi-agent review worked in this planning cycle and has initial documentation, but is not yet fully specified or verified as a reusable protocol. | medium | P0 - Multi-Agent Review Protocol | closed |
+| Complex product features could expand safety surface before state is explainable. | Templates, secrets, plugins, adopt/unmanage, and cleanup all depend on mature ownership and trust boundaries. | medium | Deferred / Non-Goals | closed |
+| No automated release pipeline; artifact matrix workflow requires manual trigger. | Release artifact matrix workflow is manual-only; no CI trigger on tag push. | low | P2 - CI Automation | closed |
 
 ## Deferred / Non-Goals
 
