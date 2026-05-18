@@ -63,6 +63,10 @@ enum Command {
     Diff {
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        narrow: bool,
+        #[arg(long)]
+        reconcile: bool,
     },
     Update {
         #[arg(long)]
@@ -111,7 +115,11 @@ fn run() -> Result<(), String> {
         Command::Check => run_check(),
         Command::Cleanup { execute } => recovery::run_cleanup(execute),
         Command::Status { json } => status::run_status(json),
-        Command::Diff { json } => diff::run_diff(json),
+        Command::Diff {
+            json,
+            narrow,
+            reconcile,
+        } => diff::run_diff(json, narrow, reconcile),
         Command::Update { check } => run_update(check),
         Command::Agent { command } => agent::run_agent(command),
         Command::Add { command } => add::run_add(command),

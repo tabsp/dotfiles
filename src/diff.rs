@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::status;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct DiffOutput {
     installed_tools: Vec<ToolDiffEntry>,
     linked_dotfiles: Vec<DotfileDiffEntry>,
@@ -18,7 +18,7 @@ struct DiffOutput {
     summary: DiffSummary,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct ToolDiffEntry {
     name: String,
     path: String,
@@ -29,7 +29,7 @@ struct ToolDiffEntry {
     expected_version: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct DotfileDiffEntry {
     name: String,
     path: String,
@@ -38,19 +38,19 @@ struct DotfileDiffEntry {
     actual_target: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct StaleEntry {
     path: String,
     status: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct SourceCheckoutDiffEntry {
     path: String,
     status: String,
 }
 
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Default, Clone)]
 struct DiffSummary {
     ok: usize,
     missing: usize,
@@ -58,9 +58,13 @@ struct DiffSummary {
     stale: usize,
     wrong_target: usize,
     version_unknown: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    narrow: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    reconcile_commands: Vec<String>,
 }
 
-pub fn run_diff(json: bool) -> Result<(), String> {
+pub fn run_diff(json: bool, narrow: bool, reconcile: bool) -> Result<(), String> {
     let repo =
         std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
 
@@ -106,7 +110,10 @@ pub fn run_diff(json: bool) -> Result<(), String> {
         },
     });
 
-    let mut summary = DiffSummary::default();
+    let mut summary = DiffSummary {
+        narrow,
+        ..Default::default()
+    };
     for t in &tool_diffs {
         match t.status.as_str() {
             "ok" => summary.ok += 1,
@@ -132,6 +139,22 @@ pub fn run_diff(json: bool) -> Result<(), String> {
         || summary.wrong_target > 0
         || summary.version_unknown > 0;
 
+    // Generate reconcile commands if requested
+    let reconcile_cmds = if reconcile {
+        let temp = DiffOutput {
+            installed_tools: tool_diffs.clone(),
+            linked_dotfiles: dotfile_diffs.clone(),
+            backups: backup_entries.clone(),
+            staging_leftovers: staging_entries.clone(),
+            source_checkout: source_entry.clone(),
+            summary: DiffSummary::default(),
+        };
+        generate_reconcile_commands(&temp)
+    } else {
+        Vec::new()
+    };
+    summary.reconcile_commands = reconcile_cmds.clone();
+
     if json {
         let output = DiffOutput {
             installed_tools: tool_diffs,
@@ -152,7 +175,21 @@ pub fn run_diff(json: bool) -> Result<(), String> {
             &staging_entries,
             &source_entry,
             &summary,
+            narrow,
         );
+    }
+
+    // Print reconcile commands if requested
+    if reconcile && !json {
+        println!();
+        println!("==> Reconcile commands (advisory — review before running)");
+        if reconcile_cmds.is_empty() {
+            println!("  Nothing to reconcile.");
+        } else {
+            for cmd in &reconcile_cmds {
+                println!("  # {}", cmd);
+            }
+        }
     }
 
     if has_issues {
@@ -312,12 +349,18 @@ fn print_human_diff(
     staging_entries: &[StaleEntry],
     source_entry: &Option<SourceCheckoutDiffEntry>,
     summary: &DiffSummary,
+    narrow: bool,
 ) {
     println!("==> Installed tools");
-    if tools.is_empty() {
+    let display_tools: Vec<&ToolDiffEntry> = if narrow {
+        tools.iter().filter(|t| t.status != "ok").collect()
+    } else {
+        tools.iter().collect()
+    };
+    if display_tools.is_empty() {
         println!("  (none)");
     } else {
-        for t in tools {
+        for t in &display_tools {
             match t.status.as_str() {
                 "drifted" => {
                     println!(
@@ -340,10 +383,15 @@ fn print_human_diff(
 
     println!();
     println!("==> Linked dotfiles");
-    if dotfiles.is_empty() {
+    let display_dotfiles: Vec<&DotfileDiffEntry> = if narrow {
+        dotfiles.iter().filter(|d| d.status != "ok").collect()
+    } else {
+        dotfiles.iter().collect()
+    };
+    if display_dotfiles.is_empty() {
         println!("  (none)");
     } else {
-        for d in dotfiles {
+        for d in &display_dotfiles {
             match d.status.as_str() {
                 "wrong_target" => {
                     println!(
@@ -398,6 +446,35 @@ fn print_human_diff(
         summary.version_unknown,
         summary.stale
     );
+}
+
+fn generate_reconcile_commands(output: &DiffOutput) -> Vec<String> {
+    let mut cmds: Vec<String> = Vec::new();
+
+    let has_actionable = output
+        .installed_tools
+        .iter()
+        .any(|t| t.status == "missing" || t.status == "drifted");
+    if has_actionable {
+        cmds.push("dotman bootstrap".to_string());
+    }
+
+    let dotfile_names: Vec<&str> = output
+        .linked_dotfiles
+        .iter()
+        .filter(|d| d.status == "missing" || d.status == "wrong_target")
+        .map(|d| d.name.as_str())
+        .collect();
+    if !dotfile_names.is_empty() {
+        cmds.push(format!("dotman link --force {}", dotfile_names.join(" ")));
+    }
+
+    let has_stale = !output.backups.is_empty() || !output.staging_leftovers.is_empty();
+    if has_stale {
+        cmds.push("dotman cleanup".to_string());
+    }
+
+    cmds
 }
 
 #[cfg(test)]
@@ -512,5 +589,125 @@ target = "~/.nonexistent-dotman-test-dir/nvim"
         let results = diff_dotfiles(&files, repo);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "missing");
+    }
+
+    #[test]
+    fn reconcile_generates_bootstrap_for_missing_tools() {
+        let output = DiffOutput {
+            installed_tools: vec![ToolDiffEntry {
+                name: "zoxide".to_string(),
+                path: "/tmp/zoxide".to_string(),
+                status: "missing".to_string(),
+                installed_version: None,
+                expected_version: Some("0.1.0".to_string()),
+            }],
+            linked_dotfiles: vec![],
+            backups: vec![],
+            staging_leftovers: vec![],
+            source_checkout: None,
+            summary: DiffSummary::default(),
+        };
+        let cmds = generate_reconcile_commands(&output);
+        assert_eq!(cmds.len(), 1);
+        assert!(cmds[0].contains("bootstrap"));
+    }
+
+    #[test]
+    fn reconcile_generates_link_force_for_missing_dotfiles() {
+        let output = DiffOutput {
+            installed_tools: vec![],
+            linked_dotfiles: vec![
+                DotfileDiffEntry {
+                    name: "nvim".to_string(),
+                    path: "~/.config/nvim".to_string(),
+                    status: "missing".to_string(),
+                    actual_target: None,
+                },
+                DotfileDiffEntry {
+                    name: "fish".to_string(),
+                    path: "~/.config/fish".to_string(),
+                    status: "wrong_target".to_string(),
+                    actual_target: Some("/wrong/path".to_string()),
+                },
+            ],
+            backups: vec![],
+            staging_leftovers: vec![],
+            source_checkout: None,
+            summary: DiffSummary::default(),
+        };
+        let cmds = generate_reconcile_commands(&output);
+        assert_eq!(cmds.len(), 1);
+        assert!(cmds[0].contains("link --force"));
+        assert!(cmds[0].contains("nvim"));
+        assert!(cmds[0].contains("fish"));
+    }
+
+    #[test]
+    fn reconcile_empty_when_all_ok() {
+        let output = DiffOutput {
+            installed_tools: vec![ToolDiffEntry {
+                name: "bat".to_string(),
+                path: "/tmp/bat".to_string(),
+                status: "ok".to_string(),
+                installed_version: None,
+                expected_version: None,
+            }],
+            linked_dotfiles: vec![],
+            backups: vec![],
+            staging_leftovers: vec![],
+            source_checkout: None,
+            summary: DiffSummary::default(),
+        };
+        let cmds = generate_reconcile_commands(&output);
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn reconcile_includes_cleanup_for_stale() {
+        let output = DiffOutput {
+            installed_tools: vec![],
+            linked_dotfiles: vec![],
+            backups: vec![StaleEntry {
+                path: "/tmp/bat.dotman-backup".to_string(),
+                status: "stale".to_string(),
+            }],
+            staging_leftovers: vec![],
+            source_checkout: None,
+            summary: DiffSummary::default(),
+        };
+        let cmds = generate_reconcile_commands(&output);
+        assert_eq!(cmds.len(), 1);
+        assert!(cmds[0].contains("cleanup"));
+    }
+
+    #[test]
+    fn reconcile_batches_multiple_categories() {
+        let output = DiffOutput {
+            installed_tools: vec![ToolDiffEntry {
+                name: "fd".to_string(),
+                path: "/tmp/fd".to_string(),
+                status: "drifted".to_string(),
+                installed_version: Some("1.0".to_string()),
+                expected_version: Some("2.0".to_string()),
+            }],
+            linked_dotfiles: vec![DotfileDiffEntry {
+                name: "wezterm".to_string(),
+                path: "~/.config/wezterm".to_string(),
+                status: "missing".to_string(),
+                actual_target: None,
+            }],
+            backups: vec![StaleEntry {
+                path: "/tmp/old.dotman-backup".to_string(),
+                status: "stale".to_string(),
+            }],
+            staging_leftovers: vec![],
+            source_checkout: None,
+            summary: DiffSummary::default(),
+        };
+        let cmds = generate_reconcile_commands(&output);
+        assert_eq!(cmds.len(), 3);
+        assert!(cmds.iter().any(|c| c.contains("bootstrap")));
+        assert!(cmds.iter().any(|c| c.contains("link --force")));
+        assert!(cmds.iter().any(|c| c.contains("cleanup")));
     }
 }

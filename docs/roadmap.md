@@ -160,7 +160,7 @@ tests, recovery notes, manual smoke checks, and non-destructive scope limits.
 
 ### P2 - Narrow Diff And Reconcile Reporting
 
-Status: proposed
+Status: done
 Category: inspectability
 
 Spec:
