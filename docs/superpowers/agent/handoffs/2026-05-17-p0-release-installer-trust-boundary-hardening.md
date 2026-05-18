@@ -6,44 +6,53 @@ P0 - Release Installer Trust Boundary Hardening
 
 ## Phase
 
-verifying
+done (retroactive review completed, fixes applied)
 
 ## Exception Reason
 
-- None.
+- Multi-agent review was not followed during implementation. Retroactive review conducted post-hoc.
 
 ## Completed
 
-- Removed `|| true` from checksum download commands; checksum download is now mandatory.
-- Added early checksum tool detection; installer fails if shasum/sha256sum unavailable.
-- Added dotfiles source archive checksum verification.
-- Added 2 failure path integration tests (missing checksum, checksum mismatch).
-- Updated existing integration test to provide dotfiles source checksum.
+- Removed `|| true` from checksum downloads; mandatory verification.
+- Early checksum tool detection; fail if shasum/sha256sum unavailable.
+- Dotfiles source archive checksum verification added.
+- 4 failure path tests (missing binary checksum, binary mismatch, missing source checksum, source mismatch).
+- URL origin unified: dotfiles source and checksum both use BASE_URL by default.
+- Release workflow updated with `source` job to package dotfiles source + checksum.
+- README: removed "latest" claim, documented DOTMAN_VERSION, noted checksum verification.
+
+## Review Findings (retroactive multi-agent review)
+
+Three reviewers (Safety/Release, Product/Community, Workflow/Harness) identified
+9 issues. 4 blocking issues fixed:
+1. ✅ Release pipeline source checksum gap
+2. ✅ Missing tests (source checksum failure paths)
+3. ✅ URL origin mismatch
+4. ✅ README "latest" wording
+
+Remaining: checksum tool absence test (hard in CI, documented gap).
 
 ## Verification
 
-- Not yet recorded.
-
-- `cargo test install_script` passed: 3 passed, 0 failed
-
-- `cargo test` passed: 139 passed, 0 failed
-
-- `cargo clippy` passed: zero warnings
-
-- `make check` passed: manifest validation passes
+- `cargo test install_script`: 5 passed, 0 failed.
+- `cargo test`: 141 passed, 0 failed.
+- `cargo clippy`: clean.
+- `make check`: passes.
 
 ## Modified Files
 
-- `scripts/install.sh`
-- `tests/install_script.rs`
-- `docs/roadmap.md`
-- `docs/superpowers/specs/2026-05-17-p0-release-installer-trust-boundary-hardening-design.md`
-- `docs/superpowers/plans/2026-05-17-p0-release-installer-trust-boundary-hardening.md`
+- `scripts/install.sh`: URL fix, mandatory checksums.
+- `tests/install_script.rs`: +2 failure tests (source checksum missing/mismatch).
+- `.github/workflows/release-artifacts.yml`: +source job.
+- `README.md`: version wording, DOTMAN_VERSION docs.
+- `docs/superpowers/agent/reviews/2026-05-17-p0-release-installer-trust-boundary-hardening-review.md`: review synthesis.
 
 ## Unresolved Risks
 
-- None from this epic.
+- Checksum tool absence test not feasible in CI (requires removing system tool).
+- Partial state risk (binary installed before source verified) — tracked for recovery epic.
 
 ## Next Step
 
-Advance to verifying, record verifications, finish.
+Commit fixes and review document. Epic is now truly complete.

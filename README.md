@@ -8,7 +8,7 @@ macOS and Linux.
 
 ### Quick install (recommended)
 
-Download and install the latest `dotman` binary without cloning the repo:
+Download and install `dotman` without cloning the repo:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tabsp/dotfiles/main/scripts/install.sh | sh
@@ -16,6 +16,15 @@ curl -fsSL https://raw.githubusercontent.com/tabsp/dotfiles/main/scripts/install
 
 Prerequisites: `curl`, `tar`, and either `shasum` (macOS) or `sha256sum` (Linux).
 No Rust toolchain required.
+
+To install a specific version, set the `DOTMAN_VERSION` environment variable:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tabsp/dotfiles/main/scripts/install.sh | DOTMAN_VERSION=0.2.0 sh
+```
+
+If `DOTMAN_VERSION` is not set, the installer defaults to `0.1.0`.
+All downloads are checksum-verified before installation.
 
 The installer also downloads the matching dotfiles source into
 `~/.local/share/dotman/dotfiles`. Run `dotman bootstrap` from that directory:

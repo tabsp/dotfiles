@@ -47,10 +47,40 @@ jobs:
             dist/dotman-${{ matrix.target }}-*.tar.gz.sha256
           if-no-files-found: error
 
+  source:
+    name: Package dotfiles source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Create dotfiles source archive
+        run: |
+          VERSION="${{ inputs.tag }}"
+          VERSION="${VERSION#v}"
+          ARCHIVE="dotfiles-${VERSION}.tar.gz"
+          mkdir -p dist
+          tar -czf "dist/${ARCHIVE}" \
+            --exclude=.git \
+            --exclude=target \
+            --exclude=dist \
+            .
+          sha256sum "dist/${ARCHIVE}" > "dist/${ARCHIVE}.sha256"
+          echo "==> dotfiles source archive: dist/${ARCHIVE}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dotfiles-source
+          path: |
+            dist/dotfiles-*.tar.gz
+            dist/dotfiles-*.tar.gz.sha256
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
     if: ${{ inputs.publish_release }}
-    needs: build
+    needs: [build, source]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
