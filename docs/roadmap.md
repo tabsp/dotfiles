@@ -52,8 +52,14 @@ work is schedulable."
 
 ### P0 - Recovery Safety And Ownership Model
 
-Status: proposed
+Status: done
 Category: safety / recovery
+
+Spec:
+`docs/superpowers/specs/2026-05-18-p0-recovery-safety-and-ownership-model-design.md`
+
+Plan:
+`docs/superpowers/plans/2026-05-18-p0-recovery-safety-and-ownership-model.md`
 
 Depends on: P0 - Multi-Agent Review Protocol
 

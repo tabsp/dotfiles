@@ -49,6 +49,9 @@ Requires Rust and Cargo. See [Rust installation](https://rustup.rs/).
 - `make link CONFLICT=backup`: back up target conflicts before linking.
 - `make link CONFLICT=overwrite`: overwrite target conflicts before linking.
 - `make doctor`: inspect installed commands, versions, and linked files.
+- `dotman status`: print a read-only inventory of all managed state.
+- `dotman cleanup`: list and optionally remove stale backup and staging directories.
+- `make uninstall`: remove dotman binary and list remaining managed state.
 - `make shell`: interactively set fish as the login shell.
 - `make check`: validate manifests and host support.
 - `make update-deps-list`: list pinned download_binary deps
@@ -159,8 +162,6 @@ make link DRY_RUN=1
 
 ## Recovery / Rollback
 
-`make link CONFLICT=backup` creates backup files for conflicting link targets.
-If link results are not desired, restore from those backup files manually.
-
-Automatic rollback is not currently supported. Dependency installation side
-effects from package managers are not rolled back by this workflow.
+Run `dotman status` to inspect all managed state before taking
+any destructive action. See `docs/recovery.md` for full cleanup,
+backup, and uninstall procedures.

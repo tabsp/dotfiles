@@ -111,17 +111,18 @@ release-check: release
 uninstall:
 	@echo "==> removing dotman binary..."
 	@rm -f target/debug/dotman target/release/dotman
+	@rm -f "$$HOME/.local/bin/dotman"
 	@echo "==> dotman removed"
 	@echo ""
-	@echo "Managed state (not removed):"
+	@echo "Remaining managed state (use dotman status to inspect):"
 	@echo "  $$HOME/.local/bin/   - installed tools and symlinks"
 	@echo "  $$HOME/.config/...   - linked dotfiles"
 	@echo "  *.dotman-backup      - backup directories from conflict resolution"
 	@echo "  *.dotman-staging     - stale staging directories"
 	@echo ""
+	@echo "Run 'dotman status' for a full inventory of managed state."
 	@echo "Run 'dotman cleanup --execute' to remove stale backup/staging dirs."
 	@echo "See docs/recovery.md for full uninstall instructions."
-
 update-deps-list: build-dotman
 	$(DOTMAN) update
 

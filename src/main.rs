@@ -15,6 +15,7 @@ mod platform;
 mod process;
 mod recovery;
 mod shell;
+mod status;
 mod update;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -53,6 +54,10 @@ enum Command {
     Cleanup {
         #[arg(long)]
         execute: bool,
+    },
+    Status {
+        #[arg(long)]
+        json: bool,
     },
     Update {
         #[arg(long)]
@@ -100,6 +105,7 @@ fn run() -> Result<(), String> {
         Command::Shell => shell::run_shell(),
         Command::Check => run_check(),
         Command::Cleanup { execute } => recovery::run_cleanup(execute),
+        Command::Status { json } => status::run_status(json),
         Command::Update { check } => run_update(check),
         Command::Agent { command } => agent::run_agent(command),
         Command::Add { command } => add::run_add(command),
