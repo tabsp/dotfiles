@@ -1,6 +1,6 @@
 .PHONY: help bootstrap link doctor shell check lint test ci build build-dotman \
              cargo-preflight \
-             agent-init agent-next agent-start agent-status agent-check agent-handoff agent-template \
+             agent-init agent-next agent-start agent-status agent-check agent-review-check agent-handoff agent-template \
              agent-advance agent-record-verification agent-finish agent-set-roadmap-status \
              uninstall release release-check
 .DEFAULT_GOAL := help
@@ -26,6 +26,7 @@ help:
 		'  make agent-start                 Lock one roadmap epic for work' \
 		'  make agent-status                Print current agent state' \
 		'  make agent-check                 Validate workflow consistency' \
+		'  make agent-review-check          Validate multi-agent review document exists' \
 		'  make agent-handoff               Create or validate handoff notes' \
 		'  make agent-template              Create spec or plan from template' \
 		'  make agent-advance               Advance active epic phase' \
@@ -141,6 +142,9 @@ agent-status: build-dotman
 
 agent-check: build-dotman
 	$(DOTMAN) agent check
+
+agent-review-check: build-dotman
+	$(DOTMAN) agent review-check
 
 agent-handoff: build-dotman
 	$(DOTMAN) agent handoff --mode $(MODE) $(if $(SECTION),--section $(SECTION),) $(if $(VALUE),--value $(VALUE),)

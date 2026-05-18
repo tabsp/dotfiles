@@ -75,16 +75,26 @@ normal roadmap execution.
 
 ## Multi-Agent Review
 
-For roadmap refreshes and safety-sensitive epics, use multi-agent review before
-writing the implementation spec or plan. Safety-sensitive epics include release
-installation, bootstrap, dependency installation, archive extraction, symlinks,
-remote scripts, cleanup, uninstall, recovery, and agent workflow changes.
+**Hard rule:** All roadmap epics require multi-agent review. The harness
+enforces this via `make agent-advance` — advancing to `in_progress` or
+`verifying` without a review document will fail with `AGENT_REVIEW_MISSING`.
 
-Multi-agent review is a bounded planning review, not implementation. Reviewer
-agents must be read-only unless the user explicitly authorizes file edits. Use
-separate reviewer roles for safety/release, product/community, and
-workflow/harness concerns. The coordinating agent must synthesize consensus,
-disagreements, accepted changes, rejected changes, and risk register updates.
+Three review gates, each with the same three reviewer roles (Safety/Release,
+Product/Community, Workflow/Harness):
+
+| Gate | Trigger | Review Target | Blocks Advance To |
+|------|---------|---------------|-------------------|
+| Design Review | spec written | spec document | `planned` |
+| Approach Review | plan written | spec + plan | `in_progress` |
+| Code Review | code written | git diff + tests | `done` |
+
+Each gate may run multiple rounds until findings are resolved. Reviewer agents
+are **read-only** with isolated context. The coordinator synthesizes findings,
+resolves disagreements, and must obtain user confirmation before any file edits.
+
+Commands:
+- `make agent-review-check` — validate review document exists for current epic.
+- `make agent-advance PHASE=in_progress` — harness will reject without review doc.
 
 **Template:** `docs/superpowers/agent/templates/multi-agent-review.md`
 

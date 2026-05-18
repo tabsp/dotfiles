@@ -1,26 +1,19 @@
-# Multi-Agent Review - YYYY-MM-DD
+# Multi-Agent Review - {{EPIC}}
 
 ## Protocol Rules
 
-This review follows the Multi-Agent Review Protocol. Reviewers are **read-only
-specialists** with isolated context. They gather evidence and discover risks,
-but do not vote. The coordinator is responsible for final judgment.
+This review follows the Multi-Agent Review Protocol. Reviewer agents are
+**read-only specialists** with isolated context. They gather evidence and
+discover risks, but do not vote. The coordinator is responsible for final
+judgment.
 
 - Reviewers must not modify files.
 - Reviewers operate in isolated context (no shared state with other reviewers).
 - Each reviewer fills only their assigned role section.
 - The coordinator synthesizes all reviewer outputs, resolves disagreements,
   and presents findings to the user for confirmation before any file edits.
-
-## Trigger
-
-Why multi-agent review is required for this work. Reference the trigger
-criteria (roadmap refresh, safety-sensitive P0 epic, agent harness safety gate
-change).
-
-## Scope
-
-Files, docs, epics, or subsystems reviewed.
+- Reviews may run multiple rounds per gate. Record each round in the
+  corresponding section below.
 
 ## Reviewer Roles
 
@@ -32,68 +25,137 @@ Three fixed roles, each with read-only constraints and isolated context:
 | Product / Community | User value, comparable tools, productization timing, documentation quality, community expectations | Read-only; reviews user-facing impact and product direction only |
 | Workflow / Harness | Roadmap scheduling, specs/plans, handoffs, agent process, CI, verification completeness | Read-only; reviews process and agent workflow quality only |
 
+---
+
+## Gate 1: Design Review (spec → plan)
+
+Review the spec document before the plan is written.
+
+### Round 1
+
 | Role | Agent / Reviewer | Status |
 |------|------------------|--------|
 | Safety / Release | | pending |
 | Product / Community | | pending |
 | Workflow / Harness | | pending |
 
-## Reviewer Findings
-
-### Safety / Release
-
+#### Safety / Release
 - Findings:
 - Priority changes:
 - Risks:
 
-### Product / Community
-
+#### Product / Community
 - Findings:
 - Priority changes:
 - Risks:
 
-### Workflow / Harness
-
+#### Workflow / Harness
 - Findings:
 - Priority changes:
 - Risks:
 
-## Stable Consensus
+#### Round 1 Synthesis
+- Consensus:
+- Disagreements:
+- Accepted changes:
+- Rejected suggestions:
 
-What all or most reviewers agree on. If no consensus is reached on a point,
-list it under Disagreements instead.
+### Round 2 (if needed)
+...
 
-## Disagreements
+---
 
-| Topic | Positions | Coordinator decision | Rationale |
-|-------|-----------|----------------------|-----------|
+## Gate 2: Approach Review (plan → implementation)
 
-The coordinator resolves disagreements with explicit rationale. Disagreement
-resolution is not a compromise; the coordinator chooses the best path based on
-project priorities and safety rules.
+Review the spec + plan before code is written.
 
-## Accepted Roadmap Changes
+### Round 1
 
-- Change and reason.
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | | pending |
+| Product / Community | | pending |
+| Workflow / Harness | | pending |
 
-## Rejected Or Deferred Suggestions
+#### Safety / Release
+- Findings:
+- Priority changes:
+- Risks:
 
-- Suggestion and reason for rejection/deferral.
+#### Product / Community
+- Findings:
+- Priority changes:
+- Risks:
+
+#### Workflow / Harness
+- Findings:
+- Priority changes:
+- Risks:
+
+#### Round 1 Synthesis
+- Consensus:
+- Disagreements:
+- Accepted changes:
+- Rejected suggestions:
+
+### Round 2 (if needed)
+...
+
+---
+
+## Gate 3: Code Review (implementation → done)
+
+Review the git diff, code changes, and test coverage before finishing.
+
+### Round 1
+
+| Role | Agent / Reviewer | Status |
+|------|------------------|--------|
+| Safety / Release | | pending |
+| Product / Community | | pending |
+| Workflow / Harness | | pending |
+
+#### Safety / Release
+- Code review findings:
+- Error handling coverage:
+- Test coverage gaps:
+- Risks:
+
+#### Product / Community
+- Code review findings:
+- UX / API surface:
+- Documentation changes:
+- Risks:
+
+#### Workflow / Harness
+- Code review findings:
+- CI / verification impact:
+- Handoff completeness:
+- Risks:
+
+#### Round 1 Synthesis
+- Consensus:
+- Disagreements:
+- Accepted changes:
+- Rejected suggestions:
+
+### Round 2 (if needed)
+...
+
+---
 
 ## Risk Register Updates
 
 | Risk | Evidence | Linked Epic | Proposed Status |
 |------|----------|-------------|-----------------|
 
-New risks discovered during review. Existing risks that should be updated.
-
 ## Coordinator Summary
 
-Final judgment after synthesizing reviewer outputs. Must include:
+Final judgment after synthesizing all gate reviews. Must include:
 
-1. Summary of consensus findings.
+1. Summary of consensus findings across all gates.
 2. Summary of resolved disagreements with rationale.
 3. List of accepted changes.
 4. List of rejected suggestions with reasons.
 5. Updated risk register entries.
-6. Next action (start implementation, revise spec, or request re-review).
+6. Next action (start next gate, revise artifacts, or proceed to finish).

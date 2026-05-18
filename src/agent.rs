@@ -47,6 +47,7 @@ pub(crate) enum AgentCommand {
         phase: Phase,
     },
     Finish,
+    ReviewCheck,
     SetRoadmapStatus {
         #[arg(long)]
         status: String,
@@ -65,6 +66,8 @@ struct AgentState {
     plan: String,
     current_handoff: String,
     last_handoff: String,
+    #[serde(default)]
+    review: String,
     verification: Vec<VerificationEntry>,
 }
 
@@ -172,6 +175,7 @@ pub(crate) fn run_agent(command: AgentCommand) -> Result<(), String> {
             result,
             summary,
         } => record_verification(&repo, &command, result, &summary),
+        AgentCommand::ReviewCheck => review_check(&repo),
         AgentCommand::Check => check(&repo),
         AgentCommand::Advance { phase } => advance(&repo, phase),
         AgentCommand::Finish => finish(&repo),
@@ -213,6 +217,7 @@ impl AgentState {
             plan: String::new(),
             current_handoff: "docs/superpowers/agent/current-handoff.md".to_string(),
             last_handoff: String::new(),
+            review: String::new(),
             verification: Vec::new(),
         }
     }
@@ -359,6 +364,12 @@ fn default_spec_path(repo: &Path, items: &[RoadmapItem], epic: &str, today: &str
     format!("{base}-design.md")
 }
 
+fn default_review_path(spec_path: &str) -> String {
+    spec_path
+        .replace("docs/superpowers/specs/", "docs/superpowers/agent/reviews/")
+        .replace("-design.md", "-review.md")
+}
+
 fn default_plan_path(spec_path: &str) -> String {
     spec_path
         .replace("specs/", "plans/")
@@ -428,6 +439,7 @@ fn start(
         .plan
         .clone()
         .unwrap_or_else(|| default_plan_path(&spec_path));
+    let review_path = default_review_path(&spec_path);
 
     // For roadmap work, collapse phase if artifacts exist
     if work_kind == WorkKind::Roadmap {
@@ -447,6 +459,7 @@ fn start(
     state.exception_reason = exception_reason.to_string();
     state.spec = spec_path;
     state.plan = plan_path;
+    state.review = review_path;
     state.current_handoff = "docs/superpowers/agent/current-handoff.md".to_string();
 
     write_state(repo, &state)?;
@@ -811,6 +824,7 @@ struct ArtifactStatus {
     spec_exists: bool,
     plan_exists: bool,
     handoff_exists: bool,
+    review_exists: bool,
 }
 
 fn check_state_consistency(
@@ -901,6 +915,16 @@ fn check_state_consistency(
 
     // Handoff check — current-handoff.md is required for active phases.
     // After finish the file is moved; the durable record is last_handoff.
+    // Multi-agent review: InProgress and Verifying phases require review document
+    if matches!(state.phase, Phase::InProgress | Phase::Verifying)
+        && state.work_kind == WorkKind::Roadmap
+        && !artifacts.review_exists
+    {
+        report
+            .errors
+            .push("AGENT_REVIEW_MISSING: multi-agent review document is missing".to_string());
+    }
+
     if matches!(state.phase, Phase::InProgress | Phase::Verifying) && !artifacts.handoff_exists {
         report
             .errors
@@ -1156,7 +1180,29 @@ fn artifact_status_from_repo(repo: &Path, state: &AgentState) -> ArtifactStatus 
         spec_exists: !state.spec.is_empty() && repo.join(&state.spec).exists(),
         plan_exists: !state.plan.is_empty() && repo.join(&state.plan).exists(),
         handoff_exists: repo.join(HANDOFF_PATH).exists(),
+        review_exists: !state.review.is_empty() && repo.join(&state.review).exists(),
     }
+}
+
+fn review_check(repo: &Path) -> Result<(), String> {
+    let state = read_state(repo)?;
+    if state.review.is_empty() {
+        return Err("AGENT_REVIEW_MISSING: no review path recorded in state".to_string());
+    }
+    let review_path = repo.join(&state.review);
+    if !review_path.exists() {
+        return Err(format!(
+            "AGENT_REVIEW_MISSING: review document not found: {}",
+            state.review
+        ));
+    }
+    let review_content = std::fs::read_to_string(&review_path)
+        .map_err(|e| format!("failed to read review document: {e}"))?;
+    if review_content.trim().is_empty() {
+        return Err("AGENT_REVIEW_MISSING: review document is empty".to_string());
+    }
+    output::progress(format!("review document: {}", state.review));
+    Ok(())
 }
 
 fn check(repo: &Path) -> Result<(), String> {
@@ -1280,6 +1326,20 @@ fn advance(repo: &Path, target: Phase) -> Result<(), String> {
         if !harness_done {
             return Err(
                 "AGENT_P0_PREREQUISITE: P0 - Roadmap Agent Harness blocks implementation work"
+                    .to_string(),
+            );
+        }
+    }
+
+    // Multi-agent review: advance to InProgress or Verifying requires review document.
+    // Exempt P0 - Roadmap Agent Harness (foundational harness, predates review protocol).
+    if state.work_kind == WorkKind::Roadmap
+        && matches!(target, Phase::InProgress | Phase::Verifying)
+        && state.current_epic != "P0 - Roadmap Agent Harness"
+    {
+        if state.review.is_empty() || !repo.join(&state.review).exists() {
+            return Err(
+                "AGENT_REVIEW_MISSING: multi-agent review document required before implementation"
                     .to_string(),
             );
         }
@@ -1537,6 +1597,7 @@ mod tests {
             plan: "docs/superpowers/plans/atomic.md".to_string(),
             current_handoff: "docs/superpowers/agent/current-handoff.md".to_string(),
             last_handoff: String::new(),
+            review: String::new(),
             verification: Vec::new(),
         };
         let item = RoadmapItem {
@@ -1552,6 +1613,7 @@ mod tests {
             spec_exists: true,
             plan_exists: true,
             handoff_exists: true,
+            review_exists: false,
         };
         let report = check_state_consistency(&state, &[item], &artifacts);
         assert!(
@@ -1595,6 +1657,7 @@ mod tests {
             plan: "docs/superpowers/plans/atomic-directory-install.md".to_string(),
             current_handoff: "docs/superpowers/agent/current-handoff.md".to_string(),
             last_handoff: String::new(),
+            review: String::new(),
             verification: Vec::new(),
         };
         let items = vec![
@@ -1622,6 +1685,7 @@ mod tests {
             spec_exists: true,
             plan_exists: true,
             handoff_exists: true,
+            review_exists: false,
         };
         let report = check_state_consistency(&state, &items, &artifacts);
         assert!(report.errors.iter().any(|err| {
@@ -1695,6 +1759,7 @@ mod tests {
             plan: "docs/superpowers/plans/test.md".to_string(),
             current_handoff: "docs/superpowers/agent/current-handoff.md".to_string(),
             last_handoff: String::new(),
+            review: String::new(),
             verification: Vec::new(),
         }
     }
@@ -1719,7 +1784,8 @@ mod tests {
                     spec_exists: true,
                     plan_exists: true,
                     handoff_exists: true,
-                },
+            review_exists: false,
+        },
             );
             assert!(
                 report.errors.iter().any(|e| e.contains("AGENT_")),
@@ -1736,7 +1802,8 @@ mod tests {
                 spec_exists: true,
                 plan_exists: true,
                 handoff_exists: true,
-            },
+            review_exists: false,
+        },
         );
         assert!(
             warn_report
@@ -1752,7 +1819,8 @@ mod tests {
                 spec_exists: true,
                 plan_exists: true,
                 handoff_exists: true,
-            },
+            review_exists: false,
+        },
         );
         assert!(pass_report.errors.is_empty());
     }
@@ -1800,6 +1868,7 @@ in_progress
             plan: "docs/superpowers/plans/2026-05-14-roadmap-agent-harness.md".to_string(),
             current_handoff: "docs/superpowers/agent/current-handoff.md".to_string(),
             last_handoff: String::new(),
+            review: String::new(),
             verification: Vec::new(),
         };
 
@@ -1815,6 +1884,7 @@ in_progress
             spec_exists: false,
             plan_exists: false,
             handoff_exists: false,
+            review_exists: false,
         };
 
         let report = check_state_consistency(&state, &[item], &artifacts);
@@ -1909,6 +1979,7 @@ Category: observability
             plan: "docs/superpowers/plans/2026-05-14-roadmap-agent-harness.md".to_string(),
             current_handoff: "docs/superpowers/agent/current-handoff.md".to_string(),
             last_handoff: String::new(),
+            review: String::new(),
             verification: vec![VerificationEntry {
                 command: "cargo test".to_string(),
                 result: VerificationResult::Passed,
