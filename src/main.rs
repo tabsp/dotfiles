@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 mod add;
-mod agent;
 mod archive;
 mod check;
 mod config;
@@ -32,10 +31,6 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Agent {
-        #[command(subcommand)]
-        command: agent::AgentCommand,
-    },
     Bootstrap {
         #[arg(long)]
         dry_run: bool,
@@ -121,7 +116,6 @@ fn run() -> Result<(), String> {
             reconcile,
         } => diff::run_diff(json, narrow, reconcile),
         Command::Update { check } => run_update(check),
-        Command::Agent { command } => agent::run_agent(command),
         Command::Add { command } => add::run_add(command),
     }
 }

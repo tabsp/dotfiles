@@ -366,7 +366,7 @@ fn install_archive_dir(
     if let Err(err) = copy_dir_recursive(&source_dir, &staging) {
         let _ = fs::remove_dir_all(&staging);
         return Err(format!(
-            "AGENT_ARCHIVE_DIR_STAGE_FAILED: failed to stage directory install: {err}"
+            "DOTMAN_ARCHIVE_DIR_STAGE_FAILED: failed to stage directory install: {err}"
         ));
     }
 
@@ -387,7 +387,7 @@ fn install_archive_dir(
         fs::rename(install_dir_to, &old).map_err(|err| {
             let _ = fs::remove_dir_all(&staging);
             format!(
-                "AGENT_ARCHIVE_DIR_RENAME_FAILED: failed to move old install directory {}: {err}",
+                "DOTMAN_ARCHIVE_DIR_RENAME_FAILED: failed to move old install directory {}: {err}",
                 install_dir_to.display()
             )
         })?;
@@ -406,7 +406,7 @@ fn install_archive_dir(
         }
         let _ = fs::remove_dir_all(&staging);
         return Err(format!(
-            "AGENT_ARCHIVE_DIR_PROMOTE_FAILED: failed to promote staged directory to {}: {err}",
+            "DOTMAN_ARCHIVE_DIR_PROMOTE_FAILED: failed to promote staged directory to {}: {err}",
             install_dir_to.display()
         ));
     }
@@ -437,7 +437,7 @@ fn install_archive_dir(
     {
         std::os::unix::fs::symlink(&target_binary, install_to).map_err(|err| {
             format!(
-                "AGENT_ARCHIVE_DIR_SYMLINK_FAILED: failed to link binary {} -> {}: {err}",
+                "DOTMAN_ARCHIVE_DIR_SYMLINK_FAILED: failed to link binary {} -> {}: {err}",
                 install_to.display(),
                 target_binary.display()
             )
@@ -454,7 +454,7 @@ fn install_archive_dir(
         && let Err(err) = fs::remove_dir_all(&old)
     {
         eprintln!(
-            "AGENT_ARCHIVE_DIR_CLEANUP_FAILED: warn: failed to remove old install backup {}: {err}",
+            "DOTMAN_ARCHIVE_DIR_CLEANUP_FAILED: warn: failed to remove old install backup {}: {err}",
             old.display()
         );
     }

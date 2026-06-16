@@ -18,8 +18,3 @@ config/fish/fish_variables
 config/fish/completions/
 config/fish/conf.d/
 config/fish/functions/
-
-# Superpowers agent runtime state. Keep templates, specs, plans, reviews, and
-# finished handoffs tracked.
-docs/superpowers/agent/state.toml
-docs/superpowers/agent/current-handoff.md

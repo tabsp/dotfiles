@@ -1,8 +1,6 @@
 .PHONY: help bootstrap link doctor shell check lint test ci build build-dotman \
-             cargo-preflight \
-             agent-init agent-next agent-start agent-status agent-check agent-review-check agent-handoff agent-template \
-             agent-advance agent-record-verification agent-finish agent-set-roadmap-status \
-             uninstall release release-check smoke-test
+	             cargo-preflight \
+	             uninstall release release-check smoke-test
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -18,22 +16,11 @@ help:
 		'  make link DRY_RUN=1              Preview link actions' \
 		'  make link CONFLICT=fail          Fail on target conflicts' \
 		'  make link CONFLICT=backup        Back up target conflicts before linking' \
-		'  make link CONFLICT=overwrite     Overwrite target conflicts before linking' \
-		'  make doctor                      Inspect installed commands and managed links' \
-		'  make shell                       Interactively set fish as the login shell' \
-		'  make agent-init                  Initialize roadmap agent runtime state' \
-		'  make agent-next                  Print next eligible roadmap epic' \
-		'  make agent-start                 Lock one roadmap epic for work' \
-		'  make agent-status                Print current agent state' \
-		'  make agent-check                 Validate workflow consistency' \
-		'  make agent-review-check          Validate multi-agent review document exists' \
-		'  make agent-handoff               Create or validate handoff notes' \
-		'  make agent-template              Create spec or plan from template' \
-		'  make agent-advance               Advance active epic phase' \
-		'  make agent-record-verification   Record verification evidence' \
-		'  make agent-finish                Finish active epic after verification' \
-		'  make check                       Validate manifests and host support' \
-		'  make lint                        Run cargo fmt and clippy checks' \
+			'  make link CONFLICT=overwrite     Overwrite target conflicts before linking' \
+			'  make doctor                      Inspect installed commands and managed links' \
+			'  make shell                       Interactively set fish as the login shell' \
+			'  make check                       Validate manifests and host support' \
+			'  make lint                        Run cargo fmt and clippy checks' \
 		'  make test                        Run Rust tests' \
 		'  make ci                          Run local verification suite' \
 		'  make release                     Build release binary tarball and checksum' \
@@ -134,39 +121,3 @@ update-deps-list: build-dotman
 
 update-deps-check: build-dotman
 	$(DOTMAN) update --check
-
-agent-init: build-dotman
-	$(DOTMAN) agent init
-
-agent-next: build-dotman
-	$(DOTMAN) agent next
-
-agent-start: build-dotman
-	$(DOTMAN) agent start --epic "$(EPIC)" --work-kind $(or $(WORK_KIND),roadmap) $(if $(EXCEPTION_REASON),--exception-reason "$(EXCEPTION_REASON)",)
-
-agent-status: build-dotman
-	$(DOTMAN) agent status
-
-agent-check: build-dotman
-	$(DOTMAN) agent check
-
-agent-review-check: build-dotman
-	$(DOTMAN) agent review-check
-
-agent-handoff: build-dotman
-	$(DOTMAN) agent handoff --mode $(MODE) $(if $(SECTION),--section $(SECTION),) $(if $(VALUE),--value $(VALUE),)
-
-agent-template: build-dotman
-	$(DOTMAN) agent template --kind $(KIND)
-
-agent-advance: build-dotman
-	$(DOTMAN) agent advance --phase $(PHASE)
-
-agent-record-verification: build-dotman
-	$(DOTMAN) agent record-verification --command "$(COMMAND)" --result $(RESULT) --summary "$(SUMMARY)"
-
-agent-set-roadmap-status: build-dotman
-	$(DOTMAN) agent set-roadmap-status --status $(STATUS)
-
-agent-finish: build-dotman
-	$(DOTMAN) agent finish

@@ -6,8 +6,8 @@
 
 | Bump | Criteria |
 |------|----------|
-| **MAJOR** | Breaking changes to `deps.toml` / `dotfiles.toml` schema; CLI flag removal or rename; `AGENT_*` error code removal or rename |
-| **MINOR** | New installer types; new CLI flags; new manifest fields (backward compatible); new `AGENT_*` error codes |
+| **MAJOR** | Breaking changes to `deps.toml` / `dotfiles.toml` schema; CLI flag removal or rename |
+| **MINOR** | New installer types; new CLI flags; new manifest fields (backward compatible) |
 | **PATCH** | Bug fixes; documentation updates; internal refactors |
 
 Pre-1.0 (current version `0.1.0`): MINOR bumps may include breaking changes.
@@ -34,7 +34,7 @@ The SHA256 checksum file contains the hex digest and filename, one per line.
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/):
 - Sections: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **Security**.
 - Updated with each release.
-- Each entry references the relevant roadmap epic or commit where practical.
+- Each entry references the relevant commit where practical.
 
 ## Backward Compatibility
 
@@ -50,12 +50,6 @@ The SHA256 checksum file contains the hex digest and filename, one per line.
 - New flags and subcommands: MINOR.
 - Flag/subcommand removal or rename: MAJOR.
 - Deprecated flags print a warning for at least one MINOR release before removal.
-
-### Error Codes (`AGENT_*`)
-
-- `AGENT_*` codes used by the agent harness are stable within a MAJOR version.
-- New codes: MINOR.
-- Renaming or renumbering existing codes: MAJOR.
 
 ### Internal APIs
 

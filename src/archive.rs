@@ -42,7 +42,7 @@ fn validate_entry_path(dest: &Path, entry_path: &Path) -> Result<PathBuf, String
                 depth -= 1;
                 if depth < 0 {
                     return Err(format!(
-                        "AGENT_EXTRACT_PATH_TRAVERSAL: archive entry escapes destination: {}",
+                        "DOTMAN_EXTRACT_PATH_TRAVERSAL: archive entry escapes destination: {}",
                         entry_path.display()
                     ));
                 }
@@ -50,7 +50,7 @@ fn validate_entry_path(dest: &Path, entry_path: &Path) -> Result<PathBuf, String
             Component::Normal(_) => depth += 1,
             Component::RootDir | Component::Prefix(_) => {
                 return Err(format!(
-                    "AGENT_EXTRACT_PATH_TRAVERSAL: archive entry has absolute path: {}",
+                    "DOTMAN_EXTRACT_PATH_TRAVERSAL: archive entry has absolute path: {}",
                     entry_path.display()
                 ));
             }
@@ -66,7 +66,7 @@ fn validate_entry_path(dest: &Path, entry_path: &Path) -> Result<PathBuf, String
         && !canonical_out.starts_with(&canonical_dest)
     {
         return Err(format!(
-            "AGENT_EXTRACT_PATH_TRAVERSAL: archive entry escapes destination: {}",
+            "DOTMAN_EXTRACT_PATH_TRAVERSAL: archive entry escapes destination: {}",
             entry_path.display()
         ));
     }
@@ -121,13 +121,13 @@ fn unpack_tar_safe<R: std::io::Read>(
         let entry_type = entry.header().entry_type();
         if entry_type == tar::EntryType::Symlink {
             return Err(format!(
-                "AGENT_EXTRACT_SYMLINK_REJECTED: archive contains symlink: {}",
+                "DOTMAN_EXTRACT_SYMLINK_REJECTED: archive contains symlink: {}",
                 entry_path.display()
             ));
         }
         if entry_type == tar::EntryType::Link {
             return Err(format!(
-                "AGENT_EXTRACT_HARDLINK_REJECTED: archive contains hardlink: {}",
+                "DOTMAN_EXTRACT_HARDLINK_REJECTED: archive contains hardlink: {}",
                 entry_path.display()
             ));
         }
@@ -174,14 +174,14 @@ fn unpack_zip_safe(
         let mangled = entry.mangled_name();
         if mangled.as_os_str().is_empty() {
             return Err(format!(
-                "AGENT_EXTRACT_EMPTY_PATH: zip entry at index {i} has empty or invalid path"
+                "DOTMAN_EXTRACT_EMPTY_PATH: zip entry at index {i} has empty or invalid path"
             ));
         }
 
         // Reject symlinks in zip.
         if entry.is_symlink() {
             return Err(format!(
-                "AGENT_EXTRACT_SYMLINK_REJECTED: zip contains symlink: {}",
+                "DOTMAN_EXTRACT_SYMLINK_REJECTED: zip contains symlink: {}",
                 mangled.display()
             ));
         }
@@ -284,7 +284,7 @@ mod tests {
 
         let err = unpack(&gz_bytes, &ArchiveKind::TarGz, dest.path()).expect_err("should fail");
         assert!(
-            err.contains("AGENT_EXTRACT_SYMLINK_REJECTED"),
+            err.contains("DOTMAN_EXTRACT_SYMLINK_REJECTED"),
             "expected symlink rejected error, got: {err}"
         );
     }
@@ -308,7 +308,7 @@ mod tests {
 
         let err = unpack(&gz_bytes, &ArchiveKind::TarGz, dest.path()).expect_err("should fail");
         assert!(
-            err.contains("AGENT_EXTRACT_HARDLINK_REJECTED"),
+            err.contains("DOTMAN_EXTRACT_HARDLINK_REJECTED"),
             "expected hardlink rejected error, got: {err}"
         );
     }
@@ -378,7 +378,7 @@ mod tests {
 
         let err = unpack(&zip_bytes, &ArchiveKind::Zip, dest.path()).expect_err("should fail");
         assert!(
-            err.contains("AGENT_EXTRACT_EMPTY_PATH"),
+            err.contains("DOTMAN_EXTRACT_EMPTY_PATH"),
             "expected empty path error, got: {err}"
         );
     }
@@ -390,7 +390,7 @@ mod tests {
         let dest = tempfile::tempdir().expect("dest");
         let err =
             validate_entry_path(dest.path(), Path::new("../escape")).expect_err("should fail");
-        assert!(err.contains("AGENT_EXTRACT_PATH_TRAVERSAL"), "got: {err}");
+        assert!(err.contains("DOTMAN_EXTRACT_PATH_TRAVERSAL"), "got: {err}");
     }
 
     #[test]
@@ -398,7 +398,7 @@ mod tests {
         let dest = tempfile::tempdir().expect("dest");
         let err = validate_entry_path(dest.path(), Path::new("foo/../../../escape"))
             .expect_err("should fail");
-        assert!(err.contains("AGENT_EXTRACT_PATH_TRAVERSAL"), "got: {err}");
+        assert!(err.contains("DOTMAN_EXTRACT_PATH_TRAVERSAL"), "got: {err}");
     }
 
     #[test]

@@ -70,5 +70,4 @@ When adding new platform-specific code:
 
 ## Future
 
-Windows support is tracked as a potential future epic. It is intentionally
-out of scope for the current roadmap (P0–P3).
+Windows support is intentionally out of scope for the current project.
