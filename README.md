@@ -1,5 +1,7 @@
 # dotfiles
 
+[中文](README.zh-CN.md)
+
 Personal dotfiles managed by `dotman`, a small Rust dotfiles deployer inspired
 by Dotbot's ordered configuration model.
 
