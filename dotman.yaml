@@ -1,0 +1,20 @@
+- defaults:
+    link:
+      create: true
+      relink: true
+      relative: true
+
+- link:
+    ~/.config/fish: config/fish
+    ~/.config/nvim: config/nvim
+    ~/.config/ghostty: config/ghostty
+    ~/.tmux.conf: config/tmux.conf
+
+- create:
+    - ~/.config/fish/local.d
+
+- shell:
+    - command: fish -lc 'fisher update'
+      description: Sync fish plugins
+      stdout: true
+      stderr: true

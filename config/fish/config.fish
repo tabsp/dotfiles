@@ -61,3 +61,10 @@ end
 # bun
 set --export BUN_INSTALL "$HOME/.bun"
 set --export PATH $BUN_INSTALL/bin $PATH
+
+set -l local_fish_dir "$HOME/.config/fish/local.d"
+if test -d $local_fish_dir
+    for file in $local_fish_dir/*.fish
+        source $file
+    end
+end

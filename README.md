@@ -1,169 +1,103 @@
 # dotfiles
 
-Personal dotfiles managed by `dotman`, a safety-first bootstrap manager for
-macOS and Linux.
+Personal dotfiles managed by `dotman`, a small Rust dotfiles deployer inspired
+by Dotbot's ordered configuration model.
 
+## Prerequisites
 
-## Install
-
-### Quick install (recommended)
-
-Download and install `dotman` without cloning the repo:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/tabsp/dotfiles/main/scripts/install.sh | sh
-```
-
-Prerequisites: `curl`, `tar`, and either `shasum` (macOS) or `sha256sum` (Linux).
-No Rust toolchain required.
-
-To install a specific version, set the `DOTMAN_VERSION` environment variable:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/tabsp/dotfiles/main/scripts/install.sh | DOTMAN_VERSION=0.2.0 sh
-```
-
-If `DOTMAN_VERSION` is not set, the installer defaults to `0.1.0`.
-All downloads are checksum-verified before installation.
-
-The installer also downloads the matching dotfiles source into
-`~/.local/share/dotman/dotfiles`. Run `dotman bootstrap` from that directory:
-
-```sh
-cd ~/.local/share/dotman/dotfiles
-dotman bootstrap
-```
-
-### Build from source
-
-Requires Rust and Cargo. See [Rust installation](https://rustup.rs/).
-
-## Commands
-
-- `make help`: print the available public commands.
-- `make build`: build the Rust backend without changing machine state.
-- `make bootstrap`: build `dotman`, check manifests, install missing supported dependencies, link dotfiles, and run doctor.
-- `make link`: link managed files from `dotfiles.toml`.
-- `make link DRY_RUN=1`: preview link actions.
-- `make link CONFLICT=fail`: fail on target conflicts.
-- `make link CONFLICT=backup`: back up target conflicts before linking.
-- `make link CONFLICT=overwrite`: overwrite target conflicts before linking.
-- `make doctor`: inspect installed commands, versions, and linked files.
-- `dotman status`: print a read-only inventory of all managed state.
-- `dotman diff`: compare manifests to machine state, reporting missing, drifted, and stale items.
-- `dotman diff --json`: machine-readable diff output.
-- `dotman cleanup`: list and optionally remove stale backup and staging directories.
-- `make uninstall`: remove dotman binary and list remaining managed state.
-- `make shell`: interactively set fish as the login shell.
-- `make check`: validate manifests and host support.
-- `make update-deps-list`: list pinned download_binary deps
-- `make update-deps-check`: check for newer GitHub releases
-- `make lint`: run formatting and static analysis checks.
-- `make test`: run Rust tests.
-- `make ci`: run local verification (`lint` -> `check` -> `test`).
-- `make release-check`: build the current host release artifact and verify its checksum.
-
-### Release artifacts
-
-`make release-check` builds and verifies the current host artifact locally.
-For a tagged release, run the **Release Artifacts** GitHub Actions workflow with
-the release tag to build the supported macOS and Linux tarballs on native
-runners and optionally attach them to the GitHub Release.
-
-## Development Dependencies
-
-- Rust toolchain with `cargo`, `rustfmt`, and `clippy`
-- C compiler/linker for Rust crates with native dependencies
+- Rust toolchain with Cargo
 - GNU Make
-- Git
+- fish shell
 
-These are bootstrap prerequisites: they must exist before `make bootstrap` can
-build and run `dotman`. Dependencies in `deps.toml` are managed after the Rust
-backend has already been built.
+## Usage
 
-On Ubuntu/Debian, install the non-Rust build prerequisites first:
+Build the deployer:
 
 ```sh
-sudo apt-get install -y git make build-essential
+make build
 ```
 
-On macOS, install Xcode Command Line Tools first:
+Preview the deployment:
 
 ```sh
-xcode-select --install
+make deploy DRY_RUN=1
 ```
 
-Install Rust with rustup, then make sure `cargo`, `rustc`, `rustfmt`, and
-`clippy` are available on `PATH`.
+Deploy dotfiles:
+
+```sh
+make deploy
+```
+
+Skip shell commands such as plugin sync:
+
+```sh
+make deploy EXCEPT=shell
+```
+
+Run only link steps:
+
+```sh
+make deploy ONLY=link
+```
+
+## Configuration
+
+Deployment steps live in `dotman.yaml`.
+
+Supported directives:
+
+- `defaults`
+- `link`
+- `create`
+- `shell`
+- `clean` (dry-run placeholder only)
+
+Example:
+
+```yaml
+- defaults:
+    link:
+      create: true
+      relink: true
+      relative: true
+
+- link:
+    ~/.config/fish: config/fish
+    ~/.config/nvim: config/nvim
+
+- create:
+    - ~/.config/fish/local.d
+
+- shell:
+    - command: fish -lc 'fisher update'
+      description: Sync fish plugins
+      stdout: true
+      stderr: true
+```
+
+## Local Overrides
+
+Machine-specific paths, tokens, and temporary tool setup should stay out of the
+shared repository.
+
+Fish loads local-only files from:
+
+```text
+~/.config/fish/local.d/*.fish
+```
 
 ## Layout
 
-- `config/`: source dotfiles tracked by this repo
-- `dotfiles.toml`: managed file mappings
-- `deps.toml`: dependency installer policy
-- `docs/manifest-schema.md`: authoritative schema reference for `deps.toml` and `dotfiles.toml`
-- `docs/platform-support.md`: platform support policy and Unix-specific code audit
-- `docs/release-policy.md`: versioning, compatibility, and release process
-- `CHANGELOG.md`: project changelog following Keep a Changelog
-- `docs/recovery.md`: cleanup, backup, and uninstall procedures
-- `src/`: Rust backend source
+- `config/`: tracked source dotfiles
+- `dotman.yaml`: deploy steps
+- `src/`: Rust deployer source
 - `tests/`: CLI integration tests
 
-## Current Scope
-
-The Rust backend supports these dependency installers:
-
-- `system`
-- `brew`
-- `cask`
-- `apt`
-- `repo_package`
-- `official_script`
-- `download_binary`
-
-## First-Time Setup
-
-Fast path:
+## Development
 
 ```sh
-make bootstrap
+make lint
+make test
+make ci
 ```
-
-`make bootstrap` runs `doctor` in the same process environment after installing
-dependencies. `dotman` searches `$HOME/.local/bin` and `$HOME/.cargo/bin`
-directly, so newly installed user-local tools can be verified before opening a
-new fish shell. It does not change your login shell; switch shells manually
-after bootstrap if desired.
-
-To set fish as the default login shell after bootstrap:
-
-```sh
-make shell
-```
-
-This command prints the `chsh` command it will run and requires interactive
-confirmation. Non-interactive runs fail with the equivalent manual command.
-
-Cautious path:
-
-```sh
-make build
-make check
-make link DRY_RUN=1
-make link CONFLICT=backup
-make doctor
-```
-
-## Safe Dry-Run Workflow
-
-```sh
-make build
-make check
-make link DRY_RUN=1
-```
-
-## Recovery / Rollback
-
-Run `dotman status` to inspect all managed state before taking
-any destructive action. See `docs/recovery.md` for full cleanup,
-backup, and uninstall procedures.
