@@ -24,6 +24,16 @@ enum Command {
         #[arg(long, default_value = "dotman.yaml")]
         config: String,
     },
+    Bootstrap {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<deploy::Directive>,
+        #[arg(long, value_delimiter = ',')]
+        except: Vec<deploy::Directive>,
+        #[arg(long, default_value = "dotman.bootstrap.yaml")]
+        config: String,
+    },
 }
 
 fn main() {
@@ -37,6 +47,12 @@ fn run() -> Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
         Command::Deploy {
+            dry_run,
+            only,
+            except,
+            config,
+        }
+        | Command::Bootstrap {
             dry_run,
             only,
             except,

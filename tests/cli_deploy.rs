@@ -113,3 +113,92 @@ fn deploy_except_shell_skips_shell_commands() {
 
     assert!(!marker.exists());
 }
+
+#[test]
+fn shell_defaults_control_command_output_and_items_can_override() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        r#"
+- defaults:
+    shell:
+      stdout: true
+      stderr: true
+
+- shell:
+    - command: "printf visible"
+      description: Visible stdout
+    - command: "printf hidden"
+      description: Hidden stdout
+      stdout: false
+"#,
+    )
+    .expect("dotman yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["deploy"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("visible"), "stdout: {stdout}");
+    assert!(!stdout.contains("hidden"), "stdout: {stdout}");
+}
+
+#[test]
+fn shell_condition_skips_command_when_false() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    let marker = home.path().join("shell-marker");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        format!(
+            r#"
+- shell:
+    - command: "touch {}"
+      description: Skipped shell marker
+      if: "false"
+"#,
+            marker.to_string_lossy()
+        ),
+    )
+    .expect("dotman yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["deploy"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!marker.exists());
+}
+
+#[test]
+fn bootstrap_uses_bootstrap_config_by_default() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    let marker = home.path().join("bootstrap-marker");
+    std::fs::write(
+        repo.path().join("dotman.bootstrap.yaml"),
+        format!(
+            r#"
+- shell:
+    - command: "touch {}"
+      description: Touch bootstrap marker
+"#,
+            marker.to_string_lossy()
+        ),
+    )
+    .expect("dotman bootstrap yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["bootstrap"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(marker.exists());
+}

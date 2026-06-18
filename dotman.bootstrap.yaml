@@ -1,0 +1,12 @@
+- defaults:
+    shell:
+      stdout: true
+      stderr: true
+
+- shell:
+    - command: brew bundle --file packages/Brewfile
+      description: Install Homebrew packages
+      if: command -v brew >/dev/null
+    - command: packages/install-maple-mono-linux.sh
+      description: Install Maple Mono NF CN on Linux
+      if: test "$(uname -s)" = Linux && command -v curl >/dev/null && command -v unzip >/dev/null && command -v fc-cache >/dev/null

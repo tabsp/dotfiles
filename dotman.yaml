@@ -3,6 +3,9 @@
       create: true
       relink: true
       relative: true
+    shell:
+      stdout: true
+      stderr: true
 
 - link:
     ~/.config/fish: config/fish
@@ -14,7 +17,5 @@
     - ~/.config/fish/local.d
 
 - shell:
-    - command: fish -lc 'fisher update'
-      description: Sync fish plugins
-      stdout: true
-      stderr: true
+    - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
+      description: Install and sync fish plugins

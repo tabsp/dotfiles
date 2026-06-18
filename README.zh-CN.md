@@ -2,13 +2,15 @@
 
 [English](README.md)
 
-个人 dotfiles，由 `dotman` 管理。`dotman` 是一个小型 Rust 配置部署工具，
-配置模型参考了 Dotbot 的有序步骤列表。
+dotman 是一个小型 Rust-based dotfiles 部署工具，用于我的个人 macOS/Linux 环境。
+它使用 Dotbot-like 的有序 YAML 配置来链接文件、创建目录并运行设置命令。
 
 ## 前置依赖
 
 - 带 Cargo 的 Rust 工具链
 - GNU Make
+- Git
+- curl
 - fish shell
 
 ## 使用
@@ -31,6 +33,18 @@ make deploy DRY_RUN=1
 make deploy
 ```
 
+预览 bootstrap 步骤：
+
+```sh
+make bootstrap DRY_RUN=1
+```
+
+运行 bootstrap 步骤：
+
+```sh
+make bootstrap
+```
+
 跳过 shell 命令，例如插件同步：
 
 ```sh
@@ -45,7 +59,8 @@ make deploy ONLY=link
 
 ## 配置
 
-部署步骤写在 `dotman.yaml` 中。
+部署步骤写在 `dotman.yaml` 中。bootstrap 步骤写在
+`dotman.bootstrap.yaml` 中。
 
 支持的指令：
 
@@ -53,7 +68,7 @@ make deploy ONLY=link
 - `link`
 - `create`
 - `shell`
-- `clean`（目前只在 dry-run 中占位）
+- `clean`: planned / dry-run placeholder
 
 示例：
 
@@ -63,6 +78,9 @@ make deploy ONLY=link
       create: true
       relink: true
       relative: true
+    shell:
+      stdout: true
+      stderr: true
 
 - link:
     ~/.config/fish: config/fish
@@ -72,11 +90,26 @@ make deploy ONLY=link
     - ~/.config/fish/local.d
 
 - shell:
-    - command: fish -lc 'fisher update'
-      description: Sync fish plugins
-      stdout: true
-      stderr: true
+    - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
+      description: Install and sync fish plugins
 ```
+
+字段说明：
+
+- `defaults.link.create`：为链接目标自动创建缺失的父目录。
+- `defaults.link.relink`：目标已是 symlink 但指向不对时，替换为新的链接。
+- `defaults.link.backup`：目标冲突时，先备份原目标再创建链接。
+- `defaults.link.relative`：创建相对 symlink。
+- `defaults.shell.stdout`：默认继承 shell 命令的 stdout。
+- `defaults.shell.stderr`：默认继承 shell 命令的 stderr。
+- `link`：把目标路径映射到源路径；单个链接项也可以使用 `path`，并覆盖
+  `create`、`relink`、`backup`、`relative` 和 `if`。
+- `create`：创建目录，并跟随路径中已有的 symlink 组件。
+- `shell.command`：通过 `sh -c` 执行的命令。
+- `shell.description`：日志中显示的人类可读步骤名称。
+- `shell.if`：命令运行前必须成功的 shell 条件。
+- `shell.stdout` / `shell.stderr`：单条命令的输出覆盖设置。
+- `clean`：目前会被解析并在 dry-run 中显示，但非 dry-run 清理尚未实现。
 
 ## 本地覆盖
 
@@ -88,10 +121,15 @@ fish 会加载本地文件：
 ~/.config/fish/local.d/*.fish
 ```
 
+新机器首次设置参考 [docs/new-machine.md](docs/new-machine.md)。
+
 ## 目录结构
 
 - `config/`：被跟踪的 dotfiles 源文件
+- `docs/`：设置说明和手动清单
 - `dotman.yaml`：部署步骤
+- `dotman.bootstrap.yaml`：bootstrap 步骤
+- `packages/`：包清单和安装辅助脚本
 - `src/`：Rust 部署工具源码
 - `tests/`：CLI 集成测试
 

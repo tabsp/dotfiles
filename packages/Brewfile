@@ -1,0 +1,15 @@
+brew "fd"
+brew "fzf"
+brew "eza"
+brew "lazygit"
+brew "neovim"
+brew "ripgrep"
+brew "starship"
+brew "tmux"
+brew "yazi"
+brew "zoxide"
+
+if OS.mac?
+  cask "ghostty"
+  cask "font-maple-mono-nf-cn"
+end

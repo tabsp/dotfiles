@@ -2,13 +2,15 @@
 
 [中文](README.zh-CN.md)
 
-Personal dotfiles managed by `dotman`, a small Rust dotfiles deployer inspired
-by Dotbot's ordered configuration model.
+dotman is a tiny Rust-based dotfiles deployer for my personal macOS/Linux environment.
+It uses a Dotbot-like ordered YAML config to link files, create directories, and run setup commands.
 
 ## Prerequisites
 
 - Rust toolchain with Cargo
 - GNU Make
+- Git
+- curl
 - fish shell
 
 ## Usage
@@ -31,6 +33,18 @@ Deploy dotfiles:
 make deploy
 ```
 
+Preview bootstrap steps:
+
+```sh
+make bootstrap DRY_RUN=1
+```
+
+Run bootstrap steps:
+
+```sh
+make bootstrap
+```
+
 Skip shell commands such as plugin sync:
 
 ```sh
@@ -45,7 +59,8 @@ make deploy ONLY=link
 
 ## Configuration
 
-Deployment steps live in `dotman.yaml`.
+Deployment steps live in `dotman.yaml`. Bootstrap steps live in
+`dotman.bootstrap.yaml`.
 
 Supported directives:
 
@@ -53,7 +68,7 @@ Supported directives:
 - `link`
 - `create`
 - `shell`
-- `clean` (dry-run placeholder only)
+- `clean`: planned / dry-run placeholder
 
 Example:
 
@@ -63,6 +78,9 @@ Example:
       create: true
       relink: true
       relative: true
+    shell:
+      stdout: true
+      stderr: true
 
 - link:
     ~/.config/fish: config/fish
@@ -72,11 +90,26 @@ Example:
     - ~/.config/fish/local.d
 
 - shell:
-    - command: fish -lc 'fisher update'
-      description: Sync fish plugins
-      stdout: true
-      stderr: true
+    - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
+      description: Install and sync fish plugins
 ```
+
+Field reference:
+
+- `defaults.link.create`: create missing parent directories for link targets.
+- `defaults.link.relink`: replace an existing symlink when it points somewhere else.
+- `defaults.link.backup`: move an existing conflicting target aside before linking.
+- `defaults.link.relative`: create relative symlinks.
+- `defaults.shell.stdout`: inherit stdout from shell commands.
+- `defaults.shell.stderr`: inherit stderr from shell commands.
+- `link`: maps target paths to source paths. A link item can also use `path` plus
+  per-item `create`, `relink`, `backup`, `relative`, and `if` overrides.
+- `create`: creates directories, following existing symlinked path components.
+- `shell.command`: command to run through `sh -c`.
+- `shell.description`: human-readable label shown in logs.
+- `shell.if`: shell condition that must succeed before the command runs.
+- `shell.stdout` / `shell.stderr`: per-command output overrides.
+- `clean`: parsed and shown in dry-runs, but non-dry-run cleanup is not implemented yet.
 
 ## Local Overrides
 
@@ -89,10 +122,15 @@ Fish loads local-only files from:
 ~/.config/fish/local.d/*.fish
 ```
 
+For first-time setup on a new machine, follow [docs/new-machine.md](docs/new-machine.md).
+
 ## Layout
 
 - `config/`: tracked source dotfiles
+- `docs/`: setup notes and manual checklists
 - `dotman.yaml`: deploy steps
+- `dotman.bootstrap.yaml`: bootstrap steps
+- `packages/`: package manifests and install helpers
 - `src/`: Rust deployer source
 - `tests/`: CLI integration tests
 

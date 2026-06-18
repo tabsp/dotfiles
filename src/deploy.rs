@@ -31,6 +31,8 @@ enum Step {
 struct DefaultsStep {
     #[serde(default)]
     link: LinkOptions,
+    #[serde(default)]
+    shell: ShellOptions,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -43,6 +45,15 @@ struct LinkOptions {
     backup: Option<bool>,
     #[serde(default)]
     relative: Option<bool>,
+}
+
+impl LinkOptions {
+    fn has_values(&self) -> bool {
+        self.create.is_some()
+            || self.relink.is_some()
+            || self.backup.is_some()
+            || self.relative.is_some()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -79,9 +90,53 @@ struct ShellItem {
     command: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(flatten)]
+    options: ShellOptions,
+    #[serde(rename = "if")]
+    condition: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+struct ShellOptions {
     #[serde(default)]
+    stdout: Option<bool>,
+    #[serde(default)]
+    stderr: Option<bool>,
+}
+
+impl ShellOptions {
+    fn has_values(&self) -> bool {
+        self.stdout.is_some() || self.stderr.is_some()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ShellDefaults {
     stdout: bool,
-    #[serde(default)]
+    stderr: bool,
+}
+
+impl ShellDefaults {
+    fn apply(&mut self, options: &ShellOptions) {
+        if let Some(value) = options.stdout {
+            self.stdout = value;
+        }
+        if let Some(value) = options.stderr {
+            self.stderr = value;
+        }
+    }
+
+    fn merged(&self, options: &ShellOptions) -> ShellSettings {
+        ShellSettings {
+            stdout: options.stdout.unwrap_or(self.stdout),
+            stderr: options.stderr.unwrap_or(self.stderr),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ShellSettings {
+    stdout: bool,
     stderr: bool,
 }
 
@@ -158,6 +213,7 @@ pub fn run_deploy(
         std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
     let steps = load_steps(config_path)?;
     let mut link_defaults = LinkDefaults::default();
+    let mut shell_defaults = ShellDefaults::default();
 
     for step in steps {
         let directive = step.directive();
@@ -168,18 +224,34 @@ pub fn run_deploy(
         match step {
             Step::Defaults { defaults } => {
                 link_defaults.apply(&defaults.link);
+                shell_defaults.apply(&defaults.shell);
                 if dry_run {
-                    println!("defaults: link");
+                    print_defaults_plan(&defaults);
                 }
             }
             Step::Link { link } => run_link_step(&repo, &link, link_defaults.clone(), dry_run)?,
             Step::Create { create } => run_create_step(create, dry_run)?,
-            Step::Shell { shell } => run_shell_step(&shell, dry_run)?,
+            Step::Shell { shell } => run_shell_step(&shell, shell_defaults, dry_run)?,
             Step::Clean { clean } => run_clean_step(&clean, dry_run)?,
         }
     }
 
     Ok(())
+}
+
+fn print_defaults_plan(defaults: &DefaultsStep) {
+    let mut labels = Vec::new();
+    if defaults.link.has_values() {
+        labels.push("link");
+    }
+    if defaults.shell.has_values() {
+        labels.push("shell");
+    }
+    if labels.is_empty() {
+        println!("defaults");
+    } else {
+        println!("defaults: {}", labels.join(" "));
+    }
 }
 
 impl Step {
@@ -366,19 +438,33 @@ fn run_create_step(create: CreateValue, dry_run: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn run_shell_step(items: &[ShellValue], dry_run: bool) -> Result<(), String> {
+fn run_shell_step(
+    items: &[ShellValue],
+    defaults: ShellDefaults,
+    dry_run: bool,
+) -> Result<(), String> {
     for item in items {
         let shell = match item {
             ShellValue::Command(command) => ShellItem {
                 command: command.clone(),
                 description: None,
-                stdout: false,
-                stderr: false,
+                options: ShellOptions::default(),
+                condition: None,
             },
             ShellValue::Options(item) => item.clone(),
         };
+        let settings = defaults.merged(&shell.options);
 
         let label = shell.description.as_deref().unwrap_or(&shell.command);
+        if let Some(condition) = shell.condition.as_deref()
+            && !condition_matches(condition)?
+        {
+            if dry_run {
+                println!("shell skip: {label} (condition false: {condition})");
+            }
+            continue;
+        }
+
         if dry_run {
             println!("shell dry-run: {label}");
             println!("  command: {}", shell.command);
@@ -388,10 +474,10 @@ fn run_shell_step(items: &[ShellValue], dry_run: bool) -> Result<(), String> {
         println!("shell: {label}");
         let mut command = Command::new("sh");
         command.arg("-c").arg(&shell.command);
-        if !shell.stdout {
+        if !settings.stdout {
             command.stdout(Stdio::null());
         }
-        if !shell.stderr {
+        if !settings.stderr {
             command.stderr(Stdio::null());
         }
         let status = command

@@ -1,5 +1,5 @@
 if status is-interactive
-    # Commands to run in interactive sessions can go here
+    set fish_greeting
 end
 
 set -l local_bin "$HOME/.local/bin"
@@ -12,9 +12,10 @@ if test -d $cargo_bin
     fish_add_path $cargo_bin
 end
 
-if test (uname) = Darwin
-    if test -d /opt/homebrew
-        fish_add_path /opt/homebrew/bin /opt/homebrew/sbin
+for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew
+    if test -x $brew_bin
+        eval ($brew_bin shellenv)
+        break
     end
 end
 
@@ -28,7 +29,7 @@ function y
 end
 
 if type -q zoxide
-    zoxide init fish | source
+    zoxide init fish --cmd cd | source
 end
 
 if type -q starship
@@ -47,20 +48,9 @@ function ls --description 'alias ls=eza --icons=always'
     end
 end
 
-alias z="cd"
 if type -q lazygit
     alias lg="lazygit"
 end
-
-# opencode
-set -l opencode_bin "$HOME/.opencode/bin"
-if test -d $opencode_bin
-    fish_add_path $opencode_bin
-end
-
-# bun
-set --export BUN_INSTALL "$HOME/.bun"
-set --export PATH $BUN_INSTALL/bin $PATH
 
 set -l local_fish_dir "$HOME/.config/fish/local.d"
 if test -d $local_fish_dir
