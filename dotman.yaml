@@ -8,7 +8,9 @@
       stderr: true
 
 - link:
-    ~/.config/fish: config/fish
+    ~/.config/fish:
+      path: config/fish
+      backup: true
     ~/.config/nvim: config/nvim
     ~/.config/ghostty: config/ghostty
     ~/.tmux.conf: config/tmux.conf
