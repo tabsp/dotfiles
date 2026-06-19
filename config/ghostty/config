@@ -8,14 +8,13 @@ adjust-cell-height = 6
 theme = Catppuccin Mocha
 
 # --- Window and Appearance ---
-background-opacity = 1
-macos-titlebar-style = transparent
+background-opacity = 0.92
+background-blur-radius = 20
 window-padding-x = 14
 window-padding-y = 10
 window-save-state = never
 window-width = 80
 window-height = 24
-window-theme = auto
 
 # --- Cursor ---
 cursor-style = bar
