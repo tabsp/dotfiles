@@ -13,6 +13,7 @@
       backup: true
     ~/.config/nvim: config/nvim
     ~/.config/ghostty: config/ghostty
+    ~/.local/bin/tmux-status: bin/tmux-status
     ~/.tmux.conf: config/tmux.conf
 
 - create:

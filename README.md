@@ -126,6 +126,7 @@ For first-time setup on a new machine, follow [docs/new-machine.md](docs/new-mac
 
 ## Layout
 
+- `bin/`: user scripts linked into `~/.local/bin`
 - `config/`: tracked source dotfiles
 - `docs/`: setup notes and manual checklists
 - `dotman.yaml`: deploy steps

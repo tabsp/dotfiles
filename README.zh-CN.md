@@ -125,6 +125,7 @@ fish 会加载本地文件：
 
 ## 目录结构
 
+- `bin/`：链接到 `~/.local/bin` 的用户脚本
 - `config/`：被跟踪的 dotfiles 源文件
 - `docs/`：设置说明和手动清单
 - `dotman.yaml`：部署步骤

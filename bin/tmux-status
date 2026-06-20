@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+
+set -u
+
+FULL="━"
+EMPTY="╍"
+
+C0="#1e1e2e"
+C1="#313244"
+C2="#89dceb"
+C3="#f38ba8"
+C4="#45475a"
+C5="#cdd6f4"
+C6="#f9e2af"
+C7="#89b4fa"
+C8="#fab387"
+C9="#a6e3a1"
+CC="#bac2de"
+SSH_BG="#cba6f7"
+
+window_width="$(tmux display-message -p "#{window_width}" 2>/dev/null || printf "120")"
+pane_command="${1:-}"
+pane_title="${2:-}"
+
+if [ -z "$pane_command" ]; then
+  pane_command="$(tmux display-message -p "#{pane_current_command}" 2>/dev/null || true)"
+fi
+
+if [ -z "$pane_title" ]; then
+  pane_title="$(tmux display-message -p "#{pane_title}" 2>/dev/null || true)"
+fi
+
+draw() {
+  local percent="$1"
+  local size="$2"
+  local color="$3"
+  local filled=$((percent * size / 125))
+  local out=""
+
+  if [ "$window_width" -le 80 ]; then
+    return
+  fi
+
+  for ((i = 0; i < size; i++)); do
+    if [ "$i" -le "$filled" ]; then
+      out="${out}#[fg=${C1}]${FULL}"
+    else
+      out="${out}#[fg=${C6}]${EMPTY}"
+    fi
+  done
+
+  printf "%s" "$out"
+}
+
+pressure_color() {
+  local percent="${1:-0}"
+
+  if [ "$percent" -gt 90 ]; then
+    printf "%s" "$C3"
+  elif [ "$percent" -gt 74 ]; then
+    printf "%s" "$C8"
+  else
+    printf "%s" "$C0"
+  fi
+}
+
+normalize_percent() {
+  case "${1:-}" in
+    '' | *[!0-9]*) printf "0\n" ;;
+    *) printf "%s\n" "$1" ;;
+  esac
+}
+
+cpu_percent() {
+  if [ "$(uname)" = "Darwin" ]; then
+    top -l 1 -n 0 | awk '/CPU usage/ {printf "%.0f\n", $3 + $5}'
+  else
+    local stat_file idle total previous_idle previous_total idle_delta total_delta
+
+    read -r idle total < <(awk '/cpu / {
+      idle=$5
+      total=0
+      for (i = 2; i <= NF; i++) total += $i
+      print idle, total
+      exit
+    }' /proc/stat)
+
+    stat_file="${TMPDIR:-/tmp}/tmux-status-cpu.${UID:-0}"
+    if read -r previous_idle previous_total < "$stat_file" 2>/dev/null; then
+      idle_delta=$((idle - previous_idle))
+      total_delta=$((total - previous_total))
+      if [ "$total_delta" -gt 0 ]; then
+        awk -v idle_delta="$idle_delta" -v total_delta="$total_delta" \
+          'BEGIN {printf "%.0f\n", (1 - idle_delta / total_delta) * 100}'
+      else
+        printf "0\n"
+      fi
+    else
+      printf "0\n"
+    fi
+
+    printf "%s %s\n" "$idle" "$total" > "$stat_file"
+  fi
+}
+
+ram_percent() {
+  if [ "$(uname)" = "Darwin" ]; then
+    memory_pressure | awk '/System-wide memory free percentage/ {
+      gsub("%", "", $5)
+      printf "%.0f\n", 100 - $5
+    }'
+  else
+    awk '
+      /MemTotal:/ {total=$2}
+      /MemAvailable:/ {available=$2}
+      END {
+        if (total > 0 && available >= 0) {
+          printf "%.0f\n", (total - available) / total * 100
+        } else {
+          print 0
+        }
+      }' /proc/meminfo
+  fi
+}
+
+disk_percent() {
+  if [ "$(uname)" = "Darwin" ] && [ -d /System/Volumes/Data ]; then
+    df -h /System/Volumes/Data | awk 'NR == 2 {gsub("%", "", $5); print $5}'
+  else
+    df -h / | awk 'NR == 2 {gsub("%", "", $5); print $5}'
+  fi
+}
+
+battery_segment() {
+  command -v pmset >/dev/null 2>&1 || return
+
+  local percent
+  percent="$(pmset -g batt | grep -Eo '[0-9]+%' | head -n 1 | tr -d '%')"
+  [ -n "$percent" ] || return
+
+  local icon color
+  if [ "$percent" -eq 100 ]; then
+    icon="󰂄"
+    color="$C9"
+  elif [ "$percent" -gt 74 ]; then
+    icon="󱊣"
+    color="$C9"
+  elif [ "$percent" -gt 50 ]; then
+    icon="󱊢"
+    color="$C2"
+  elif [ "$percent" -gt 20 ]; then
+    icon="󱊡"
+    color="$C8"
+  else
+    icon="󰂎"
+    color="$C3"
+  fi
+
+  printf "#[bg=%s]#[fg=%s]░▒▓#[bg=%s]#[fg=%s]%s %s%%#[bg=%s]" \
+    "$C7" "$color" "$color" "$C0" "$icon" "$percent" "$color"
+}
+
+ssh_segment() {
+  local target
+
+  [ "$pane_command" = "ssh" ] || return
+
+  target="$(printf "%s" "$pane_title" | awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "ssh" && (i + 1) <= NF) {
+          print $(i + 1)
+          exit
+        }
+      }
+      print $1
+    }')"
+
+  [ -n "$target" ] || target="remote"
+
+  printf "#[fg=%s]░▒#[bg=%s]#[fg=%s] 󰣀 %.28s #[bg=%s]" \
+    "$SSH_BG" "$SSH_BG" "$C0" "$target" "$SSH_BG"
+}
+
+tail_segment() {
+  local color="${1:-$C7}"
+
+  printf "#[bg=terminal,fg=%s]▓▒░#[default]" "$color"
+}
+
+system_segment() {
+  local cpu ram disk cpu_color ram_color disk_color pad
+
+  cpu="$(cpu_percent 2>/dev/null || printf "0")"
+  ram="$(ram_percent 2>/dev/null || printf "0")"
+  disk="$(disk_percent 2>/dev/null || printf "0")"
+  cpu="$(normalize_percent "$cpu")"
+  ram="$(normalize_percent "$ram")"
+  disk="$(normalize_percent "$disk")"
+
+  cpu_color="$(pressure_color "$cpu")"
+  ram_color="$(pressure_color "$ram")"
+  disk_color="$(pressure_color "$disk")"
+  pad=" "
+
+  printf "#[fg=%s] %s %s " "$cpu_color" "${pad:${#cpu}}" "$cpu%"
+  draw "$cpu" 4 "$cpu_color"
+  printf "#[fg=%s]  %s " "$ram_color" "$ram%"
+  draw "$ram" 4 "$ram_color"
+  printf "#[fg=%s] 󰽄 %s " "$disk_color" "$disk%"
+  draw "$disk" 4 "$disk_color"
+}
+
+front="#[bg=terminal,fg=${C7}]░▒▓#[bg=${C7},fg=${C0}]"
+
+if [ "$window_width" -gt 80 ]; then
+  if [ "$pane_command" = "ssh" ]; then
+    printf "%s %s%s%s%s" "$front" "$(system_segment)" "$(battery_segment)" "$(ssh_segment)" "$(tail_segment "$SSH_BG")"
+  else
+    printf "%s %s%s%s" "$front" "$(system_segment)" "$(battery_segment)" "$(tail_segment "$C7")"
+  fi
+else
+  if [ "$pane_command" = "ssh" ]; then
+    printf "%s %s%s%s" "$front" "$(system_segment)" "$(ssh_segment)" "$(tail_segment "$SSH_BG")"
+  else
+    printf "%s %s%s" "$front" "$(system_segment)" "$(tail_segment "$C7")"
+  fi
+fi

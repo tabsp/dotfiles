@@ -22,7 +22,7 @@ require("lazy").setup {
       import = "plugins",
     },
   },
-  install = { colorscheme = { "tokyonight" } },
+  install = { colorscheme = { "catppuccin" } },
   rocks = { enabled = false },
   -- automatically check for plugin updates
   checker = { enabled = true, notify = false },
