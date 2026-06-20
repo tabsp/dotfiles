@@ -5,6 +5,10 @@
 dotman is a tiny Rust-based dotfiles deployer for my personal macOS/Linux environment.
 It uses a Dotbot-like ordered YAML config to link files, create directories, and run setup commands.
 
+## Preview
+
+![Terminal setup preview](assets/screenshots/terminal-preview.png)
+
 ## Prerequisites
 
 - Rust toolchain with Cargo
