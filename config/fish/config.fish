@@ -32,6 +32,14 @@ if type -q zoxide
     zoxide init fish --cmd cd | source
 end
 
+if type -q direnv
+    direnv hook fish | source
+end
+
+if type -q mise
+    mise activate fish | source
+end
+
 if type -q fzf
     set -gx FZF_DEFAULT_COMMAND 'fd --type f --hidden --follow --exclude .git'
     set -gx FZF_CTRL_T_COMMAND $FZF_DEFAULT_COMMAND

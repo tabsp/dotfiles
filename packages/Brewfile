@@ -1,12 +1,16 @@
+brew "direnv"
 brew "fd"
 brew "fzf"
+brew "jq"
 brew "eza"
 brew "lazygit"
+brew "mise"
 brew "neovim"
 brew "ripgrep"
 brew "starship"
 brew "tmux"
 brew "yazi"
+brew "yq"
 brew "zoxide"
 
 if OS.mac?
