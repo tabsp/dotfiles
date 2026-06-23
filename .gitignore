@@ -20,3 +20,6 @@ config/fish/conf.d/
 config/fish/functions/
 config/fish/local.d/
 config/fish/themes/
+
+# Machine/platform-specific Ghostty overrides.
+config/ghostty/config.local

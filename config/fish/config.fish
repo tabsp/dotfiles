@@ -32,6 +32,20 @@ if type -q zoxide
     zoxide init fish --cmd cd | source
 end
 
+if type -q fzf
+    set -gx FZF_DEFAULT_COMMAND 'fd --type f --hidden --follow --exclude .git'
+    set -gx FZF_CTRL_T_COMMAND $FZF_DEFAULT_COMMAND
+    set -gx FZF_ALT_C_COMMAND 'fd --type d --hidden --follow --exclude .git'
+    fzf --fish | source
+
+    if type -q zoxide
+        function zi --description 'jump to a zoxide directory with fzf'
+            set -l dir (zoxide query -i)
+            and cd $dir
+        end
+    end
+end
+
 if type -q starship
     starship init fish | source
 end
