@@ -61,6 +61,45 @@ Run only link steps:
 make deploy ONLY=link
 ```
 
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| [fish](https://fishshell.com) | Shell with built-in autosuggestions |
+| [starship](https://starship.rs) | Cross-shell prompt |
+| [direnv](https://direnv.net) | Per-directory environment variables |
+| [mise](https://mise.jdx.dev) | Runtime and tool version manager |
+| [fzf](https://github.com/junegunn/fzf) | Fuzzy finder (files, history, zoxide jump) |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) | Smarter `cd` with directory ranking |
+| [fd](https://github.com/sharkdp/fd) | Fast `find` replacement |
+| [ripgrep](https://github.com/BurntSushi/ripgrep) | Fast `grep` replacement |
+| [eza](https://github.com/eza-community/eza) | Modern `ls` replacement with icons |
+| [bat](https://github.com/sharkdp/bat) | `cat` with syntax highlighting |
+| [tealdeer](https://github.com/dbrgn/tealdeer) | Fast `tldr` client |
+| [btop](https://github.com/aristocratos/btop) | Resource monitor |
+| [fastfetch](https://github.com/fastfetch-cli/fastfetch) | System info display |
+| [dua-cli](https://github.com/Byron/dua-cli) | Disk usage analyzer |
+| [neovim](https://neovim.io) | Editor |
+| [lazygit](https://github.com/jesseduffield/lazygit) | Terminal Git UI |
+| [yazi](https://github.com/sachinsenal/yazi) | Terminal file manager |
+| [tmux](https://github.com/tmux/tmux) | Terminal multiplexer with Catppuccin theme |
+| [ghostty](https://ghostty.org) | GPU-accelerated terminal with Catppuccin Mocha theme |
+| [jq](https://github.com/jqlang/jq) + [yq](https://github.com/mikefarah/yq) | JSON/YAML CLI processors |
+| [ruby](https://www.ruby-lang.org) | Runtime for `try` experiment manager |
+
+All packages are installed via `brew bundle --file packages/Brewfile` during bootstrap. Fish integrates most tools on startup and defines custom functions: `zi` (fzf+zoxide jump), `ff` (fzf file picker), `y` (yazi with auto-cd), `t` (tmux attach/create). See `config/fish/config.fish`.
+
+## Layout
+
+- `bin/`: user scripts linked into `~/.local/bin` (tmux-status, etc.)
+- `config/`: tracked dotfiles for fish, nvim, ghostty, btop, fastfetch, starship, tealdeer, tmux, git
+- `docs/`: setup notes and manual checklists
+- `dotman.yaml`: deploy steps (link configs, run shell commands)
+- `dotman.bootstrap.yaml`: bootstrap steps (install packages, fonts)
+- `packages/`: Brewfile and platform-specific install helpers
+- `src/`: Rust deployer source
+- `tests/`: CLI integration tests
+
 ## Configuration
 
 Deployment steps live in `dotman.yaml`. Bootstrap steps live in
@@ -127,17 +166,6 @@ Fish loads local-only files from:
 ```
 
 For first-time setup on a new machine, follow [docs/new-machine.md](docs/new-machine.md).
-
-## Layout
-
-- `bin/`: user scripts linked into `~/.local/bin`
-- `config/`: tracked source dotfiles
-- `docs/`: setup notes and manual checklists
-- `dotman.yaml`: deploy steps
-- `dotman.bootstrap.yaml`: bootstrap steps
-- `packages/`: package manifests and install helpers
-- `src/`: Rust deployer source
-- `tests/`: CLI integration tests
 
 ## Development
 

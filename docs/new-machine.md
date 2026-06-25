@@ -18,6 +18,7 @@
 
 - `git`
 - `curl`
+- `make`（GNU Make）
 - CA certificates
 - 编译工具链
 
@@ -142,7 +143,9 @@ shell 步骤。如果 fish 已经提前创建了 `~/.config/fish`，`dotman` 会
 - 登录 1Password、浏览器、GitHub、云同步等账号。
 - 配置系统权限，例如终端、编辑器和窗口管理工具的 Accessibility 权限。
 - Linux 上按发行版或 [Ghostty 官方安装说明](https://ghostty.org/docs/install/binary)
-  手动安装 Ghostty；`deploy` 只负责链接 Ghostty 配置。
+  手动安装 Ghostty；`deploy` 只负责链接 Ghostty 配置。如需机器相关的
+  Ghostty 设置（窗口大小、透明度等），创建 `~/.config/ghostty/config.local`，
+  仓库配置会自动加载它。
 - 检查字体、输入法、浏览器扩展和 GUI 应用设置。
 - 首次打开 Neovim，让插件和工具完成安装。
 

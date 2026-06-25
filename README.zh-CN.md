@@ -61,6 +61,45 @@ make deploy EXCEPT=shell
 make deploy ONLY=link
 ```
 
+## 工具
+
+| 工具 | 用途 |
+|------|------|
+| [fish](https://fishshell.com) | 自带自动补全的 shell |
+| [starship](https://starship.rs) | 跨 shell 的提示符 |
+| [direnv](https://direnv.net) | 按目录加载环境变量 |
+| [mise](https://mise.jdx.dev) | 运行环境和工具版本管理器 |
+| [fzf](https://github.com/junegunn/fzf) | 模糊查找（文件、历史、zoxide 跳转） |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) | 智能 `cd`，带目录权重排序 |
+| [fd](https://github.com/sharkdp/fd) | 快速 `find` 替代 |
+| [ripgrep](https://github.com/BurntSushi/ripgrep) | 快速 `grep` 替代 |
+| [eza](https://github.com/eza-community/eza) | 现代 `ls` 替代，带图标 |
+| [bat](https://github.com/sharkdp/bat) | 带语法高亮的 `cat` |
+| [tealdeer](https://github.com/dbrgn/tealdeer) | 快速 `tldr` 客户端 |
+| [btop](https://github.com/aristocratos/btop) | 资源监控 |
+| [fastfetch](https://github.com/fastfetch-cli/fastfetch) | 系统信息展示 |
+| [dua-cli](https://github.com/Byron/dua-cli) | 磁盘使用分析 |
+| [neovim](https://neovim.io) | 编辑器 |
+| [lazygit](https://github.com/jesseduffield/lazygit) | 终端 Git UI |
+| [yazi](https://github.com/sachinsenal/yazi) | 终端文件管理器 |
+| [tmux](https://github.com/tmux/tmux) | 终端复用器，Catppuccin 主题 |
+| [ghostty](https://ghostty.org) | GPU 加速终端，Catppuccin Mocha 主题 |
+| [jq](https://github.com/jqlang/jq) + [yq](https://github.com/mikefarah/yq) | JSON/YAML 命令行处理器 |
+| [ruby](https://www.ruby-lang.org) | `try` 实验管理器的运行时 |
+
+所有包在 bootstrap 时通过 `brew bundle --file packages/Brewfile` 安装。Fish 启动时自动集成大部分工具，并定义自定义函数：`zi`（fzf+zoxide 跳转）、`ff`（fzf 文件选择）、`y`（yazi 并自动 cd）、`t`（tmux 附加/创建）。参见 `config/fish/config.fish`。
+
+## 目录结构
+
+- `bin/`：链接到 `~/.local/bin` 的用户脚本（tmux-status 等）
+- `config/`：被跟踪的 dotfiles 源文件（fish、nvim、ghostty、btop、fastfetch、starship、tealdeer、tmux、git）
+- `docs/`：设置说明和手动清单
+- `dotman.yaml`：部署步骤（链接配置、运行 shell 命令）
+- `dotman.bootstrap.yaml`：bootstrap 步骤（安装包、字体）
+- `packages/`：Brewfile 和平台相关的安装辅助脚本
+- `src/`：Rust 部署工具源码
+- `tests/`：CLI 集成测试
+
 ## 配置
 
 部署步骤写在 `dotman.yaml` 中。bootstrap 步骤写在
@@ -126,17 +165,6 @@ fish 会加载本地文件：
 ```
 
 新机器首次设置参考 [docs/new-machine.md](docs/new-machine.md)。
-
-## 目录结构
-
-- `bin/`：链接到 `~/.local/bin` 的用户脚本
-- `config/`：被跟踪的 dotfiles 源文件
-- `docs/`：设置说明和手动清单
-- `dotman.yaml`：部署步骤
-- `dotman.bootstrap.yaml`：bootstrap 步骤
-- `packages/`：包清单和安装辅助脚本
-- `src/`：Rust 部署工具源码
-- `tests/`：CLI 集成测试
 
 ## 开发
 
