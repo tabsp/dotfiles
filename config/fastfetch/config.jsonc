@@ -1,0 +1,126 @@
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+
+  "logo": {
+    "padding": {
+      "top": 1,
+      "right": 4
+    }
+  },
+
+  "display": {
+    "separator": "  "
+  },
+
+  "modules": [
+    "break",
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌────────────────────── Hardware ───────────────────────┐"
+    },
+    {
+      "type": "host",
+      "key": "  Host",
+      "keyColor": "green"
+    },
+    {
+      "type": "cpu",
+      "key": "  CPU",
+      "keyColor": "green",
+      "showPeCoreCount": true
+    },
+    {
+      "type": "gpu",
+      "key": "󰢮  GPU",
+      "keyColor": "green"
+    },
+    {
+      "type": "memory",
+      "key": "  Memory",
+      "keyColor": "green"
+    },
+    {
+      "type": "disk",
+      "key": "󰋊  Disk",
+      "keyColor": "green"
+    },
+    {
+      "type": "display",
+      "key": "󱄄  Display",
+      "keyColor": "green"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└───────────────────────────────────────────────────────┘"
+    },
+
+    "break",
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌────────────────────── Software ───────────────────────┐"
+    },
+    {
+      "type": "os",
+      "key": "  OS",
+      "keyColor": "blue"
+    },
+    {
+      "type": "kernel",
+      "key": "  Kernel",
+      "keyColor": "blue"
+    },
+    {
+      "type": "shell",
+      "key": "  Shell",
+      "keyColor": "blue"
+    },
+    {
+      "type": "terminal",
+      "key": "  Terminal",
+      "keyColor": "blue"
+    },
+    {
+      "type": "packages",
+      "key": "󰏖  Packages",
+      "keyColor": "blue"
+    },
+    {
+      "type": "terminalfont",
+      "key": "  Font",
+      "keyColor": "blue"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└───────────────────────────────────────────────────────┘"
+    },
+
+    "break",
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌─────────────────────── System ────────────────────────┐"
+    },
+    {
+      "type": "uptime",
+      "key": "󱫐  Uptime",
+      "keyColor": "magenta"
+    },
+    {
+      "type": "localip",
+      "key": "󰩟  Local IP",
+      "keyColor": "magenta",
+      "showIpv4": true,
+      "showIpv6": false,
+      "showMac": false
+    },
+    {
+      "type": "battery",
+      "key": "󰁹  Battery",
+      "keyColor": "magenta"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└───────────────────────────────────────────────────────┘"
+    },
+    "break"
+  ]
+}

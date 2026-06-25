@@ -18,8 +18,11 @@ window-width = 80
 window-height = 24
 
 # --- Cursor ---
-cursor-style = bar
-cursor-style-blink = true
+cursor-style = block
+cursor-style-blink = false
+
+# --- Bell ---
+bell-features = no-system,no-audio,no-attention,no-title,no-border
 
 # --- Mouse ---
 mouse-hide-while-typing = true

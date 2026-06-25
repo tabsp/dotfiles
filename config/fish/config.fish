@@ -12,6 +12,8 @@ if test -d $cargo_bin
     fish_add_path $cargo_bin
 end
 
+set -gx GEM_HOME "$HOME/.local/share/gem"
+
 for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew
     if test -x $brew_bin
         eval ($brew_bin shellenv)
@@ -44,6 +46,9 @@ if type -q fzf
     set -gx FZF_DEFAULT_COMMAND 'fd --type f --hidden --follow --exclude .git'
     set -gx FZF_CTRL_T_COMMAND $FZF_DEFAULT_COMMAND
     set -gx FZF_ALT_C_COMMAND 'fd --type d --hidden --follow --exclude .git'
+    if type -q bat
+        set -gx FZF_CTRL_T_OPTS "--preview 'bat --color=always --style=numbers --line-range=:500 {}'"
+    end
     fzf --fish | source
 
     if type -q zoxide
@@ -52,6 +57,35 @@ if type -q fzf
             and cd $dir
         end
     end
+
+    function ff --description 'select a file with fzf and bat preview'
+        if not type -q fd
+            echo "ff: fd is required" >&2
+            return 127
+        end
+
+        set -l preview 'bat --color=always --style=numbers --line-range=:500 {}'
+        if not type -q bat
+            set preview 'sed -n "1,500p" {}'
+        end
+
+        fd --type f --hidden --follow --exclude .git |
+            fzf --preview "$preview" $argv
+    end
+end
+
+if type -q bat
+    set -gx MANPAGER "sh -c 'col -bx | bat -l man -p'"
+    set -gx MANROFFOPT -c
+end
+
+if type -q tldr
+    set -gx TEALDEER_CONFIG_DIR "$HOME/.config/tealdeer"
+end
+
+if type -q try
+    set -gx TRY_PATH "$HOME/Workspace/tries"
+    eval (try init | string collect)
 end
 
 if type -q starship
@@ -72,6 +106,17 @@ end
 
 if type -q lazygit
     alias lg="lazygit"
+end
+
+if type -q tmux
+    function t --description 'attach to tmux, or create the Work session'
+        if set -q TMUX
+            echo "Already inside tmux."
+            return 0
+        end
+
+        tmux attach-session; or tmux new-session -s Work
+    end
 end
 
 set -l local_fish_dir "$HOME/.config/fish/local.d"

@@ -3,6 +3,7 @@
       create: true
       relink: true
       relative: true
+      backup: true
     shell:
       stdout: true
       stderr: true
@@ -10,15 +11,29 @@
 - link:
     ~/.config/fish:
       path: config/fish
-      backup: true
     ~/.config/nvim: config/nvim
     ~/.config/ghostty: config/ghostty
+    ~/.config/btop:
+      path: config/btop
+    ~/.config/fastfetch:
+      path: config/fastfetch
+    ~/.config/starship.toml:
+      path: config/starship.toml
+    ~/.config/tealdeer:
+      path: config/tealdeer
     ~/.local/bin/tmux-status: bin/tmux-status
     ~/.tmux.conf: config/tmux.conf
 
 - create:
     - ~/.config/fish/local.d
+    - ~/Workspace/tries
 
 - shell:
+    - command: '"$(brew --prefix ruby)/bin/gem" install try-cli --no-document --install-dir "$HOME/.local/share/gem" --bindir "$HOME/.local/bin"'
+      description: Install try experiment manager
+      if: command -v brew >/dev/null 2>&1
     - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
       description: Install and sync fish plugins
+    - command: TEALDEER_CONFIG_DIR="$HOME/.config/tealdeer" tldr --update
+      description: Update tealdeer pages
+      if: command -v tldr >/dev/null 2>&1
