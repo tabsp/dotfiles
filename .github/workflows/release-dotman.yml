@@ -34,7 +34,18 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - run: cargo build --release --target ${{ matrix.target }}
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            if cargo build --release --target ${{ matrix.target }}; then
+              exit 0
+            fi
+            echo "build attempt $i failed, retrying in $((i * 5))s..."
+            sleep $((i * 5))
+          done
+          exit 1
 
       - name: Package
         shell: bash
