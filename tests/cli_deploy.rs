@@ -34,6 +34,7 @@ fn run_dotman(repo: &Path, home: &Path, args: &[&str]) -> Output {
     Command::new(exe)
         .current_dir(repo)
         .env("HOME", home)
+        .env_remove("DOTFILES_DIR")
         .args(args)
         .output()
         .expect("run dotman")
@@ -44,6 +45,7 @@ fn run_dotman_from(cwd: &Path, home: &Path, args: &[&str]) -> Output {
     Command::new(exe)
         .current_dir(cwd)
         .env("HOME", home)
+        .env_remove("DOTFILES_DIR")
         .args(args)
         .output()
         .expect("run dotman")
@@ -57,11 +59,105 @@ fn run_dotman_from_with_env(
 ) -> Output {
     let exe = env!("CARGO_BIN_EXE_dotman");
     let mut command = Command::new(exe);
-    command.current_dir(cwd).env("HOME", home).args(args);
+    command
+        .current_dir(cwd)
+        .env("HOME", home)
+        .env_remove("DOTFILES_DIR")
+        .args(args);
     for (key, value) in envs {
         command.env(key, value);
     }
     command.output().expect("run dotman")
+}
+
+#[test]
+fn installer_uses_source_checkout_from_dotfiles_dir_without_downloading_bundle() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    let bin = tempfile::tempdir().expect("bin");
+    std::fs::create_dir_all(repo.path().join(".git")).expect("git dir");
+    std::fs::create_dir_all(repo.path().join("scripts")).expect("scripts dir");
+    std::fs::write(repo.path().join("dotman.yaml"), "[]\n").expect("dotman yaml");
+    std::fs::write(
+        repo.path().join("scripts/install.sh"),
+        "#!/usr/bin/env sh\n",
+    )
+    .expect("install");
+    std::fs::write(repo.path().join("sentinel"), "keep me\n").expect("sentinel");
+    let dotman = bin.path().join("dotman");
+    std::fs::write(
+        &dotman,
+        r#"#!/usr/bin/env sh
+case "$1" in
+  --version) echo "dotman 0.0.0-test" ;;
+  bootstrap|deploy) exit 0 ;;
+  *) exit 1 ;;
+esac
+"#,
+    )
+    .expect("dotman");
+    std::fs::write(bin.path().join("brew"), "#!/usr/bin/env sh\nexit 0\n").expect("brew");
+    std::fs::write(bin.path().join("fish"), "#!/usr/bin/env sh\nexit 0\n").expect("fish");
+    std::fs::write(
+        bin.path().join("sudo"),
+        "#!/usr/bin/env sh\nprintf '%s\\n' \"$*\" >>\"$HOME/sudo-args\"\nexit 1\n",
+    )
+    .expect("sudo");
+    std::fs::write(bin.path().join("chsh"), "#!/usr/bin/env sh\nexit 1\n").expect("chsh");
+    let mut permissions = std::fs::metadata(&dotman)
+        .expect("dotman metadata")
+        .permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&dotman, permissions.clone()).expect("dotman executable");
+        std::fs::set_permissions(bin.path().join("brew"), permissions.clone())
+            .expect("brew executable");
+        std::fs::set_permissions(bin.path().join("fish"), permissions.clone())
+            .expect("fish executable");
+        std::fs::set_permissions(bin.path().join("sudo"), permissions.clone())
+            .expect("sudo executable");
+        std::fs::set_permissions(bin.path().join("chsh"), permissions).expect("chsh executable");
+    }
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh");
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = Command::new("sh")
+        .arg(script)
+        .arg("--yes")
+        .env("HOME", home.path())
+        .env("DOTFILES_DIR", repo.path())
+        .env("DOTMAN_BIN", &dotman)
+        .env("DOTFILES_SITE_URL", "http://127.0.0.1:9")
+        .env("PATH", path)
+        .env("SHELL", "/bin/sh")
+        .output()
+        .expect("run installer");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("skipping published bundle download"),
+        "stdout: {stdout}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("sentinel")).expect("sentinel"),
+        "keep me\n"
+    );
+    let sudo_args = std::fs::read_to_string(home.path().join("sudo-args")).expect("sudo args");
+    assert!(
+        sudo_args.lines().any(|line| line.starts_with("-n ")),
+        "sudo args: {sudo_args}"
+    );
 }
 
 #[test]

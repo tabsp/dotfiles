@@ -92,10 +92,7 @@ detect_target() {
   esac
 }
 
-need_command curl
-need_command tar
 need_command mktemp
-need_command sed
 need_command awk
 
 printf 'Installing tabsp dotfiles from %s\n' "$base_url"
@@ -104,6 +101,63 @@ printf '  dotfiles: %s\n' "$dotfiles_dir"
 
 bundle_next="$dotfiles_dir.next"
 bundle_previous="$dotfiles_dir.previous"
+source_checkout=0
+
+looks_like_source_checkout() {
+  path=$1
+
+  [ -d "$path" ] || return 1
+  [ -e "$path/.git" ] || return 1
+  [ -f "$path/dotman.yaml" ] || return 1
+  [ -f "$path/scripts/install.sh" ] || return 1
+}
+
+detect_install_mode() {
+  if looks_like_source_checkout "$dotfiles_dir"; then
+    source_checkout=1
+    printf 'Detected source checkout at %s; skipping published bundle download.\n' "$dotfiles_dir"
+    return 0
+  fi
+
+  if looks_like_source_checkout "$bundle_previous"; then
+    cat >&2 <<EOF
+error: refusing to remove source checkout backup: $bundle_previous
+
+Move or rename that directory before running the installer again.
+EOF
+    exit 1
+  fi
+}
+
+install_dotman_from_source() {
+  if [ -x "$dotman_bin" ]; then
+    current_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
+    printf 'using existing dotman%s at %s\n' "${current_version:+ $current_version}" "$dotman_bin"
+    return 0
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    cat >&2 <<EOF
+error: dotman is not installed at $dotman_bin and cargo is not available
+
+Install Rust/Cargo or set DOTMAN_BIN to an existing dotman binary, then run the
+installer again.
+EOF
+    exit 1
+  fi
+
+  stage="building dotman from source"
+  mkdir -p "$(dirname -- "$dotman_bin")"
+  (
+    cd "$dotfiles_dir"
+    cargo build --release --locked
+  )
+  cp "$dotfiles_dir/target/release/dotman" "$dotman_bin"
+  chmod 755 "$dotman_bin"
+  printf 'installed local dotman to %s\n' "$dotman_bin"
+}
+
+detect_install_mode
 
 cleanup() {
   status=$?
@@ -245,7 +299,13 @@ ensure_shell_registered() {
       return 0
     fi
   elif command -v sudo >/dev/null 2>&1; then
-    if printf '%s\n' "$shell_path" | sudo tee -a /etc/shells >/dev/null; then
+    if [ "$yes" -eq 1 ]; then
+      sudo_command="sudo -n"
+    else
+      sudo_command="sudo"
+    fi
+
+    if printf '%s\n' "$shell_path" | $sudo_command tee -a /etc/shells >/dev/null; then
       printf 'Added %s to /etc/shells.\n' "$shell_path"
       return 0
     fi
@@ -432,77 +492,85 @@ print_final_summary() {
 stage="creating temporary workspace"
 tmp_dir=$(mktemp -d)
 
-manifest="$tmp_dir/manifest.json"
-stage="downloading manifest"
-download "$base_url/manifest.json" "$manifest"
-
-stage="reading manifest"
-target=$(detect_target)
-bundle_url=$(json_string bundle_url)
-bundle_sha256=$(json_string bundle_sha256)
-dotman_version=$(json_string dotman_version)
-release_base_url=$(json_string dotman_release_base_url)
-asset_template=$(json_string dotman_asset_template)
-
-if [ -z "$bundle_url" ] || [ -z "$release_base_url" ] || [ -z "$asset_template" ]; then
-  printf 'error: manifest is missing required fields\n' >&2
-  exit 1
-fi
-
-asset_name=$(printf '%s' "$asset_template" | sed "s/{target}/$target/g")
-dotman_url="$release_base_url/$asset_name"
-
-current_version=""
-if [ -x "$dotman_bin" ]; then
-  current_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
-fi
-
-mkdir -p "$(dirname -- "$dotman_bin")"
-
-if [ -n "$current_version" ] && [ "$current_version" = "$dotman_version" ]; then
-  printf 'dotman %s already installed at %s\n' "$current_version" "$dotman_bin"
+if [ "$source_checkout" -eq 1 ]; then
+  install_dotman_from_source
 else
-  stage="installing dotman"
-  dotman_archive="$tmp_dir/$asset_name"
-  dotman_extract_dir="$tmp_dir/dotman"
-  mkdir -p "$dotman_extract_dir"
-  download "$dotman_url" "$dotman_archive"
-  tar -xzf "$dotman_archive" -C "$dotman_extract_dir"
-  if [ ! -f "$dotman_extract_dir/dotman" ]; then
-    printf 'error: dotman archive did not contain ./dotman\n' >&2
+  need_command curl
+  need_command tar
+  need_command sed
+
+  manifest="$tmp_dir/manifest.json"
+  stage="downloading manifest"
+  download "$base_url/manifest.json" "$manifest"
+
+  stage="reading manifest"
+  target=$(detect_target)
+  bundle_url=$(json_string bundle_url)
+  bundle_sha256=$(json_string bundle_sha256)
+  dotman_version=$(json_string dotman_version)
+  release_base_url=$(json_string dotman_release_base_url)
+  asset_template=$(json_string dotman_asset_template)
+
+  if [ -z "$bundle_url" ] || [ -z "$release_base_url" ] || [ -z "$asset_template" ]; then
+    printf 'error: manifest is missing required fields\n' >&2
     exit 1
   fi
-  cp "$dotman_extract_dir/dotman" "$dotman_bin"
-  chmod 755 "$dotman_bin"
-  printf 'installed dotman to %s\n' "$dotman_bin"
-fi
 
-bundle_archive="$tmp_dir/dotfiles-bundle.tar.gz"
+  asset_name=$(printf '%s' "$asset_template" | sed "s/{target}/$target/g")
+  dotman_url="$release_base_url/$asset_name"
 
-stage="downloading dotfiles bundle"
-download "$bundle_url" "$bundle_archive"
-if [ -n "$bundle_sha256" ]; then
-  stage="verifying dotfiles bundle"
-  actual_sha256=$(sha256_file "$bundle_archive")
-  if [ "$actual_sha256" != "$bundle_sha256" ]; then
-    printf 'error: bundle checksum mismatch\n' >&2
-    printf 'expected: %s\nactual:   %s\n' "$bundle_sha256" "$actual_sha256" >&2
-    exit 1
+  current_version=""
+  if [ -x "$dotman_bin" ]; then
+    current_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
   fi
-fi
 
-stage="extracting dotfiles bundle"
-rm -rf "$bundle_next"
-mkdir -p "$bundle_next"
-tar -xzf "$bundle_archive" -C "$bundle_next"
+  mkdir -p "$(dirname -- "$dotman_bin")"
 
-stage="installing dotfiles bundle"
-rm -rf "$bundle_previous"
-if [ -d "$dotfiles_dir" ]; then
-  mv "$dotfiles_dir" "$bundle_previous"
+  if [ -n "$current_version" ] && [ "$current_version" = "$dotman_version" ]; then
+    printf 'dotman %s already installed at %s\n' "$current_version" "$dotman_bin"
+  else
+    stage="installing dotman"
+    dotman_archive="$tmp_dir/$asset_name"
+    dotman_extract_dir="$tmp_dir/dotman"
+    mkdir -p "$dotman_extract_dir"
+    download "$dotman_url" "$dotman_archive"
+    tar -xzf "$dotman_archive" -C "$dotman_extract_dir"
+    if [ ! -f "$dotman_extract_dir/dotman" ]; then
+      printf 'error: dotman archive did not contain ./dotman\n' >&2
+      exit 1
+    fi
+    cp "$dotman_extract_dir/dotman" "$dotman_bin"
+    chmod 755 "$dotman_bin"
+    printf 'installed dotman to %s\n' "$dotman_bin"
+  fi
+
+  bundle_archive="$tmp_dir/dotfiles-bundle.tar.gz"
+
+  stage="downloading dotfiles bundle"
+  download "$bundle_url" "$bundle_archive"
+  if [ -n "$bundle_sha256" ]; then
+    stage="verifying dotfiles bundle"
+    actual_sha256=$(sha256_file "$bundle_archive")
+    if [ "$actual_sha256" != "$bundle_sha256" ]; then
+      printf 'error: bundle checksum mismatch\n' >&2
+      printf 'expected: %s\nactual:   %s\n' "$bundle_sha256" "$actual_sha256" >&2
+      exit 1
+    fi
+  fi
+
+  stage="extracting dotfiles bundle"
+  rm -rf "$bundle_next"
+  mkdir -p "$bundle_next"
+  tar -xzf "$bundle_archive" -C "$bundle_next"
+
+  stage="installing dotfiles bundle"
+  rm -rf "$bundle_previous"
+  if [ -d "$dotfiles_dir" ]; then
+    mv "$dotfiles_dir" "$bundle_previous"
+  fi
+  mv "$bundle_next" "$dotfiles_dir"
+  printf 'installed dotfiles bundle to %s\n' "$dotfiles_dir"
 fi
-mv "$bundle_next" "$dotfiles_dir"
-printf 'installed dotfiles bundle to %s\n' "$dotfiles_dir"
 
 stage="installing Homebrew"
 ensure_brew
