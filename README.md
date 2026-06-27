@@ -21,7 +21,7 @@ For first-time setup, install `dotman` and the published dotfiles bundle from
 the site:
 
 ```sh
-curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
+sh -c "$(curl -fsSL https://dotfiles.tabsp.com/install.sh)"
 ```
 
 For unattended setup:

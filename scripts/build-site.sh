@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 
 public_dir=${PUBLIC_DIR:-"$repo_dir/public"}
 base_url=${DOTFILES_SITE_URL:-"https://dotfiles.tabsp.com"}
@@ -209,7 +209,7 @@ cat >"$public_dir/index.html" <<EOF
       <h1>tabsp dotfiles</h1>
       <p>Install dotman and the latest dotfiles bundle without cloning or building on the target machine.</p>
       <div class="command">
-        <pre><code id="install-command">curl -fsSL $base_url/install.sh | sh</code></pre>
+        <pre><code id="install-command">sh -c "\$(curl -fsSL $base_url/install.sh)"</code></pre>
         <button type="button" id="copy-command">Copy</button>
       </div>
       <nav aria-label="Published files">

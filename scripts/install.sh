@@ -39,7 +39,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 # ── Guard: interactive mode reads confirmations from the controlling terminal.
-if [ "$yes" -eq 0 ] && ! ([ -r /dev/tty ] && [ -w /dev/tty ]); then
+if [ "$yes" -eq 0 ] && ! { [ -r /dev/tty ] && [ -w /dev/tty ]; }; then
   printf 'error: TTY required for interactive install.\n' >&2
   printf 'Use --yes for unattended mode.\n' >&2
   exit 1
@@ -117,7 +117,49 @@ gum_spin() {
     gum spin --spinner dot --title "$title" -- sh -c "$*"
   else
     printf '%s...\n' "$title"
-    eval "$*"
+    sh -c "$*"
+  fi
+}
+
+spin_quiet() {
+  title=$1; shift
+  if [ "$use_gum" -eq 1 ]; then
+    gum spin --spinner dot --title "$title" -- sh -c "$*"
+  elif [ -t 1 ]; then
+    log="$tmp_dir/spin.log"
+    : >"$log"
+    (sh -c "$*") >"$log" 2>&1 &
+    pid=$!
+    i=0
+
+    while kill -0 "$pid" 2>/dev/null; do
+      case $i in
+        0) frame="." ;;
+        1) frame=".." ;;
+        2) frame="..." ;;
+        *) frame="...." ;;
+      esac
+      printf '\r%s %s' "$title" "$frame"
+      i=$(((i + 1) % 4))
+      sleep 0.12
+    done
+
+    set +e
+    wait "$pid"
+    rc=$?
+    set -e
+
+    if [ "$rc" -eq 0 ]; then
+      printf '\r\033[2K%s done.\n' "$title"
+      return 0
+    fi
+
+    printf '\r\033[2K%s failed.\n' "$title" >&2
+    cat "$log" >&2
+    return "$rc"
+  else
+    printf '%s...\n' "$title"
+    sh -c "$*"
   fi
 }
 
@@ -144,9 +186,9 @@ gum_warn() {
 
 gum_card() {
   if [ "$use_gum" -eq 1 ]; then
-    gum style --border rounded --border-foreground "#89b4fa" --padding "1 2" "$@"
+    gum style --border rounded --border-foreground "#89b4fa" --padding "1 2"
   else
-    printf '%s\n' "$*"
+    cat
   fi
 }
 
@@ -526,6 +568,8 @@ print_final_summary() {
 
 stage="creating temporary workspace"
 tmp_dir=$(mktemp -d)
+bootstrap_log="$tmp_dir/dotfiles-bootstrap.log"
+deploy_log="$tmp_dir/dotfiles-deploy.log"
 
 if [ "$source_checkout" -eq 1 ]; then
   install_dotman_from_source
@@ -536,7 +580,7 @@ else
 
   manifest="$tmp_dir/manifest.json"
   stage="downloading manifest"
-  gum_spin "Downloading manifest" \
+  spin_quiet "Downloading manifest" \
     "curl -fsSL '$base_url/manifest.json' -o '$manifest'"
 
   stage="reading manifest"
@@ -569,7 +613,7 @@ else
     dotman_archive="$tmp_dir/$asset_name"
     dotman_extract_dir="$tmp_dir/dotman"
     mkdir -p "$dotman_extract_dir"
-    gum_spin "Installing dotman $dotman_version" \
+    spin_quiet "Installing dotman $dotman_version" \
       "curl -fsSL '$dotman_url' -o '$dotman_archive' &&
        tar -xzf '$dotman_archive' -C '$dotman_extract_dir' &&
        cp '$dotman_extract_dir/dotman' '$dotman_bin' &&
@@ -580,7 +624,7 @@ else
   bundle_archive="$tmp_dir/dotfiles-bundle.tar.gz"
 
   stage="downloading dotfiles bundle"
-  gum_spin "Downloading dotfiles bundle" \
+  spin_quiet "Downloading dotfiles bundle" \
     "curl -fsSL '$bundle_url' -o '$bundle_archive'"
   if [ -n "$bundle_sha256" ]; then
     stage="verifying dotfiles bundle"
@@ -593,7 +637,7 @@ else
   fi
 
   stage="extracting dotfiles bundle"
-  gum_spin "Extracting dotfiles bundle" \
+  spin_quiet "Extracting dotfiles bundle" \
     "rm -rf '$bundle_next' && mkdir -p '$bundle_next' && tar -xzf '$bundle_archive' -C '$bundle_next'"
 
   stage="installing dotfiles bundle"
@@ -621,7 +665,7 @@ echo
   else
     "$dotman_bin" bootstrap --dry-run 2>&1
   fi
-) >/tmp/dotfiles-bootstrap.log
+) >"$bootstrap_log"
 (
   cd "$dotfiles_dir"
   if [ "$use_gum" -eq 1 ]; then
@@ -629,12 +673,12 @@ echo
   else
     "$dotman_bin" deploy --dry-run 2>&1
   fi
-) >/tmp/dotfiles-deploy.log
+) >"$deploy_log"
 
-bootstrap_summary=$(grep -E '[0-9]+ links ok' /tmp/dotfiles-bootstrap.log | tail -1 || true)
-deploy_summary=$(grep -E '[0-9]+ links ok' /tmp/dotfiles-deploy.log | tail -1 || true)
-bootstrap_warn=$(grep -oE '[0-9]+ warnings' /tmp/dotfiles-bootstrap.log | tail -1 || true)
-deploy_warn=$(grep -oE '[0-9]+ warnings' /tmp/dotfiles-deploy.log | tail -1 || true)
+bootstrap_summary=$(grep -E '[0-9]+ links ok' "$bootstrap_log" | tail -1 || true)
+deploy_summary=$(grep -E '[0-9]+ links ok' "$deploy_log" | tail -1 || true)
+bootstrap_warn=$(grep -oE '[0-9]+ warnings' "$bootstrap_log" | tail -1 || true)
+deploy_warn=$(grep -oE '[0-9]+ warnings' "$deploy_log" | tail -1 || true)
 
 if [ "$use_gum" -eq 1 ]; then
   gum style --foreground "#89b4fa" --bold "Preview"
@@ -658,20 +702,19 @@ if [ "$use_gum" -eq 1 ]; then
   if gum confirm --default=false "Show full details?"; then
     {
       gum style --foreground "#cba6f7" --bold "# Bootstrap"
-      cat /tmp/dotfiles-bootstrap.log
+      cat "$bootstrap_log"
       echo
       gum style --foreground "#6c7086" "────────────────────────────────────────────"
       echo
       gum style --foreground "#f5c2e7" --bold "# Deploy"
-      cat /tmp/dotfiles-deploy.log
+      cat "$deploy_log"
     } | ${PAGER:-less -r}
   fi
 else
-  cat /tmp/dotfiles-bootstrap.log
+  cat "$bootstrap_log"
   echo
-  cat /tmp/dotfiles-deploy.log
+  cat "$deploy_log"
 fi
-rm -f /tmp/dotfiles-bootstrap.log /tmp/dotfiles-deploy.log
 echo
 
 if ! gum_confirm "Apply these changes now?"; then

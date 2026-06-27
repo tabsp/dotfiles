@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_dir=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 
 mode=local
 keep=0
@@ -257,7 +257,7 @@ fi
 if [ "${E2E_INTERACTIVE_INSTALL:-0}" = "1" ]; then
   cat >/work/install-interactive.expect <<EOF
 set timeout -1
-spawn sudo -H -u tester env HOME=/home/tester USER=tester PATH=/home/tester/.cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DOTFILES_SITE_URL=${install_url%/install.sh} DOTFILES_ALLOW_PIPE=1 bash -lc {set -o pipefail; curl -fsSL '$install_url' | sh}
+spawn sudo -H -u tester env HOME=/home/tester USER=tester PATH=/home/tester/.cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DOTFILES_SITE_URL=${install_url%/install.sh} bash -lc {set -o pipefail; curl -fsSL '$install_url' | sh}
 expect {
   -re {Install Homebrew automatically\\? \\[y/N\\]} { send "y\r"; exp_continue }
   -re {Install fish via Homebrew\\? \\[y/N\\]} { send "y\r"; exp_continue }

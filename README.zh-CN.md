@@ -19,7 +19,7 @@ Homebrew、通过 Homebrew 安装 fish，然后运行 `dotman bootstrap` 和 `do
 首次设置时，从网站安装 `dotman` 和发布好的 dotfiles bundle：
 
 ```sh
-curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
+sh -c "$(curl -fsSL https://dotfiles.tabsp.com/install.sh)"
 ```
 
 无交互安装：
