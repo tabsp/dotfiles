@@ -11,54 +11,53 @@ It uses a Dotbot-like ordered YAML config to link files, create directories, and
 
 ## Prerequisites
 
-- Rust toolchain with Cargo
-- GNU Make
-- Git
 - curl
 - fish shell
+- `dotman` installed in `~/.local/bin`
 
-## Usage
-
-Build the deployer:
+For first-time setup, install `dotman` and the published dotfiles bundle from
+the site:
 
 ```sh
-make build
+curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
 ```
+
+## Usage
 
 Preview the deployment:
 
 ```sh
-make deploy DRY_RUN=1
+dotman deploy --dry-run
 ```
 
 Deploy dotfiles:
 
 ```sh
-make deploy
+dotman deploy
 ```
 
 Preview bootstrap steps:
 
 ```sh
-make bootstrap DRY_RUN=1
+dotman bootstrap --dry-run
 ```
 
 Run bootstrap steps:
 
 ```sh
-make bootstrap
+dotman bootstrap
 ```
 
 Skip shell commands such as plugin sync:
 
 ```sh
-make deploy EXCEPT=shell
+dotman deploy --except shell
 ```
 
 Run only link steps:
 
 ```sh
-make deploy ONLY=link
+dotman deploy --only link
 ```
 
 ## Tools
@@ -97,6 +96,7 @@ All packages are installed via `brew bundle --file packages/Brewfile` during boo
 - `dotman.yaml`: deploy steps (link configs, create directories, sync derived state)
 - `dotman.bootstrap.yaml`: bootstrap steps (install packages, fonts)
 - `packages/`: Brewfile and platform-specific install helpers
+- `scripts/`: install and static site build scripts
 - `src/`: Rust deployer source
 - `tests/`: CLI integration tests
 
@@ -177,7 +177,25 @@ For first-time setup on a new machine, follow [docs/new-machine.md](docs/new-mac
 ## Development
 
 ```sh
+make build
 make lint
 make test
 make ci
 ```
+
+## Publishing
+
+The website build publishes the installer and runtime bundle:
+
+```sh
+scripts/build-site.sh
+```
+
+Use this for Vercel:
+
+- Build Command: `scripts/build-site.sh`
+- Output Directory: `public`
+
+`public/manifest.json` points at `bundle/latest.tar.gz` on
+`dotfiles.tabsp.com` and at dotman binaries from the latest GitHub Release.
+Tagging `v*` runs the release workflow that builds those dotman binaries.

@@ -16,11 +16,8 @@
 
 先安装基础工具，这部分不由 `dotman` 自动处理：
 
-- `git`
 - `curl`
-- `make`（GNU Make）
 - CA certificates
-- 编译工具链
 
 macOS 先安装 Xcode Command Line Tools：
 
@@ -28,8 +25,8 @@ macOS 先安装 Xcode Command Line Tools：
 xcode-select --install
 ```
 
-Linux 根据发行版安装基础工具。如果需要自动安装 Maple Mono NF CN 字体，还要确保
-有 `unzip` 和 `fontconfig`。
+Linux 根据发行版安装基础工具。如果需要自动安装 Maple Mono NF CN 字体，还要确保有
+`unzip` 和 `fontconfig`。
 
 ## 3. Homebrew
 
@@ -70,41 +67,38 @@ exec fish -l
 如果 `chsh` 对新窗口没有立刻生效，重新登录系统后再确认。当前终端可以继续通过
 `exec fish -l` 进入 fish。
 
-## 5. Rust
+## 5. 安装 dotman 和 dotfiles bundle
 
-安装 Rust toolchain with Cargo：
+从发布站点安装 `dotman`，并下载最新 dotfiles bundle 到
+`~/.local/share/tabsp-dotfiles`：
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
 ```
 
-因为 dotfiles 还没有 deploy，当前 fish 需要先临时加入 Cargo 路径：
+安装脚本会先执行 dry-run，确认后才运行真正的 bootstrap/deploy。确认过流程后，
+也可以使用无交互模式：
 
-```fish
-fish_add_path "$HOME/.cargo/bin"
-cargo --version
+```sh
+curl -fsSL https://dotfiles.tabsp.com/install.sh | sh -s -- --yes
 ```
 
-## 6. 获取仓库
+`dotman` 会安装到 `~/.local/bin/dotman`。安装脚本首轮运行时会用绝对路径调用它；
+如果当前 shell 还没有把 `~/.local/bin` 加进 `PATH`，脚本结束时会给出提示。
 
-```fish
-git clone https://github.com/tabsp/dotfiles.git ~/dotfiles
-cd ~/dotfiles
-make build
-```
-
-## 7. Bootstrap
+## 6. Bootstrap
 
 先预览：
 
 ```fish
-make bootstrap DRY_RUN=1
+cd ~/.local/share/tabsp-dotfiles
+dotman bootstrap --dry-run
 ```
 
 确认无误后执行：
 
 ```fish
-make bootstrap
+dotman bootstrap
 ```
 
 `bootstrap` 会读取 `dotman.bootstrap.yaml`：
@@ -115,18 +109,19 @@ make bootstrap
 - Linux 运行 `packages/install-maple-mono-linux.sh`，把 Maple Mono NF CN 安装到
   `~/.local/share/fonts/MapleMono-NF-CN`。
 
-## 8. Deploy
+## 7. Deploy
 
 先预览：
 
 ```fish
-make deploy DRY_RUN=1
+cd ~/.local/share/tabsp-dotfiles
+dotman deploy --dry-run
 ```
 
 确认无误后执行：
 
 ```fish
-make deploy
+dotman deploy
 ```
 
 `deploy` 会读取 `dotman.yaml`，链接 dotfiles、创建目录，并运行依赖配置文件的
@@ -135,13 +130,13 @@ make deploy
 核心文件操作失败会停止本次 deploy；受网络影响的同步步骤标记为 `optional: true`，
 失败时只会显示 warning，并继续后续步骤。
 
-## 9. 恢复私有配置
+## 8. 恢复私有配置
 
 - 恢复 `~/.gitconfig.local`。
 - 恢复 `~/.config/fish/local.d/*.fish`。
 - 恢复 SSH/GPG key，并检查权限。
 
-## 10. 手动应用设置
+## 9. 手动应用设置
 
 - 登录 1Password、浏览器、GitHub、云同步等账号。
 - 配置系统权限，例如终端、编辑器和窗口管理工具的 Accessibility 权限。
@@ -152,7 +147,7 @@ make deploy
 - 检查字体、输入法、浏览器扩展和 GUI 应用设置。
 - 首次打开 Neovim，让插件和工具完成安装。
 
-## 11. 验证
+## 10. 验证
 
 检查 Homebrew bundle：
 

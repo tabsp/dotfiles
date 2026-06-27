@@ -9,6 +9,7 @@ __pycache__/
 # Build artifacts
 target/
 dist/
+public/
 
 # Generated tool state
 lazy-lock.json

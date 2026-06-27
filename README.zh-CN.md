@@ -11,54 +11,52 @@ dotman 是一个小型 Rust-based dotfiles 部署工具，用于我的个人 mac
 
 ## 前置依赖
 
-- 带 Cargo 的 Rust 工具链
-- GNU Make
-- Git
 - curl
 - fish shell
+- 已安装到 `~/.local/bin` 的 `dotman`
 
-## 使用
-
-构建部署工具：
+首次设置时，从网站安装 `dotman` 和发布好的 dotfiles bundle：
 
 ```sh
-make build
+curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
 ```
+
+## 使用
 
 预览部署计划：
 
 ```sh
-make deploy DRY_RUN=1
+dotman deploy --dry-run
 ```
 
 部署 dotfiles：
 
 ```sh
-make deploy
+dotman deploy
 ```
 
 预览 bootstrap 步骤：
 
 ```sh
-make bootstrap DRY_RUN=1
+dotman bootstrap --dry-run
 ```
 
 运行 bootstrap 步骤：
 
 ```sh
-make bootstrap
+dotman bootstrap
 ```
 
 跳过 shell 命令，例如插件同步：
 
 ```sh
-make deploy EXCEPT=shell
+dotman deploy --except shell
 ```
 
 只运行链接步骤：
 
 ```sh
-make deploy ONLY=link
+dotman deploy --only link
 ```
 
 ## 工具
@@ -97,6 +95,7 @@ make deploy ONLY=link
 - `dotman.yaml`：部署步骤（链接配置、创建目录、同步衍生状态）
 - `dotman.bootstrap.yaml`：bootstrap 步骤（安装包、字体）
 - `packages/`：Brewfile 和平台相关的安装辅助脚本
+- `scripts/`：安装脚本和静态站点构建脚本
 - `src/`：Rust 部署工具源码
 - `tests/`：CLI 集成测试
 
@@ -175,7 +174,25 @@ fish 会加载本地文件：
 ## 开发
 
 ```sh
+make build
 make lint
 make test
 make ci
 ```
+
+## 发布
+
+网站构建会发布安装脚本和运行时 bundle：
+
+```sh
+scripts/build-site.sh
+```
+
+Vercel 使用：
+
+- Build Command：`scripts/build-site.sh`
+- Output Directory：`public`
+
+`public/manifest.json` 会指向 `dotfiles.tabsp.com` 上的
+`bundle/latest.tar.gz`，以及 GitHub 最新 Release 里的 dotman 二进制。
+推送 `v*` tag 会触发 release workflow 构建这些 dotman 二进制。

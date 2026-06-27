@@ -6,6 +6,7 @@ use std::path::Path;
 
 #[derive(Debug, Parser)]
 #[command(name = "dotman")]
+#[command(version)]
 #[command(about = "Small dotfiles deployer")]
 struct Cli {
     #[arg(long, value_enum, default_value_t = ColorChoice::Auto, global = true)]
