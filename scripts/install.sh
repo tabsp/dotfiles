@@ -38,6 +38,14 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+# ── Guard: TTY required for interactive mode ──
+allow_pipe=${DOTFILES_ALLOW_PIPE:-0}
+if [ "$yes" -eq 0 ] && [ "$allow_pipe" -eq 0 ] && ! ([ -t 0 ] && [ -r /dev/tty ]); then
+  printf 'error: TTY required for interactive install.\n' >&2
+  printf 'Use --yes for unattended mode.\n' >&2
+  exit 1
+fi
+
 need_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     printf 'error: required command not found: %s\n' "$1" >&2
@@ -58,13 +66,6 @@ read_tty() {
 json_string() {
   key=$1
   sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$manifest" | head -n 1
-}
-
-download() {
-  url=$1
-  output=$2
-  printf 'Downloading %s\n' "$url"
-  curl -fsSL "$url" -o "$output"
 }
 
 sha256_file() {
@@ -92,12 +93,76 @@ detect_target() {
   esac
 }
 
+# ── gum helpers ──
+use_gum=0
+if [ "$yes" -eq 0 ] && command -v gum >/dev/null 2>&1; then
+  use_gum=1
+  export GUM_CONFIRM_PROMPT_FOREGROUND="#89b4fa"
+  export GUM_CONFIRM_SELECTED_FOREGROUND=0
+  export GUM_CONFIRM_SELECTED_BACKGROUND=2
+  export GUM_CONFIRM_UNSELECTED_FOREGROUND=7
+  export GUM_CONFIRM_UNSELECTED_BACKGROUND=0
+fi
+
+gum_header() {
+  if [ "$use_gum" -eq 1 ]; then
+    gum style --foreground "#89b4fa" --bold "$@"
+  else
+    printf '%s\n' "$*"
+  fi
+}
+
+gum_spin() {
+  title=$1; shift
+  if [ "$use_gum" -eq 1 ]; then
+    gum spin --spinner dot --title "$title" -- sh -c "$*"
+  else
+    printf '%s...\n' "$title"
+    eval "$*"
+  fi
+}
+
+gum_confirm() {
+  if [ "$yes" -eq 1 ]; then
+    return 0
+  fi
+  if [ "$use_gum" -eq 1 ]; then
+    gum confirm "$1"
+  else
+    printf '%s [y/N] ' "$1"
+    answer=$(read_tty)
+    case "$answer" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac
+  fi
+}
+
+gum_warn() {
+  if [ "$use_gum" -eq 1 ]; then
+    gum style --foreground 3 "$@"
+  else
+    printf '%s\n' "$*"
+  fi
+}
+
+gum_card() {
+  if [ "$use_gum" -eq 1 ]; then
+    gum style --border rounded --border-foreground "#89b4fa" --padding "1 2" "$@"
+  else
+    printf '%s\n' "$*"
+  fi
+}
+
 need_command mktemp
 need_command awk
 
-printf 'Installing tabsp dotfiles from %s\n' "$base_url"
-printf '  dotman:   %s\n' "$dotman_bin"
-printf '  dotfiles: %s\n' "$dotfiles_dir"
+gum_header "tabsp dotfiles"
+if [ "$use_gum" -eq 1 ]; then
+  gum style --foreground "#6c7086" "from $base_url"
+  echo
+else
+  printf 'Installing tabsp dotfiles from %s\n' "$base_url"
+  printf '  dotman:   %s\n' "$dotman_bin"
+  printf '  dotfiles: %s\n' "$dotfiles_dir"
+fi
 
 bundle_next="$dotfiles_dir.next"
 bundle_previous="$dotfiles_dir.previous"
@@ -195,24 +260,15 @@ ensure_brew() {
 
   os=$(uname -s)
 
-  printf '\nHomebrew is required but not found.\n'
-  printf 'Install it with:\n'
-  printf '  /bin/bash -c "%s"\n' "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  gum_warn "Homebrew is required but not found."
 
-  if [ "$yes" -eq 0 ]; then
-    printf '\nInstall Homebrew automatically now? [y/N] '
-    answer=$(read_tty)
-    case "$answer" in
-      y | Y | yes | YES) ;;
-      *)
-        printf 'Skipping Homebrew installation. Bootstrap steps that depend on brew will fail.\n'
-        return 0
-        ;;
-    esac
+  if ! gum_confirm "Install Homebrew automatically?"; then
+    printf 'Skipping Homebrew installation. Bootstrap steps that depend on brew will fail.\n'
+    return 0
   fi
 
-  printf 'Installing Homebrew...\n'
-  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  gum_spin "Installing Homebrew..." \
+    'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 
   if [ "$os" = "Darwin" ]; then
     if [ -x /opt/homebrew/bin/brew ]; then
@@ -246,22 +302,15 @@ ensure_fish() {
     return 0
   fi
 
-  printf '\nFish shell is required but not found.\n'
+  gum_warn "Fish shell is required but not found."
 
-  if [ "$yes" -eq 0 ]; then
-    printf 'Install fish via Homebrew? [y/N] '
-    answer=$(read_tty)
-    case "$answer" in
-      y | Y | yes | YES) ;;
-      *)
-        printf 'Skipping fish installation.\n'
-        return 0
-        ;;
-    esac
+  if ! gum_confirm "Install fish via Homebrew?"; then
+    printf 'Skipping fish installation.\n'
+    return 0
   fi
 
-  printf 'Installing fish...\n'
-  brew install fish
+  gum_spin "Installing fish..." \
+    "brew install fish"
 
   if ! command -v fish >/dev/null 2>&1; then
     printf 'error: fish installation completed but fish is still not in PATH\n' >&2
@@ -280,17 +329,10 @@ ensure_shell_registered() {
 
   printf '\n%s is not listed in /etc/shells.\n' "$shell_path"
 
-  if [ "$yes" -eq 0 ]; then
-    printf 'Add it automatically now? (may require password) [y/N] '
-    answer=$(read_tty)
-    case "$answer" in
-      y | Y | yes | YES) ;;
-      *)
-        printf 'Skipping shell registration. Run this later:\n'
-        printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
-        return 1
-        ;;
-    esac
+  if ! gum_confirm "Add it automatically? (may require password)"; then
+    printf 'Skipping shell registration. Run this later:\n'
+    printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
+    return 1
   fi
 
   if [ -w /etc/shells ]; then
@@ -404,17 +446,11 @@ ensure_fish_login() {
     return 0
   fi
 
-  if [ "$yes" -eq 0 ]; then
-    printf '\nCurrent default shell is %s, not fish.\n' "${current_shell:-unknown}"
-    printf 'Change default shell to fish? (requires password) [y/N] '
-    answer=$(read_tty)
-    case "$answer" in
-      y | Y | yes | YES) ;;
-      *)
-        printf 'Skipping shell change. Fish activation details will be shown at the end.\n'
-        return 0
-        ;;
-    esac
+  printf '\nCurrent default shell is %s, not fish.\n' "${current_shell:-unknown}"
+
+  if ! gum_confirm "Change default shell to fish? (requires password)"; then
+    printf 'Skipping shell change. Fish activation details will be shown at the end.\n'
+    return 0
   fi
 
   if ! ensure_shell_registered "$fish_path"; then
@@ -501,7 +537,8 @@ else
 
   manifest="$tmp_dir/manifest.json"
   stage="downloading manifest"
-  download "$base_url/manifest.json" "$manifest"
+  gum_spin "Downloading manifest" \
+    "curl -fsSL '$base_url/manifest.json' -o '$manifest'"
 
   stage="reading manifest"
   target=$(detect_target)
@@ -533,21 +570,19 @@ else
     dotman_archive="$tmp_dir/$asset_name"
     dotman_extract_dir="$tmp_dir/dotman"
     mkdir -p "$dotman_extract_dir"
-    download "$dotman_url" "$dotman_archive"
-    tar -xzf "$dotman_archive" -C "$dotman_extract_dir"
-    if [ ! -f "$dotman_extract_dir/dotman" ]; then
-      printf 'error: dotman archive did not contain ./dotman\n' >&2
-      exit 1
-    fi
-    cp "$dotman_extract_dir/dotman" "$dotman_bin"
-    chmod 755 "$dotman_bin"
+    gum_spin "Installing dotman $dotman_version" \
+      "curl -fsSL '$dotman_url' -o '$dotman_archive' &&
+       tar -xzf '$dotman_archive' -C '$dotman_extract_dir' &&
+       cp '$dotman_extract_dir/dotman' '$dotman_bin' &&
+       chmod 755 '$dotman_bin'"
     printf 'installed dotman to %s\n' "$dotman_bin"
   fi
 
   bundle_archive="$tmp_dir/dotfiles-bundle.tar.gz"
 
   stage="downloading dotfiles bundle"
-  download "$bundle_url" "$bundle_archive"
+  gum_spin "Downloading dotfiles bundle" \
+    "curl -fsSL '$bundle_url' -o '$bundle_archive'"
   if [ -n "$bundle_sha256" ]; then
     stage="verifying dotfiles bundle"
     actual_sha256=$(sha256_file "$bundle_archive")
@@ -559,9 +594,8 @@ else
   fi
 
   stage="extracting dotfiles bundle"
-  rm -rf "$bundle_next"
-  mkdir -p "$bundle_next"
-  tar -xzf "$bundle_archive" -C "$bundle_next"
+  gum_spin "Extracting dotfiles bundle" \
+    "rm -rf '$bundle_next' && mkdir -p '$bundle_next' && tar -xzf '$bundle_archive' -C '$bundle_next'"
 
   stage="installing dotfiles bundle"
   rm -rf "$bundle_previous"
@@ -580,23 +614,69 @@ stage="configuring fish login shell"
 ensure_fish_login
 
 stage="previewing bootstrap and deploy"
-printf '\nPreviewing bootstrap and deploy...\n'
+echo
 (
   cd "$dotfiles_dir"
-  "$dotman_bin" bootstrap --dry-run
-  "$dotman_bin" deploy --dry-run
-)
+  "$dotman_bin" --color always bootstrap --dry-run 2>&1
+) >/tmp/dotfiles-bootstrap.log
+(
+  cd "$dotfiles_dir"
+  "$dotman_bin" --color always deploy --dry-run 2>&1
+) >/tmp/dotfiles-deploy.log
 
-if [ "$yes" -eq 0 ]; then
-  printf '\nDry-run complete. Apply these changes now? [y/N] '
-  answer=$(read_tty)
-  case "$answer" in
-    y | Y | yes | YES) ;;
-    *)
-      print_final_summary "Stopped before applying changes." "stopped"
-      exit 0
-      ;;
-  esac
+bootstrap_summary=$(grep -E '[0-9]+ links ok' /tmp/dotfiles-bootstrap.log | tail -1 || true)
+deploy_summary=$(grep -E '[0-9]+ links ok' /tmp/dotfiles-deploy.log | tail -1 || true)
+bootstrap_warn=$(grep -oE '[0-9]+ warnings' /tmp/dotfiles-bootstrap.log | tail -1 || true)
+deploy_warn=$(grep -oE '[0-9]+ warnings' /tmp/dotfiles-deploy.log | tail -1 || true)
+
+if [ "$use_gum" -eq 1 ]; then
+  gum style --foreground "#89b4fa" --bold "Preview"
+  echo
+  gum style --bold --foreground "#cba6f7" "# Bootstrap"
+  if [ -n "$bootstrap_summary" ]; then
+    gum style --foreground "#6c7086" "  $bootstrap_summary"
+  fi
+  if [ -n "$bootstrap_warn" ]; then
+    gum style --foreground "#f9e2af" "  $bootstrap_warn"
+  fi
+  echo
+  gum style --bold --foreground "#f5c2e7" "# Deploy"
+  if [ -n "$deploy_summary" ]; then
+    gum style --foreground "#6c7086" "  $deploy_summary"
+  fi
+  if [ -n "$deploy_warn" ]; then
+    gum style --foreground "#f9e2af" "  $deploy_warn"
+  fi
+  echo
+  if gum confirm --default=false "Show full details?"; then
+    {
+      gum style --foreground "#cba6f7" --bold "# Bootstrap"
+      cat /tmp/dotfiles-bootstrap.log
+      echo
+      gum style --foreground "#6c7086" "────────────────────────────────────────────"
+      echo
+      gum style --foreground "#f5c2e7" --bold "# Deploy"
+      cat /tmp/dotfiles-deploy.log
+    } | ${PAGER:-less -r}
+  fi
+else
+  cat /tmp/dotfiles-bootstrap.log
+  echo
+  cat /tmp/dotfiles-deploy.log
+fi
+rm -f /tmp/dotfiles-bootstrap.log /tmp/dotfiles-deploy.log
+echo
+
+if ! gum_confirm "Apply these changes now?"; then
+  if [ "$use_gum" -eq 1 ]; then
+    { printf 'Stopped before applying changes.\n\n'; printf 'dotman:   %s\n' "$dotman_bin"
+      printf 'dotfiles: %s\n' "$dotfiles_dir"
+      if command -v fish >/dev/null 2>&1; then
+        printf '\nStart fish: exec %s -l\n' "$(command -v fish)"; fi; } | gum_card
+  else
+    print_final_summary "Stopped before applying changes." "stopped"
+  fi
+  exit 0
 fi
 
 stage="applying bootstrap and deploy"
@@ -607,4 +687,11 @@ stage="applying bootstrap and deploy"
 )
 
 stage="done"
-print_final_summary "Done." "applied"
+if [ "$use_gum" -eq 1 ]; then
+  { printf 'Done.\n\n'; printf 'dotman:   %s\n' "$dotman_bin"
+    printf 'dotfiles: %s\n' "$dotfiles_dir"
+    if command -v fish >/dev/null 2>&1; then
+      printf '\nStart fish now:\n  exec %s -l\n' "$(command -v fish)"; fi; } | gum_card
+else
+  print_final_summary "Done." "applied"
+fi

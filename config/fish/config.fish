@@ -2,6 +2,23 @@ if status is-interactive
     set fish_greeting
 end
 
+# gum Catppuccin Mocha theme
+set -gx GUM_INPUT_CURSOR_FOREGROUND "#89b4fa"
+set -gx GUM_INPUT_PROMPT_FOREGROUND "#89b4fa"
+set -gx GUM_FILTER_INDICATOR_FOREGROUND "#a6e3a1"
+set -gx GUM_FILTER_MATCH_FOREGROUND "#f5c2e7"
+set -gx GUM_FILTER_PROMPT_FOREGROUND "#89b4fa"
+set -gx GUM_CHOOSE_CURSOR_FOREGROUND "#f9e2af"
+set -gx GUM_CHOOSE_SELECTED_FOREGROUND "#f9e2af"
+set -gx GUM_SPIN_SPINNER_FOREGROUND "#94e2d5"
+set -gx GUM_SPIN_TITLE_FOREGROUND "#94e2d5"
+# confirm: high-contrast buttons
+set -gx GUM_CONFIRM_PROMPT_FOREGROUND "#89b4fa"
+set -gx GUM_CONFIRM_SELECTED_FOREGROUND 0
+set -gx GUM_CONFIRM_SELECTED_BACKGROUND 2
+set -gx GUM_CONFIRM_UNSELECTED_FOREGROUND 7
+set -gx GUM_CONFIRM_UNSELECTED_BACKGROUND 0
+
 set -l local_bin "$HOME/.local/bin"
 if test -d $local_bin
     fish_add_path $local_bin
