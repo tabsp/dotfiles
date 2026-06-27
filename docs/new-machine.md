@@ -91,7 +91,6 @@ curl -fsSL https://dotfiles.tabsp.com/install.sh | sh -s -- --yes
 先预览：
 
 ```fish
-cd ~/.local/share/tabsp-dotfiles
 dotman bootstrap --dry-run
 ```
 
@@ -114,7 +113,6 @@ dotman bootstrap
 先预览：
 
 ```fish
-cd ~/.local/share/tabsp-dotfiles
 dotman deploy --dry-run
 ```
 

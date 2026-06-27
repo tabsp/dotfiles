@@ -14,6 +14,11 @@ end
 
 set -gx GEM_HOME "$HOME/.local/share/gem"
 
+set -l workspace_dotfiles "$HOME/Workspace/dotfiles"
+if test -d $workspace_dotfiles
+    set -gx DOTFILES_DIR $workspace_dotfiles
+end
+
 for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew
     if test -x $brew_bin
         eval ($brew_bin shellenv)

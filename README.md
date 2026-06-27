@@ -22,6 +22,10 @@ the site:
 curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
 ```
 
+When `dotman.yaml` is not present in the current directory, `dotman` falls back
+to `DOTFILES_DIR` and then to the installed bundle in
+`~/.local/share/tabsp-dotfiles`.
+
 ## Usage
 
 Preview the deployment:

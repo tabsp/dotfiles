@@ -21,6 +21,9 @@ dotman 是一个小型 Rust-based dotfiles 部署工具，用于我的个人 mac
 curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
 ```
 
+如果当前目录没有 `dotman.yaml`，`dotman` 会自动 fallback 到 `DOTFILES_DIR`，
+再 fallback 到安装好的 `~/.local/share/tabsp-dotfiles` bundle。
+
 ## 使用
 
 预览部署计划：

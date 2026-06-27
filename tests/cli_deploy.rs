@@ -39,6 +39,31 @@ fn run_dotman(repo: &Path, home: &Path, args: &[&str]) -> Output {
         .expect("run dotman")
 }
 
+fn run_dotman_from(cwd: &Path, home: &Path, args: &[&str]) -> Output {
+    let exe = env!("CARGO_BIN_EXE_dotman");
+    Command::new(exe)
+        .current_dir(cwd)
+        .env("HOME", home)
+        .args(args)
+        .output()
+        .expect("run dotman")
+}
+
+fn run_dotman_from_with_env(
+    cwd: &Path,
+    home: &Path,
+    envs: &[(&str, &Path)],
+    args: &[&str],
+) -> Output {
+    let exe = env!("CARGO_BIN_EXE_dotman");
+    let mut command = Command::new(exe);
+    command.current_dir(cwd).env("HOME", home).args(args);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command.output().expect("run dotman")
+}
+
 #[test]
 fn deploy_dry_run_prints_plan_without_linking() {
     let repo = tempfile::tempdir().expect("repo");
@@ -158,6 +183,97 @@ fn link_sources_are_resolved_from_config_file_directory() {
     let actual = std::fs::canonicalize(target.parent().unwrap().join(link)).expect("actual source");
     let expected = std::fs::canonicalize(profile.join("config/fish")).expect("expected source");
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn deploy_falls_back_to_installed_bundle_when_default_config_is_missing() {
+    let cwd = tempfile::tempdir().expect("cwd");
+    let home = tempfile::tempdir().expect("home");
+    let bundle = home.path().join(".local/share/tabsp-dotfiles");
+    std::fs::create_dir_all(bundle.join("config/fish")).expect("bundle config");
+    std::fs::write(
+        bundle.join("config/fish/config.fish"),
+        "set fish_greeting bundle\n",
+    )
+    .expect("bundle fish");
+    std::fs::write(
+        bundle.join("dotman.yaml"),
+        r#"
+- defaults:
+    link:
+      create: true
+      relative: true
+
+- link:
+    ~/.config/fish: config/fish
+"#,
+    )
+    .expect("bundle dotman yaml");
+
+    let output = run_dotman_from(cwd.path(), home.path(), &["deploy"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let target = home.path().join(".config/fish");
+    let link = std::fs::read_link(&target).expect("fish link");
+    assert!(!link.is_absolute(), "expected relative link, got {link:?}");
+    let resolved = std::fs::canonicalize(target).expect("resolved link");
+    assert_eq!(
+        resolved,
+        std::fs::canonicalize(bundle.join("config/fish")).expect("bundle source")
+    );
+}
+
+#[test]
+fn deploy_uses_dotfiles_dir_env_before_default_installed_bundle() {
+    let cwd = tempfile::tempdir().expect("cwd");
+    let home = tempfile::tempdir().expect("home");
+    let custom_bundle = tempfile::tempdir().expect("custom bundle");
+    std::fs::create_dir_all(custom_bundle.path().join("config/fish")).expect("custom config");
+    std::fs::write(
+        custom_bundle.path().join("config/fish/config.fish"),
+        "set fish_greeting custom\n",
+    )
+    .expect("custom fish");
+    std::fs::write(
+        custom_bundle.path().join("dotman.yaml"),
+        r#"
+- defaults:
+    link:
+      create: true
+      relative: true
+
+- link:
+    ~/.config/fish: config/fish
+"#,
+    )
+    .expect("custom dotman yaml");
+
+    let default_bundle = home.path().join(".local/share/tabsp-dotfiles");
+    std::fs::create_dir_all(&default_bundle).expect("default bundle");
+    std::fs::write(default_bundle.join("dotman.yaml"), "[]\n").expect("default yaml");
+
+    let output = run_dotman_from_with_env(
+        cwd.path(),
+        home.path(),
+        &[("DOTFILES_DIR", custom_bundle.path())],
+        &["deploy"],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let target = home.path().join(".config/fish");
+    let resolved = std::fs::canonicalize(target).expect("resolved link");
+    assert_eq!(
+        resolved,
+        std::fs::canonicalize(custom_bundle.path().join("config/fish")).expect("custom source")
+    );
 }
 
 #[test]
@@ -487,6 +603,35 @@ fn bootstrap_uses_bootstrap_config_by_default() {
     .expect("dotman bootstrap yaml");
 
     let output = run_dotman(repo.path(), home.path(), &["bootstrap"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(marker.exists());
+}
+
+#[test]
+fn bootstrap_falls_back_to_installed_bundle_when_default_config_is_missing() {
+    let cwd = tempfile::tempdir().expect("cwd");
+    let home = tempfile::tempdir().expect("home");
+    let bundle = home.path().join(".local/share/tabsp-dotfiles");
+    std::fs::create_dir_all(&bundle).expect("bundle");
+    let marker = home.path().join("bootstrap-marker");
+    std::fs::write(
+        bundle.join("dotman.bootstrap.yaml"),
+        format!(
+            r#"
+- shell:
+    - command: "touch {}"
+      description: Touch bootstrap marker
+"#,
+            marker.to_string_lossy()
+        ),
+    )
+    .expect("bundle bootstrap yaml");
+
+    let output = run_dotman_from(cwd.path(), home.path(), &["bootstrap"]);
     assert!(
         output.status.success(),
         "stderr: {}",

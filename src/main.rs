@@ -2,7 +2,7 @@ mod deploy;
 mod path;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Parser)]
 #[command(name = "dotman")]
@@ -40,8 +40,8 @@ enum Command {
         only: Vec<deploy::Directive>,
         #[arg(long, value_delimiter = ',')]
         except: Vec<deploy::Directive>,
-        #[arg(long, default_value = "dotman.yaml")]
-        config: String,
+        #[arg(long)]
+        config: Option<String>,
     },
     Bootstrap {
         #[arg(long)]
@@ -50,8 +50,8 @@ enum Command {
         only: Vec<deploy::Directive>,
         #[arg(long, value_delimiter = ',')]
         except: Vec<deploy::Directive>,
-        #[arg(long, default_value = "dotman.bootstrap.yaml")]
-        config: String,
+        #[arg(long)]
+        config: Option<String>,
     },
 }
 
@@ -71,19 +71,38 @@ fn run() -> Result<(), String> {
             only,
             except,
             config,
-        } => deploy::run_deploy("deploy", Path::new(&config), dry_run, &only, &except, style),
+        } => {
+            let config = resolve_config_path(config, "dotman.yaml")?;
+            deploy::run_deploy("deploy", &config, dry_run, &only, &except, style)
+        }
         Command::Bootstrap {
             dry_run,
             only,
             except,
             config,
-        } => deploy::run_deploy(
-            "bootstrap",
-            Path::new(&config),
-            dry_run,
-            &only,
-            &except,
-            style,
-        ),
+        } => {
+            let config = resolve_config_path(config, "dotman.bootstrap.yaml")?;
+            deploy::run_deploy("bootstrap", &config, dry_run, &only, &except, style)
+        }
     }
+}
+
+fn resolve_config_path(config: Option<String>, default_file: &str) -> Result<PathBuf, String> {
+    if let Some(config) = config {
+        return Ok(PathBuf::from(config));
+    }
+
+    let local_config = Path::new(default_file);
+    if local_config.exists() {
+        return Ok(local_config.to_path_buf());
+    }
+
+    if let Some(dotfiles_dir) = std::env::var_os("DOTFILES_DIR") {
+        return Ok(PathBuf::from(dotfiles_dir).join(default_file));
+    }
+
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home)
+        .join(".local/share/tabsp-dotfiles")
+        .join(default_file))
 }
