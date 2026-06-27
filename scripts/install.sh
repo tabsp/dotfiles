@@ -43,6 +43,16 @@ need_command() {
   fi
 }
 
+read_tty() {
+  if [ ! -r /dev/tty ]; then
+    return 0
+  fi
+
+  (
+    IFS= read -r line </dev/tty && printf '%s' "$line"
+  ) 2>/dev/null || true
+}
+
 json_string() {
   key=$1
   sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$manifest" | head -n 1
@@ -99,10 +109,7 @@ ensure_brew() {
 
   if [ "$yes" -eq 0 ]; then
     printf '\nInstall Homebrew automatically now? [y/N] '
-    answer=
-    if [ -r /dev/tty ]; then
-      read -r answer </dev/tty 2>/dev/null || true
-    fi
+    answer=$(read_tty)
     case "$answer" in
       y | Y | yes | YES) ;;
       *)
@@ -151,10 +158,7 @@ ensure_fish() {
 
   if [ "$yes" -eq 0 ]; then
     printf 'Install fish via Homebrew? [y/N] '
-    answer=
-    if [ -r /dev/tty ]; then
-      read -r answer </dev/tty 2>/dev/null || true
-    fi
+    answer=$(read_tty)
     case "$answer" in
       y | Y | yes | YES) ;;
       *)
@@ -173,6 +177,45 @@ ensure_fish() {
   fi
 
   printf 'Fish installed successfully.\n'
+}
+
+ensure_shell_registered() {
+  shell_path=$1
+
+  if [ -r /etc/shells ] && grep -Fx "$shell_path" /etc/shells >/dev/null 2>&1; then
+    return 0
+  fi
+
+  printf '\n%s is not listed in /etc/shells.\n' "$shell_path"
+
+  if [ "$yes" -eq 0 ]; then
+    printf 'Add it automatically now? (may require password) [y/N] '
+    answer=$(read_tty)
+    case "$answer" in
+      y | Y | yes | YES) ;;
+      *)
+        printf 'Skipping shell registration. Run this later:\n'
+        printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
+        return 1
+        ;;
+    esac
+  fi
+
+  if [ -w /etc/shells ]; then
+    if printf '%s\n' "$shell_path" >>/etc/shells; then
+      printf 'Added %s to /etc/shells.\n' "$shell_path"
+      return 0
+    fi
+  elif command -v sudo >/dev/null 2>&1; then
+    if printf '%s\n' "$shell_path" | sudo tee -a /etc/shells >/dev/null; then
+      printf 'Added %s to /etc/shells.\n' "$shell_path"
+      return 0
+    fi
+  fi
+
+  printf 'Could not update /etc/shells. Run this later:\n'
+  printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
+  return 1
 }
 
 ensure_fish_login() {
@@ -197,10 +240,7 @@ ensure_fish_login() {
   if [ "$yes" -eq 0 ]; then
     printf '\nCurrent default shell is %s, not fish.\n' "${current_shell:-unknown}"
     printf 'Change default shell to fish? (requires password) [y/N] '
-    answer=
-    if [ -r /dev/tty ]; then
-      read -r answer </dev/tty 2>/dev/null || true
-    fi
+    answer=$(read_tty)
     case "$answer" in
       y | Y | yes | YES) ;;
       *)
@@ -209,6 +249,11 @@ ensure_fish_login() {
         return 0
         ;;
     esac
+  fi
+
+  if ! ensure_shell_registered "$fish_path"; then
+    printf 'Skipping shell change until fish is listed in /etc/shells.\n'
+    return 0
   fi
 
   if chsh -s "$fish_path" 2>/dev/null; then
@@ -304,10 +349,7 @@ printf '\nPreviewing bootstrap and deploy...\n'
 
 if [ "$yes" -eq 0 ]; then
   printf '\nDry-run complete. Apply these changes now? [y/N] '
-  answer=
-  if [ -r /dev/tty ]; then
-    read -r answer </dev/tty 2>/dev/null || true
-  fi
+  answer=$(read_tty)
   case "$answer" in
     y | Y | yes | YES) ;;
     *)
@@ -328,7 +370,8 @@ case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
   *)
     printf '\nNote: %s is not in PATH for this shell.\n' "$HOME/.local/bin"
-    if [ "${SHELL##*/}" = "fish" ]; then
+    current_shell_name=${SHELL:-}
+    if [ "${current_shell_name##*/}" = "fish" ]; then
       printf 'For fish, add it with:\n'
       printf '  fish_add_path "$HOME/.local/bin"\n'
     else
