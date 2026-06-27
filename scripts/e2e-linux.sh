@@ -7,11 +7,12 @@ repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 mode=local
 keep=0
 inspect=0
+interactive_install=0
 verbose=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/e2e-linux.sh [--local|--production] [--keep] [--inspect] [--verbose]
+Usage: scripts/e2e-linux.sh [--local|--production] [--interactive-install] [--keep] [--inspect] [--verbose]
 
 Run a real Linux install test inside Docker.
 
@@ -20,6 +21,7 @@ Modes:
   --production  Install from DOTFILES_SITE_URL, defaulting to production.
 
 Options:
+  --interactive-install  Exercise install.sh prompts through a pseudo-terminal.
   --keep        Keep the temporary Docker work directory after the run.
   --inspect     Open an interactive tester shell after E2E completes.
   --verbose     Enable shell tracing inside this wrapper and the container.
@@ -40,6 +42,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --production)
       mode=production
+      ;;
+    --interactive-install)
+      interactive_install=1
       ;;
     --keep)
       keep=1
@@ -109,6 +114,7 @@ fi
 docker_args+=(
   -e "E2E_MODE=$mode"
   -e "E2E_PORT=$port"
+  -e "E2E_INTERACTIVE_INSTALL=$interactive_install"
   -e "E2E_VERBOSE=$verbose"
   -e "DOTFILES_SITE_URL=$production_site_url"
   -v "$tmp_dir:/work"
@@ -145,6 +151,9 @@ apt-get install -y --no-install-recommends \
   tar \
   unzip \
   xz-utils
+if [ "${E2E_INTERACTIVE_INSTALL:-0}" = "1" ]; then
+  apt-get install -y --no-install-recommends expect
+fi
 rm -rf /var/lib/apt/lists/*
 
 if ! id tester >/dev/null 2>&1; then
@@ -245,23 +254,49 @@ else
   install_url="${DOTFILES_SITE_URL%/}/install.sh"
 fi
 
-run_as_tester "set -o pipefail; curl -fsSL '$install_url' | DOTFILES_SITE_URL='${install_url%/install.sh}' sh -s -- --yes"
+if [ "${E2E_INTERACTIVE_INSTALL:-0}" = "1" ]; then
+  cat >/work/install-interactive.expect <<EOF
+set timeout -1
+spawn sudo -H -u tester env HOME=/home/tester USER=tester PATH=/home/tester/.cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DOTFILES_SITE_URL=${install_url%/install.sh} bash -lc {set -o pipefail; curl -fsSL '$install_url' | sh}
+expect {
+  -re {Install Homebrew automatically now\\? \\[y/N\\]} { send "y\r"; exp_continue }
+  -re {Install fish via Homebrew\\? \\[y/N\\]} { send "y\r"; exp_continue }
+  -re {Add it automatically now\\? .*\\[y/N\\]} { send "y\r"; exp_continue }
+  -re {Change default shell to fish\\? .*\\[y/N\\]} { send "y\r"; exp_continue }
+  -re {Dry-run complete\\. Apply these changes now\\? \\[y/N\\]} { send "y\r"; exp_continue }
+  eof
+}
+catch wait result
+exit [lindex \$result 3]
+EOF
+  expect /work/install-interactive.expect
+else
+  run_as_tester "set -o pipefail; curl -fsSL '$install_url' | DOTFILES_SITE_URL='${install_url%/install.sh}' sh -s -- --yes"
+fi
 
 run_as_tester '
   set -euo pipefail
   export PATH="$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
+  verify_log=/work/verify.log
 
   test -x "$HOME/.local/bin/dotman"
-  dotman --version
+  dotman --version >"$verify_log"
   test -d "$HOME/.local/share/tabsp-dotfiles"
   test -f "$HOME/.local/share/tabsp-dotfiles/dotman.yaml"
   test -d "$HOME/.local/share/tabsp-dotfiles/config"
   command -v brew >/dev/null
   command -v fish >/dev/null
+  fish_path=$(command -v fish)
+  test "$(getent passwd tester | cut -d: -f7)" = "$fish_path"
 
   cd "$HOME/.local/share/tabsp-dotfiles"
-  dotman bootstrap --dry-run
-  dotman deploy --dry-run
+  if ! {
+    dotman bootstrap --dry-run
+    dotman deploy --dry-run
+  } >>"$verify_log" 2>&1; then
+    cat "$verify_log"
+    exit 1
+  fi
 
   test -e "$HOME/.config/fish"
   test -e "$HOME/.config/nvim"

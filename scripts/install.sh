@@ -256,51 +256,75 @@ ensure_shell_registered() {
   return 1
 }
 
-print_fish_session_hint() {
-  shell_path=$1
-
-  printf '\nTo switch this terminal now, run:\n'
-  printf '  exec %s -l\n' "$shell_path"
-}
-
-print_fish_login_hint() {
+print_fish_login_commands() {
   shell_path=$1
   user_name=$(id -un)
 
-  printf 'To make future login sessions start fish, run:\n'
-  printf '  sudo grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
+  printf '     sudo grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
   case "$(uname -s)" in
     Darwin)
-      printf '  chsh -s %s\n' "$shell_path"
+      printf '     chsh -s %s\n' "$shell_path"
       ;;
     *)
-      printf '  sudo chsh -s %s %s\n' "$shell_path" "$user_name"
+      printf '     sudo chsh -s %s %s\n' "$shell_path" "$user_name"
       ;;
   esac
 }
 
+current_login_shell() {
+  current_shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)
+  if [ -z "$current_shell" ]; then
+    current_shell=$(dscl . -read ~/ UserShell 2>/dev/null | awk '{print $NF}' || printf '')
+  fi
+  if [ -z "$current_shell" ]; then
+    current_shell=${SHELL:-}
+  fi
+
+  printf '%s' "$current_shell"
+}
+
+login_shell_is() {
+  [ "$(current_login_shell)" = "$1" ]
+}
+
 change_login_shell() {
   shell_path=$1
+  user_name=$(id -un)
 
   if [ "$yes" -eq 1 ]; then
-    if chsh -s "$shell_path" </dev/null 2>/dev/null; then
+    if chsh -s "$shell_path" </dev/null 2>/dev/null && login_shell_is "$shell_path"; then
       return 0
     fi
 
     if command -v sudo >/dev/null 2>&1; then
-      sudo -n chsh -s "$shell_path" "$(id -un)"
+      sudo -n chsh -s "$shell_path" "$user_name" 2>/dev/null || true
+      login_shell_is "$shell_path"
       return $?
     fi
 
     return 1
   fi
 
-  if chsh -s "$shell_path"; then
+  case "$(uname -s)" in
+    Darwin)
+      chsh -s "$shell_path" || true
+      ;;
+    *)
+      if command -v sudo >/dev/null 2>&1; then
+        sudo chsh -s "$shell_path" "$user_name" || true
+      else
+        chsh -s "$shell_path" || true
+      fi
+      ;;
+  esac
+
+  if login_shell_is "$shell_path"; then
     return 0
   fi
 
-  if command -v sudo >/dev/null 2>&1; then
-    sudo chsh -s "$shell_path" "$(id -un)"
+  if [ "$(uname -s)" = "Darwin" ] && command -v sudo >/dev/null 2>&1; then
+    sudo chsh -s "$shell_path" "$user_name" || true
+    login_shell_is "$shell_path"
     return $?
   fi
 
@@ -314,13 +338,7 @@ ensure_fish_login() {
 
   fish_path=$(command -v fish)
 
-  current_shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)
-  if [ -z "$current_shell" ]; then
-    current_shell=$(dscl . -read ~/ UserShell 2>/dev/null | awk '{print $NF}' || printf '')
-  fi
-  if [ -z "$current_shell" ]; then
-    current_shell=${SHELL:-}
-  fi
+  current_shell=$(current_login_shell)
 
   if [ "$current_shell" = "$fish_path" ]; then
     return 0
@@ -333,33 +351,82 @@ ensure_fish_login() {
     case "$answer" in
       y | Y | yes | YES) ;;
       *)
-        printf 'Skipping shell change.\n'
-        print_fish_login_hint "$fish_path"
-        printf 'New login sessions will keep using the current default shell until that succeeds.\n'
-        print_fish_session_hint "$fish_path"
+        printf 'Skipping shell change. Fish activation details will be shown at the end.\n'
         return 0
         ;;
     esac
   fi
 
   if ! ensure_shell_registered "$fish_path"; then
-    printf 'Skipping shell change until fish is listed in /etc/shells.\n'
-    print_fish_login_hint "$fish_path"
-    printf 'New login sessions will keep using the current default shell until that is fixed.\n'
-    print_fish_session_hint "$fish_path"
+    printf 'Skipping shell change until fish is listed in /etc/shells. Details will be shown at the end.\n'
     return 0
   fi
 
   if change_login_shell "$fish_path"; then
-    printf 'Default shell changed to fish.\n'
-    printf 'New login sessions will start fish after you log out and back in.\n'
+    printf 'Default shell changed to fish. Activation details will be shown at the end.\n'
   else
-    printf 'chsh failed (may require password).\n'
-    print_fish_login_hint "$fish_path"
-    printf 'New login sessions will keep using the current default shell until that succeeds.\n'
+    printf 'chsh failed (may require password). Details will be shown at the end.\n'
+  fi
+}
+
+print_next_step() {
+  printf '  %s. %s\n' "$step_no" "$1"
+  step_no=$((step_no + 1))
+}
+
+print_final_summary() {
+  install_status=$1
+  apply_status=$2
+
+  printf '\n%s\n' "$install_status"
+  printf 'Installed dotman:   %s\n' "$dotman_bin"
+  printf 'Installed dotfiles: %s\n' "$dotfiles_dir"
+
+  printf '\nNext steps:\n'
+  step_no=1
+
+  dotman_command=$dotman_bin
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*)
+      dotman_command=dotman
+      ;;
+    *)
+      print_next_step "Add dotman to PATH:"
+      current_shell_name=${SHELL:-}
+      if [ "${current_shell_name##*/}" = "fish" ]; then
+        printf '     fish_add_path "$HOME/.local/bin"\n'
+      else
+        printf '     export PATH="$HOME/.local/bin:$PATH"\n'
+      fi
+      ;;
+  esac
+
+  if command -v fish >/dev/null 2>&1; then
+    fish_path=$(command -v fish)
+    current_shell=$(current_login_shell)
+
+    if [ "$current_shell" = "$fish_path" ]; then
+      print_next_step "Open a new login session to start fish automatically."
+      printf '     Current default shell: %s\n' "$fish_path"
+    else
+      print_next_step "Configure fish as the default login shell:"
+      print_fish_login_commands "$fish_path"
+    fi
+
+    print_next_step "Switch this terminal to fish now (optional):"
+    printf '     exec %s -l\n' "$fish_path"
   fi
 
-  print_fish_session_hint "$fish_path"
+  if [ "$apply_status" = "stopped" ]; then
+    print_next_step "Apply bootstrap and deploy:"
+    printf '     cd %s\n' "$dotfiles_dir"
+    printf '     %s bootstrap\n' "$dotman_command"
+    printf '     %s deploy\n' "$dotman_command"
+  else
+    printf '\nLater, re-apply dotfiles with:\n'
+    printf '  %s bootstrap\n' "$dotman_command"
+    printf '  %s deploy\n' "$dotman_command"
+  fi
 }
 
 stage="creating temporary workspace"
@@ -458,8 +525,7 @@ if [ "$yes" -eq 0 ]; then
   case "$answer" in
     y | Y | yes | YES) ;;
     *)
-      printf 'stopped before applying changes. Run this to apply later:\n'
-      printf '  cd %s && %s bootstrap && %s deploy\n' "$dotfiles_dir" "$dotman_bin" "$dotman_bin"
+      print_final_summary "Stopped before applying changes." "stopped"
       exit 0
       ;;
   esac
@@ -472,26 +538,5 @@ stage="applying bootstrap and deploy"
   "$dotman_bin" deploy
 )
 
-case ":$PATH:" in
-  *":$HOME/.local/bin:"*) ;;
-  *)
-    printf '\nNote: %s is not in PATH for this shell.\n' "$HOME/.local/bin"
-    current_shell_name=${SHELL:-}
-    if [ "${current_shell_name##*/}" = "fish" ]; then
-      printf 'For fish, add it with:\n'
-      printf '  fish_add_path "$HOME/.local/bin"\n'
-    else
-      printf 'For POSIX shells, add something like:\n'
-      printf '  export PATH="$HOME/.local/bin:$PATH"\n'
-    fi
-    ;;
-esac
-
 stage="done"
-printf '\nDone.\n'
-printf 'Installed dotman:   %s\n' "$dotman_bin"
-printf 'Installed dotfiles: %s\n' "$dotfiles_dir"
-printf '\nFuture runs can use:\n'
-printf '  %s bootstrap\n' "$dotman_bin"
-printf '  %s deploy\n' "$dotman_bin"
-printf 'Once %s is in PATH, you can use dotman directly.\n' "$HOME/.local/bin"
+print_final_summary "Done." "applied"
