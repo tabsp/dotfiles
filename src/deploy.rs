@@ -4,11 +4,11 @@ use clap::ValueEnum;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Read, Write};
 use std::os::unix::fs as unix_fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -239,6 +239,7 @@ impl OutputStyle {
             (IconChoice::Nerd, Icon::Skip) => "",
             (IconChoice::Nerd, Icon::Warn) => "",
             (IconChoice::Nerd, Icon::Fail) => "",
+            (IconChoice::Nerd, Icon::Running) => "⠋",
             (IconChoice::Unicode, Icon::App) => "●",
             (IconChoice::Unicode, Icon::Defaults) => "●",
             (IconChoice::Unicode, Icon::Links) => "●",
@@ -253,6 +254,7 @@ impl OutputStyle {
             (IconChoice::Unicode, Icon::Skip) => "-",
             (IconChoice::Unicode, Icon::Warn) => "!",
             (IconChoice::Unicode, Icon::Fail) => "✗",
+            (IconChoice::Unicode, Icon::Running) => "…",
             (IconChoice::Ascii, Icon::App) => ">",
             (IconChoice::Ascii, Icon::Defaults) => "*",
             (IconChoice::Ascii, Icon::Links) => "*",
@@ -267,6 +269,15 @@ impl OutputStyle {
             (IconChoice::Ascii, Icon::Skip) => "-",
             (IconChoice::Ascii, Icon::Warn) => "!",
             (IconChoice::Ascii, Icon::Fail) => "!!",
+            (IconChoice::Ascii, Icon::Running) => "..",
+        }
+    }
+
+    fn spinner_frames(self) -> &'static [&'static str] {
+        match self.icons {
+            IconChoice::Nerd => &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            IconChoice::Unicode => &["◐", "◓", "◑", "◒"],
+            IconChoice::Ascii => &[".", "..", "...", " ..", "  ."],
         }
     }
 
@@ -296,6 +307,7 @@ enum Icon {
     Skip,
     Warn,
     Fail,
+    Running,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -576,7 +588,9 @@ fn run_link_step(
     reporter: &mut Reporter,
 ) -> Result<(), String> {
     reporter.section(Icon::Links, "Links");
-    for (target, value) in items {
+    let total = items.len();
+    let mut already_linked = 0usize;
+    for (index, (target, value)) in items.iter().enumerate() {
         let (source, settings, condition) = match value {
             LinkValue::Path(path) => (
                 path.as_str(),
@@ -594,19 +608,60 @@ fn run_link_step(
             && !condition_matches(config_dir, condition)?
         {
             reporter.summary.skipped += 1;
-            reporter.row(Icon::Skip, Color::Dim, target, "skipped, condition not met");
+            reporter.row(
+                Icon::Skip,
+                Color::Dim,
+                format!("[{}/{}] {target}", index + 1, total),
+                "skipped, condition not met",
+            );
             continue;
         }
 
         let plan = plan_link(config_dir, source, target, settings)?;
-        print_link_plan(&plan, reporter);
+
+        // update summary
+        match &plan.action {
+            LinkAction::Link | LinkAction::Relink | LinkAction::Backup(_) => {
+                reporter.summary.links_changed += 1;
+            }
+            LinkAction::Skip => reporter.summary.links_ok += 1,
+            LinkAction::Fail(_) => reporter.summary.failed += 1,
+        }
+
         if reporter.dry_run {
+            print_link_plan_row(&plan, reporter);
             if let LinkAction::Fail(reason) = &plan.action {
                 return Err(format!("dry-run: would fail linking {}: {reason}", target));
             }
             continue;
         }
-        apply_link_plan(plan)?;
+
+        if let LinkAction::Fail(reason) = &plan.action {
+            print_link_plan_row(&plan, reporter);
+            return Err(reason.clone());
+        }
+
+        if matches!(plan.action, LinkAction::Skip) {
+            already_linked += 1;
+            continue;
+        }
+
+        let link_label = format!(
+            "{} → {}",
+            reporter.path(&plan.target),
+            reporter.path(&plan.source)
+        );
+        let progress_label = format!("[{}/{}] {}", index + 1, total, link_label);
+        run_spinner_task(reporter, &progress_label, move || apply_link_plan(plan))?;
+        reporter.row(Icon::Ok, Color::Green, &progress_label, "");
+    }
+    if already_linked > 0 {
+        reporter.row(
+            Icon::Ok,
+            Color::Green,
+            format!("{already_linked} already linked"),
+            "",
+        );
     }
     println!();
     Ok(())
@@ -665,16 +720,14 @@ fn plan_link(
     })
 }
 
-fn print_link_plan(plan: &LinkPlan, reporter: &mut Reporter) {
+fn print_link_plan_row(plan: &LinkPlan, reporter: &mut Reporter) {
     let target = reporter.path(&plan.target);
     let source = reporter.path(&plan.source);
     match &plan.action {
         LinkAction::Link => {
-            reporter.summary.links_changed += 1;
             reporter.row(Icon::Action, Color::Blue, target, source);
         }
         LinkAction::Relink => {
-            reporter.summary.links_changed += 1;
             reporter.row(
                 Icon::Relink,
                 Color::Yellow,
@@ -683,7 +736,6 @@ fn print_link_plan(plan: &LinkPlan, reporter: &mut Reporter) {
             );
         }
         LinkAction::Backup(backup) => {
-            reporter.summary.links_changed += 1;
             reporter.row(
                 Icon::Backup,
                 Color::Yellow,
@@ -692,11 +744,9 @@ fn print_link_plan(plan: &LinkPlan, reporter: &mut Reporter) {
             );
         }
         LinkAction::Skip => {
-            reporter.summary.links_ok += 1;
             reporter.row(Icon::Ok, Color::Green, target, "already linked");
         }
         LinkAction::Fail(reason) => {
-            reporter.summary.failed += 1;
             reporter.row(Icon::Fail, Color::Red, target, reason);
         }
     }
@@ -734,22 +784,44 @@ fn apply_link_plan(plan: LinkPlan) -> Result<(), String> {
 fn run_create_step(create: CreateValue, reporter: &mut Reporter) -> Result<(), String> {
     reporter.section(Icon::Directories, "Directories");
     let CreateValue::Paths(paths) = create;
-    for path in paths {
+    let total = paths.len();
+    let mut existing_dirs = 0usize;
+    for (index, path) in paths.into_iter().enumerate() {
         let path = expand_home(&path)?;
+        if reporter.dry_run {
+            if path.exists() && path.is_dir() {
+                reporter.row(
+                    Icon::Ok,
+                    Color::Green,
+                    reporter.path(&path),
+                    "already exists",
+                );
+            } else {
+                reporter.summary.dirs += 1;
+                reporter.row(Icon::Create, Color::Cyan, reporter.path(&path), "create");
+            }
+            continue;
+        }
+
         if path.exists() && path.is_dir() {
-            reporter.row(
-                Icon::Ok,
-                Color::Green,
-                reporter.path(&path),
-                "already exists",
-            );
+            existing_dirs += 1;
+            continue;
+        }
+        reporter.summary.dirs += 1;
+        let dir_label = reporter.path(&path).to_string();
+        let progress_label = format!("[{}/{}] {}", index + 1, total, dir_label);
+        run_spinner_task(reporter, &progress_label, move || {
+            create_dir_all_following_symlinks(&path)
+        })?;
+        reporter.row(Icon::Ok, Color::Green, &progress_label, "created");
+    }
+    if existing_dirs > 0 {
+        let label = if existing_dirs == 1 {
+            "1 already exists".to_string()
         } else {
-            reporter.summary.dirs += 1;
-            reporter.row(Icon::Create, Color::Cyan, reporter.path(&path), "create");
-        }
-        if !reporter.dry_run {
-            create_dir_all_following_symlinks(&path)?;
-        }
+            format!("{existing_dirs} already exist")
+        };
+        reporter.row(Icon::Ok, Color::Green, label, "");
     }
     println!();
     Ok(())
@@ -762,7 +834,10 @@ fn run_shell_step(
     reporter: &mut Reporter,
 ) -> Result<(), String> {
     reporter.section(Icon::Shell, "Shell");
-    for item in items {
+    let total = items.len();
+    let mut completed = 0usize;
+    let mut skipped = 0usize;
+    for (index, item) in items.iter().enumerate() {
         let shell = match item {
             ShellValue::Command(command) => ShellItem {
                 command: command.clone(),
@@ -776,50 +851,224 @@ fn run_shell_step(
         let settings = defaults.merged(&shell.options);
 
         let label = shell.description.as_deref().unwrap_or(&shell.command);
+        let progress_label = format!("[{}/{}] {}", index + 1, total, label);
         if let Some(condition) = shell.condition.as_deref()
             && !condition_matches(config_dir, condition)?
         {
             reporter.summary.skipped += 1;
-            reporter.row(Icon::Skip, Color::Dim, label, "skipped");
-            reporter.detail("condition", condition);
+            if reporter.dry_run {
+                reporter.row(Icon::Skip, Color::Dim, &progress_label, "skipped");
+                reporter.detail("condition", condition);
+            } else {
+                skipped += 1;
+            }
             continue;
         }
 
         reporter.summary.shell += 1;
-        reporter.row(Icon::Action, Color::Blue, label, "");
         if reporter.dry_run {
+            reporter.row(Icon::Action, Color::Blue, &progress_label, "");
             reporter.detail("command", &shell.command);
             continue;
         }
 
+        let can_animate = std::io::stdout().is_terminal();
+        if !can_animate {
+            println!(
+                "  {} {}",
+                reporter
+                    .style
+                    .paint(reporter.style.icon(Icon::Running), Color::Cyan),
+                reporter.style.paint(&progress_label, Color::Dim)
+            );
+        }
         let mut command = Command::new("sh");
         command.arg("-c").arg(&shell.command);
         command.current_dir(config_dir);
-        if !settings.stdout {
-            command.stdout(Stdio::null());
-        }
-        if !settings.stderr {
-            command.stderr(Stdio::null());
-        }
-        let status = command
-            .status()
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        let output = run_shell_command(command, reporter, &progress_label, can_animate)
             .map_err(|err| format!("failed to run shell command '{}': {err}", shell.command))?;
-        if !status.success() {
+        let command_failed = !output.status.success();
+        if (settings.stdout || command_failed) && !output.stdout.is_empty() {
+            print!("{}", output.stdout);
+            if !output.stdout.ends_with('\n') {
+                println!();
+            }
+            std::io::stdout()
+                .flush()
+                .map_err(|err| format!("failed to flush stdout: {err}"))?;
+        }
+        if (settings.stderr || command_failed) && !output.stderr.is_empty() {
+            eprint!("{}", output.stderr);
+            if !output.stderr.ends_with('\n') {
+                eprintln!();
+            }
+            std::io::stderr()
+                .flush()
+                .map_err(|err| format!("failed to flush stderr: {err}"))?;
+        }
+        if command_failed {
             if shell.optional {
                 reporter.summary.warnings += 1;
                 reporter.row(
                     Icon::Warn,
                     Color::Yellow,
-                    label,
-                    format!("optional command failed: {status}"),
+                    &progress_label,
+                    format!("optional command failed: {}", output.status),
                 );
                 continue;
             }
+            println!(
+                "  {} {}",
+                reporter
+                    .style
+                    .paint(reporter.style.icon(Icon::Fail), Color::Red),
+                reporter.style.paint(&progress_label, Color::Red)
+            );
             return Err(format!("shell command failed: {}", shell.command));
         }
+        completed += 1;
+    }
+    let completed_label = match completed {
+        0 => None,
+        1 => Some("1 shell command completed".to_string()),
+        completed => Some(format!("{completed} shell commands completed")),
+    };
+    let skipped_label = match skipped {
+        0 => None,
+        1 => Some("1 skipped".to_string()),
+        skipped => Some(format!("{skipped} skipped")),
+    };
+    match (completed_label, skipped_label) {
+        (Some(completed), Some(skipped)) => {
+            reporter.row(
+                Icon::Ok,
+                Color::Green,
+                format!("{completed}, {skipped}"),
+                "",
+            );
+        }
+        (Some(completed), None) => reporter.row(Icon::Ok, Color::Green, completed, ""),
+        (None, Some(skipped)) => reporter.row(Icon::Skip, Color::Dim, skipped, ""),
+        (None, None) => {}
     }
     println!();
     Ok(())
+}
+
+fn run_spinner_task<T, F>(reporter: &Reporter, label: &str, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    if !std::io::stdout().is_terminal() {
+        println!(
+            "  {} {}",
+            reporter
+                .style
+                .paint(reporter.style.icon(Icon::Running), Color::Cyan),
+            reporter.style.paint(label, Color::Dim)
+        );
+        return task();
+    }
+
+    let task = std::thread::spawn(task);
+    let frames = reporter.style.spinner_frames();
+    let mut frame_index = 0usize;
+    while !task.is_finished() {
+        let frame = frames[frame_index % frames.len()];
+        print!(
+            "\r\x1b[2K  {} {}",
+            reporter.style.paint(frame, Color::Cyan),
+            reporter.style.paint(label, Color::Dim)
+        );
+        std::io::stdout()
+            .flush()
+            .map_err(|err| format!("failed to flush stdout: {err}"))?;
+        frame_index += 1;
+        std::thread::sleep(Duration::from_millis(90));
+    }
+    print!("\r\x1b[2K");
+    std::io::stdout()
+        .flush()
+        .map_err(|err| format!("failed to flush stdout: {err}"))?;
+
+    task.join()
+        .map_err(|_| "task panicked while running".to_string())?
+}
+
+struct ShellCommandOutput {
+    status: std::process::ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+fn run_shell_command(
+    mut command: Command,
+    reporter: &Reporter,
+    label: &str,
+    can_animate: bool,
+) -> Result<ShellCommandOutput, std::io::Error> {
+    let mut child = command.spawn()?;
+    let stdout_reader = child
+        .stdout
+        .take()
+        .map(|mut stdout| std::thread::spawn(move || read_command_output(&mut stdout)));
+    let stderr_reader = child
+        .stderr
+        .take()
+        .map(|mut stderr| std::thread::spawn(move || read_command_output(&mut stderr)));
+
+    let frames = reporter.style.spinner_frames();
+    let mut frame_index = 0usize;
+    let status = if can_animate {
+        loop {
+            if let Some(status) = child.try_wait()? {
+                print!("\r\x1b[2K");
+                std::io::stdout().flush()?;
+                break status;
+            }
+
+            let frame = frames[frame_index % frames.len()];
+            print!(
+                "\r\x1b[2K  {} {}",
+                reporter.style.paint(frame, Color::Cyan),
+                reporter.style.paint(label, Color::Dim)
+            );
+            std::io::stdout().flush()?;
+            frame_index += 1;
+            std::thread::sleep(Duration::from_millis(90));
+        }
+    } else {
+        child.wait()?
+    };
+
+    let stdout = join_command_output(stdout_reader)?;
+    let stderr = join_command_output(stderr_reader)?;
+
+    Ok(ShellCommandOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn read_command_output(reader: &mut impl Read) -> std::io::Result<String> {
+    let mut output = String::new();
+    reader.read_to_string(&mut output)?;
+    Ok(output)
+}
+
+fn join_command_output(
+    reader: Option<std::thread::JoinHandle<std::io::Result<String>>>,
+) -> std::io::Result<String> {
+    match reader {
+        Some(reader) => reader
+            .join()
+            .unwrap_or_else(|_| Err(std::io::Error::other("failed to join output reader"))),
+        None => Ok(String::new()),
+    }
 }
 
 fn run_clean_step(paths: &[String], reporter: &mut Reporter) -> Result<(), String> {

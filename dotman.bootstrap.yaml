@@ -1,7 +1,7 @@
 - defaults:
     shell:
-      stdout: true
-      stderr: true
+      stdout: false
+      stderr: false
 
 - shell:
     - command: brew bundle --file packages/Brewfile

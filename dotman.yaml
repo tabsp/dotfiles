@@ -5,8 +5,8 @@
       relative: true
       backup: true
     shell:
-      stdout: true
-      stderr: true
+      stdout: false
+      stderr: false
 
 - link:
     ~/.config/fish:

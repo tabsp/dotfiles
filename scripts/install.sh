@@ -38,9 +38,8 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-# ── Guard: TTY required for interactive mode ──
-allow_pipe=${DOTFILES_ALLOW_PIPE:-0}
-if [ "$yes" -eq 0 ] && [ "$allow_pipe" -eq 0 ] && ! ([ -t 0 ] && [ -r /dev/tty ]); then
+# ── Guard: interactive mode reads confirmations from the controlling terminal.
+if [ "$yes" -eq 0 ] && ! ([ -r /dev/tty ] && [ -w /dev/tty ]); then
   printf 'error: TTY required for interactive install.\n' >&2
   printf 'Use --yes for unattended mode.\n' >&2
   exit 1
@@ -95,7 +94,7 @@ detect_target() {
 
 # ── gum helpers ──
 use_gum=0
-if [ "$yes" -eq 0 ] && command -v gum >/dev/null 2>&1; then
+if [ "$yes" -eq 0 ] && [ -t 0 ] && [ -t 1 ] && command -v gum >/dev/null 2>&1; then
   use_gum=1
   export GUM_CONFIRM_PROMPT_FOREGROUND="#89b4fa"
   export GUM_CONFIRM_SELECTED_FOREGROUND=0
@@ -617,11 +616,19 @@ stage="previewing bootstrap and deploy"
 echo
 (
   cd "$dotfiles_dir"
-  "$dotman_bin" --color always bootstrap --dry-run 2>&1
+  if [ "$use_gum" -eq 1 ]; then
+    "$dotman_bin" --color always bootstrap --dry-run 2>&1
+  else
+    "$dotman_bin" bootstrap --dry-run 2>&1
+  fi
 ) >/tmp/dotfiles-bootstrap.log
 (
   cd "$dotfiles_dir"
-  "$dotman_bin" --color always deploy --dry-run 2>&1
+  if [ "$use_gum" -eq 1 ]; then
+    "$dotman_bin" --color always deploy --dry-run 2>&1
+  else
+    "$dotman_bin" deploy --dry-run 2>&1
+  fi
 ) >/tmp/dotfiles-deploy.log
 
 bootstrap_summary=$(grep -E '[0-9]+ links ok' /tmp/dotfiles-bootstrap.log | tail -1 || true)
@@ -682,8 +689,13 @@ fi
 stage="applying bootstrap and deploy"
 (
   cd "$dotfiles_dir"
-  "$dotman_bin" bootstrap
-  "$dotman_bin" deploy
+  if [ "$use_gum" -eq 1 ]; then
+    gum spin --spinner dot --title "Applying bootstrap and deploy..." --show-output -- \
+      sh -c '"$1" bootstrap && "$1" deploy' _ "$dotman_bin"
+  else
+    "$dotman_bin" bootstrap
+    "$dotman_bin" deploy
+  fi
 )
 
 stage="done"
