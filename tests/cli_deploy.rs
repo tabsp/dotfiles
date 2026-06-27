@@ -56,8 +56,9 @@ fn deploy_dry_run_prints_plan_without_linking() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("link dry-run"), "stdout: {stdout}");
-    assert!(stdout.contains("create dry-run"), "stdout: {stdout}");
+    assert!(stdout.contains("Dry run complete"), "stdout: {stdout}");
+    assert!(stdout.contains("~/.config/fish"), "stdout: {stdout}");
+    assert!(stdout.contains("create"), "stdout: {stdout}");
 
     assert!(!home.path().join(".config/fish").exists());
 }
@@ -95,6 +96,49 @@ fn deploy_only_link_still_applies_defaults() {
 
     assert!(std::fs::read_link(home.path().join(".config/fish")).is_ok());
     assert!(!home.path().join(".config/fish/local.d").exists());
+}
+
+#[test]
+fn link_sources_are_resolved_from_config_file_directory() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    let profile = repo.path().join("profiles/work");
+    std::fs::create_dir_all(profile.join("config/fish")).expect("profile config");
+    std::fs::write(
+        profile.join("config/fish/config.fish"),
+        "set fish_greeting profile\n",
+    )
+    .expect("profile fish");
+    std::fs::write(
+        profile.join("dotman.yaml"),
+        r#"
+- defaults:
+    link:
+      create: true
+      relative: true
+
+- link:
+    ~/.config/fish: config/fish
+"#,
+    )
+    .expect("profile dotman yaml");
+
+    let output = run_dotman(
+        repo.path(),
+        home.path(),
+        &["deploy", "--config", "profiles/work/dotman.yaml"],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let target = home.path().join(".config/fish");
+    let link = std::fs::read_link(&target).expect("fish link");
+    let actual = std::fs::canonicalize(target.parent().unwrap().join(link)).expect("actual source");
+    let expected = std::fs::canonicalize(profile.join("config/fish")).expect("expected source");
+    assert_eq!(actual, expected);
 }
 
 #[test]

@@ -110,6 +110,7 @@ make bootstrap
 `bootstrap` 会读取 `dotman.bootstrap.yaml`：
 
 - 使用 `packages/Brewfile` 安装 Homebrew 管理的 CLI 工具和 macOS cask。
+- 如果 `try` 尚不可用，通过 Homebrew 的 Ruby 安装 `try-cli`。
 - macOS 通过 Homebrew cask 安装 Ghostty 和 `font-maple-mono-nf-cn`。
 - Linux 运行 `packages/install-maple-mono-linux.sh`，把 Maple Mono NF CN 安装到
   `~/.local/share/fonts/MapleMono-NF-CN`。
@@ -128,9 +129,9 @@ make deploy DRY_RUN=1
 make deploy
 ```
 
-`deploy` 会读取 `dotman.yaml`，链接 dotfiles、创建目录并运行日常部署相关的
-shell 步骤。如果 fish 已经提前创建了 `~/.config/fish`，`dotman` 会先备份它，
-再链接仓库里的 fish 配置。
+`deploy` 会读取 `dotman.yaml`，链接 dotfiles、创建目录，并运行依赖配置文件的
+同步步骤，例如 fish plugins 和 tealdeer pages。如果 fish 已经提前创建了
+`~/.config/fish`，`dotman` 会先备份它，再链接仓库里的 fish 配置。
 
 ## 9. 恢复私有配置
 

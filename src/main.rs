@@ -1,15 +1,33 @@
 mod deploy;
 mod path;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::Path;
 
 #[derive(Debug, Parser)]
 #[command(name = "dotman")]
 #[command(about = "Small dotfiles deployer")]
 struct Cli {
+    #[arg(long, value_enum, default_value_t = ColorChoice::Auto, global = true)]
+    color: ColorChoice,
+    #[arg(long, value_enum, default_value_t = IconChoice::Nerd, global = true)]
+    icons: IconChoice,
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ColorChoice {
+    Auto,
+    Always,
+    Never,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum IconChoice {
+    Nerd,
+    Unicode,
+    Ascii,
 }
 
 #[derive(Debug, Subcommand)]
@@ -45,18 +63,26 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
+    let style = deploy::OutputStyle::new(cli.color, cli.icons);
     match cli.command {
         Command::Deploy {
             dry_run,
             only,
             except,
             config,
-        }
-        | Command::Bootstrap {
+        } => deploy::run_deploy("deploy", Path::new(&config), dry_run, &only, &except, style),
+        Command::Bootstrap {
             dry_run,
             only,
             except,
             config,
-        } => deploy::run_deploy(Path::new(&config), dry_run, &only, &except),
+        } => deploy::run_deploy(
+            "bootstrap",
+            Path::new(&config),
+            dry_run,
+            &only,
+            &except,
+            style,
+        ),
     }
 }

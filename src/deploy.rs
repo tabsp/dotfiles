@@ -1,11 +1,14 @@
 use crate::path::expand_home;
+use crate::{ColorChoice, IconChoice};
 use clap::ValueEnum;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::IsTerminal;
 use std::os::unix::fs as unix_fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -185,6 +188,7 @@ struct LinkSettings {
 #[derive(Clone, Debug)]
 struct LinkPlan {
     target: PathBuf,
+    source: PathBuf,
     link_source: PathBuf,
     settings: LinkSettings,
     action: LinkAction,
@@ -199,11 +203,246 @@ enum LinkAction {
     Fail(String),
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct OutputStyle {
+    color: bool,
+    icons: IconChoice,
+}
+
+impl OutputStyle {
+    pub fn new(color: ColorChoice, icons: IconChoice) -> Self {
+        let color = match color {
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+            ColorChoice::Auto => {
+                std::env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal()
+            }
+        };
+        Self { color, icons }
+    }
+
+    fn icon(self, icon: Icon) -> &'static str {
+        match (self.icons, icon) {
+            (IconChoice::Nerd, Icon::App) => "󰣇",
+            (IconChoice::Nerd, Icon::Defaults) => "󰉖",
+            (IconChoice::Nerd, Icon::Links) => "󰌷",
+            (IconChoice::Nerd, Icon::Directories) => "󰉋",
+            (IconChoice::Nerd, Icon::Shell) => "",
+            (IconChoice::Nerd, Icon::Clean) => "󰃢",
+            (IconChoice::Nerd, Icon::Ok) => "",
+            (IconChoice::Nerd, Icon::Action) => "",
+            (IconChoice::Nerd, Icon::Create) => "",
+            (IconChoice::Nerd, Icon::Relink) => "󰑓",
+            (IconChoice::Nerd, Icon::Backup) => "󰁯",
+            (IconChoice::Nerd, Icon::Skip) => "",
+            (IconChoice::Nerd, Icon::Fail) => "",
+            (IconChoice::Unicode, Icon::App) => "●",
+            (IconChoice::Unicode, Icon::Defaults) => "●",
+            (IconChoice::Unicode, Icon::Links) => "●",
+            (IconChoice::Unicode, Icon::Directories) => "●",
+            (IconChoice::Unicode, Icon::Shell) => "●",
+            (IconChoice::Unicode, Icon::Clean) => "●",
+            (IconChoice::Unicode, Icon::Ok) => "✓",
+            (IconChoice::Unicode, Icon::Action) => "→",
+            (IconChoice::Unicode, Icon::Create) => "+",
+            (IconChoice::Unicode, Icon::Relink) => "↻",
+            (IconChoice::Unicode, Icon::Backup) => "⤴",
+            (IconChoice::Unicode, Icon::Skip) => "-",
+            (IconChoice::Unicode, Icon::Fail) => "✗",
+            (IconChoice::Ascii, Icon::App) => ">",
+            (IconChoice::Ascii, Icon::Defaults) => "*",
+            (IconChoice::Ascii, Icon::Links) => "*",
+            (IconChoice::Ascii, Icon::Directories) => "*",
+            (IconChoice::Ascii, Icon::Shell) => "*",
+            (IconChoice::Ascii, Icon::Clean) => "*",
+            (IconChoice::Ascii, Icon::Ok) => "OK",
+            (IconChoice::Ascii, Icon::Action) => "->",
+            (IconChoice::Ascii, Icon::Create) => "+",
+            (IconChoice::Ascii, Icon::Relink) => "~>",
+            (IconChoice::Ascii, Icon::Backup) => "^",
+            (IconChoice::Ascii, Icon::Skip) => "-",
+            (IconChoice::Ascii, Icon::Fail) => "!!",
+        }
+    }
+
+    fn paint(self, text: impl Into<String>, color: Color) -> String {
+        let text = text.into();
+        if self.color {
+            format!("{}{}{}", color.code(), text, "\x1b[0m")
+        } else {
+            text
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Icon {
+    App,
+    Defaults,
+    Links,
+    Directories,
+    Shell,
+    Clean,
+    Ok,
+    Action,
+    Create,
+    Relink,
+    Backup,
+    Skip,
+    Fail,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Color {
+    Blue,
+    Cyan,
+    Green,
+    Yellow,
+    Red,
+    Magenta,
+    Dim,
+}
+
+impl Color {
+    fn code(self) -> &'static str {
+        match self {
+            Color::Blue => "\x1b[38;2;137;180;250m",
+            Color::Cyan => "\x1b[38;2;148;226;213m",
+            Color::Green => "\x1b[38;2;166;227;161m",
+            Color::Yellow => "\x1b[38;2;249;226;175m",
+            Color::Red => "\x1b[38;2;243;139;168m",
+            Color::Magenta => "\x1b[38;2;245;194;231m",
+            Color::Dim => "\x1b[2m",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct Summary {
+    links_ok: usize,
+    links_changed: usize,
+    dirs: usize,
+    shell: usize,
+    skipped: usize,
+    failed: usize,
+}
+
+struct Reporter {
+    repo: PathBuf,
+    dry_run: bool,
+    style: OutputStyle,
+    summary: Summary,
+}
+
+impl Reporter {
+    fn new(command_name: &str, repo: &Path, dry_run: bool, style: OutputStyle) -> Self {
+        let mode = if dry_run { " --dry-run" } else { "" };
+        println!(
+            "{} {}{}",
+            style.paint(style.icon(Icon::App), Color::Cyan),
+            style.paint("dotman", Color::Cyan),
+            style.paint(format!(" {command_name}{mode}"), Color::Dim)
+        );
+        println!();
+        Self {
+            repo: repo.to_path_buf(),
+            dry_run,
+            style,
+            summary: Summary::default(),
+        }
+    }
+
+    fn section(&self, icon: Icon, title: &str) {
+        println!(
+            "{} {}",
+            self.style.paint(self.style.icon(icon), Color::Blue),
+            self.style.paint(title, Color::Blue)
+        );
+    }
+
+    fn row(&self, icon: Icon, icon_color: Color, left: impl AsRef<str>, detail: impl AsRef<str>) {
+        let left = left.as_ref();
+        let detail = detail.as_ref();
+        let icon = self.style.paint(self.style.icon(icon), icon_color);
+        if detail.is_empty() {
+            println!("  {icon} {left}");
+        } else {
+            println!(
+                "  {icon} {:<32} {}",
+                left,
+                self.style.paint(detail, Color::Dim)
+            );
+        }
+    }
+
+    fn detail(&self, label: &str, value: &str) {
+        println!(
+            "    {} {}",
+            self.style.paint(format!("{label:<8}"), Color::Dim),
+            self.style.paint(value, Color::Magenta)
+        );
+    }
+
+    fn path(&self, path: &Path) -> String {
+        display_path(path, &self.repo)
+    }
+
+    fn finish(&self, elapsed: std::time::Duration) {
+        println!();
+        let icon = if self.summary.failed == 0 {
+            Icon::Ok
+        } else {
+            Icon::Fail
+        };
+        let color = if self.summary.failed == 0 {
+            Color::Green
+        } else {
+            Color::Red
+        };
+        let title = if self.dry_run {
+            "Dry run complete"
+        } else if self.summary.failed == 0 {
+            "Done"
+        } else {
+            "Finished with errors"
+        };
+        println!(
+            "{} {} {}",
+            self.style.paint(self.style.icon(icon), color),
+            self.style.paint(title, color),
+            self.style
+                .paint(format!("in {:.1}s", elapsed.as_secs_f32()), Color::Dim)
+        );
+        if self.dry_run {
+            println!(
+                "  {}",
+                self.style.paint("No changes were made.", Color::Dim)
+            );
+        }
+        println!(
+            "  {}",
+            self.style.paint(
+                format!(
+                    "{} links ok, {} link actions, {} directories, {} shell commands, {} skipped",
+                    self.summary.links_ok,
+                    self.summary.links_changed,
+                    self.summary.dirs,
+                    self.summary.shell,
+                    self.summary.skipped,
+                ),
+                Color::Dim
+            )
+        );
+    }
+}
+
 pub fn run_deploy(
+    command_name: &str,
     config_path: &Path,
     dry_run: bool,
     only: &[Directive],
     except: &[Directive],
+    style: OutputStyle,
 ) -> Result<(), String> {
     if !only.is_empty() && !except.is_empty() {
         return Err("--only and --except cannot be used together".to_string());
@@ -211,9 +450,12 @@ pub fn run_deploy(
 
     let repo =
         std::env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
+    let config_dir = config_dir(config_path)?;
     let steps = load_steps(config_path)?;
     let mut link_defaults = LinkDefaults::default();
     let mut shell_defaults = ShellDefaults::default();
+    let start = Instant::now();
+    let mut reporter = Reporter::new(command_name, &repo, dry_run, style);
 
     for step in steps {
         let directive = step.directive();
@@ -225,21 +467,24 @@ pub fn run_deploy(
             Step::Defaults { defaults } => {
                 link_defaults.apply(&defaults.link);
                 shell_defaults.apply(&defaults.shell);
-                if dry_run {
-                    print_defaults_plan(&defaults);
-                }
+                print_defaults_plan(&reporter, &defaults);
             }
-            Step::Link { link } => run_link_step(&repo, &link, link_defaults.clone(), dry_run)?,
-            Step::Create { create } => run_create_step(create, dry_run)?,
-            Step::Shell { shell } => run_shell_step(&shell, shell_defaults, dry_run)?,
-            Step::Clean { clean } => run_clean_step(&clean, dry_run)?,
+            Step::Link { link } => {
+                run_link_step(&config_dir, &link, link_defaults.clone(), &mut reporter)?
+            }
+            Step::Create { create } => run_create_step(create, &mut reporter)?,
+            Step::Shell { shell } => {
+                run_shell_step(&config_dir, &shell, shell_defaults, &mut reporter)?
+            }
+            Step::Clean { clean } => run_clean_step(&clean, &mut reporter)?,
         }
     }
 
+    reporter.finish(start.elapsed());
     Ok(())
 }
 
-fn print_defaults_plan(defaults: &DefaultsStep) {
+fn print_defaults_plan(reporter: &Reporter, defaults: &DefaultsStep) {
     let mut labels = Vec::new();
     if defaults.link.has_values() {
         labels.push("link");
@@ -247,11 +492,27 @@ fn print_defaults_plan(defaults: &DefaultsStep) {
     if defaults.shell.has_values() {
         labels.push("shell");
     }
-    if labels.is_empty() {
-        println!("defaults");
-    } else {
-        println!("defaults: {}", labels.join(" "));
+    reporter.section(Icon::Defaults, "Defaults");
+    if defaults.link.has_values() {
+        reporter.row(
+            Icon::Action,
+            Color::Blue,
+            "link",
+            format_link_options(&defaults.link),
+        );
     }
+    if defaults.shell.has_values() {
+        reporter.row(
+            Icon::Action,
+            Color::Blue,
+            "shell",
+            format_shell_options(&defaults.shell),
+        );
+    }
+    if labels.is_empty() {
+        reporter.row(Icon::Ok, Color::Green, "defaults", "no changes");
+    }
+    println!();
 }
 
 impl Step {
@@ -283,12 +544,27 @@ fn load_steps(path: &Path) -> Result<Vec<Step>, String> {
     serde_yaml::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
 }
 
+fn config_dir(path: &Path) -> Result<PathBuf, String> {
+    let dir = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if dir.is_absolute() {
+        Ok(dir.to_path_buf())
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(dir))
+            .map_err(|err| format!("failed to read current dir: {err}"))
+    }
+}
+
 fn run_link_step(
-    repo: &Path,
+    config_dir: &Path,
     items: &BTreeMap<String, LinkValue>,
     defaults: LinkDefaults,
-    dry_run: bool,
+    reporter: &mut Reporter,
 ) -> Result<(), String> {
+    reporter.section(Icon::Links, "Links");
     for (target, value) in items {
         let (source, settings, condition) = match value {
             LinkValue::Path(path) => (
@@ -304,17 +580,16 @@ fn run_link_step(
         };
 
         if let Some(condition) = condition
-            && !condition_matches(condition)?
+            && !condition_matches(config_dir, condition)?
         {
-            if dry_run {
-                println!("link skip: {target} (condition false: {condition})");
-            }
+            reporter.summary.skipped += 1;
+            reporter.row(Icon::Skip, Color::Dim, target, "skipped, condition not met");
             continue;
         }
 
-        let plan = plan_link(repo, source, target, settings)?;
-        print_link_plan(&plan, dry_run);
-        if dry_run {
+        let plan = plan_link(config_dir, source, target, settings)?;
+        print_link_plan(&plan, reporter);
+        if reporter.dry_run {
             if let LinkAction::Fail(reason) = &plan.action {
                 return Err(format!("dry-run: would fail linking {}: {reason}", target));
             }
@@ -322,21 +597,28 @@ fn run_link_step(
         }
         apply_link_plan(plan)?;
     }
+    println!();
     Ok(())
 }
 
 fn plan_link(
-    repo: &Path,
+    config_dir: &Path,
     source: &str,
     target: &str,
     settings: LinkSettings,
 ) -> Result<LinkPlan, String> {
-    let source = repo.join(source);
+    let source = Path::new(source);
+    let source = if source.is_absolute() {
+        source.to_path_buf()
+    } else {
+        config_dir.join(source)
+    };
     let target = expand_home(target)?;
 
     if !source.exists() {
         return Ok(LinkPlan {
             target: target.clone(),
+            source: source.clone(),
             link_source: source,
             settings,
             action: LinkAction::Fail("source does not exist".to_string()),
@@ -365,33 +647,47 @@ fn plan_link(
 
     Ok(LinkPlan {
         target,
+        source,
         link_source,
         settings,
         action,
     })
 }
 
-fn print_link_plan(plan: &LinkPlan, dry_run: bool) {
-    let prefix = if dry_run { "link dry-run" } else { "link" };
+fn print_link_plan(plan: &LinkPlan, reporter: &mut Reporter) {
+    let target = reporter.path(&plan.target);
+    let source = reporter.path(&plan.source);
     match &plan.action {
-        LinkAction::Link => println!(
-            "{prefix}: {} -> {}",
-            plan.target.display(),
-            plan.link_source.display()
-        ),
-        LinkAction::Relink => println!(
-            "{prefix}: relink {} -> {}",
-            plan.target.display(),
-            plan.link_source.display()
-        ),
-        LinkAction::Backup(backup) => println!(
-            "{prefix}: backup {} to {}; link -> {}",
-            plan.target.display(),
-            backup.display(),
-            plan.link_source.display()
-        ),
-        LinkAction::Skip => println!("{prefix}: ok {}", plan.target.display()),
-        LinkAction::Fail(reason) => println!("{prefix}: fail {} ({reason})", plan.target.display()),
+        LinkAction::Link => {
+            reporter.summary.links_changed += 1;
+            reporter.row(Icon::Action, Color::Blue, target, source);
+        }
+        LinkAction::Relink => {
+            reporter.summary.links_changed += 1;
+            reporter.row(
+                Icon::Relink,
+                Color::Yellow,
+                target,
+                format!("relink to {source}"),
+            );
+        }
+        LinkAction::Backup(backup) => {
+            reporter.summary.links_changed += 1;
+            reporter.row(
+                Icon::Backup,
+                Color::Yellow,
+                target,
+                format!("backup to {}; link to {source}", reporter.path(backup)),
+            );
+        }
+        LinkAction::Skip => {
+            reporter.summary.links_ok += 1;
+            reporter.row(Icon::Ok, Color::Green, target, "already linked");
+        }
+        LinkAction::Fail(reason) => {
+            reporter.summary.failed += 1;
+            reporter.row(Icon::Fail, Color::Red, target, reason);
+        }
     }
 }
 
@@ -424,25 +720,37 @@ fn apply_link_plan(plan: LinkPlan) -> Result<(), String> {
     }
 }
 
-fn run_create_step(create: CreateValue, dry_run: bool) -> Result<(), String> {
+fn run_create_step(create: CreateValue, reporter: &mut Reporter) -> Result<(), String> {
+    reporter.section(Icon::Directories, "Directories");
     let CreateValue::Paths(paths) = create;
     for path in paths {
         let path = expand_home(&path)?;
-        if dry_run {
-            println!("create dry-run: {}", path.display());
+        if path.exists() && path.is_dir() {
+            reporter.row(
+                Icon::Ok,
+                Color::Green,
+                reporter.path(&path),
+                "already exists",
+            );
         } else {
-            println!("create: {}", path.display());
+            reporter.summary.dirs += 1;
+            reporter.row(Icon::Create, Color::Cyan, reporter.path(&path), "create");
+        }
+        if !reporter.dry_run {
             create_dir_all_following_symlinks(&path)?;
         }
     }
+    println!();
     Ok(())
 }
 
 fn run_shell_step(
+    config_dir: &Path,
     items: &[ShellValue],
     defaults: ShellDefaults,
-    dry_run: bool,
+    reporter: &mut Reporter,
 ) -> Result<(), String> {
+    reporter.section(Icon::Shell, "Shell");
     for item in items {
         let shell = match item {
             ShellValue::Command(command) => ShellItem {
@@ -457,23 +765,24 @@ fn run_shell_step(
 
         let label = shell.description.as_deref().unwrap_or(&shell.command);
         if let Some(condition) = shell.condition.as_deref()
-            && !condition_matches(condition)?
+            && !condition_matches(config_dir, condition)?
         {
-            if dry_run {
-                println!("shell skip: {label} (condition false: {condition})");
-            }
+            reporter.summary.skipped += 1;
+            reporter.row(Icon::Skip, Color::Dim, label, "skipped");
+            reporter.detail("condition", condition);
             continue;
         }
 
-        if dry_run {
-            println!("shell dry-run: {label}");
-            println!("  command: {}", shell.command);
+        reporter.summary.shell += 1;
+        reporter.row(Icon::Action, Color::Blue, label, "");
+        if reporter.dry_run {
+            reporter.detail("command", &shell.command);
             continue;
         }
 
-        println!("shell: {label}");
         let mut command = Command::new("sh");
         command.arg("-c").arg(&shell.command);
+        command.current_dir(config_dir);
         if !settings.stdout {
             command.stdout(Stdio::null());
         }
@@ -487,25 +796,87 @@ fn run_shell_step(
             return Err(format!("shell command failed: {}", shell.command));
         }
     }
+    println!();
     Ok(())
 }
 
-fn run_clean_step(paths: &[String], dry_run: bool) -> Result<(), String> {
+fn run_clean_step(paths: &[String], reporter: &mut Reporter) -> Result<(), String> {
+    reporter.section(Icon::Clean, "Clean");
     for path in paths {
         let path = expand_home(path)?;
-        if dry_run {
-            println!("clean dry-run: {}", path.display());
+        if reporter.dry_run {
+            reporter.row(
+                Icon::Action,
+                Color::Blue,
+                reporter.path(&path),
+                "would clean",
+            );
         } else {
-            println!("clean: {} (not implemented)", path.display());
+            reporter.row(
+                Icon::Skip,
+                Color::Dim,
+                reporter.path(&path),
+                "not implemented",
+            );
         }
     }
+    println!();
     Ok(())
 }
 
-fn condition_matches(condition: &str) -> Result<bool, String> {
+fn format_link_options(options: &LinkOptions) -> String {
+    let mut labels = Vec::new();
+    if let Some(value) = options.create {
+        labels.push(format!("create={value}"));
+    }
+    if let Some(value) = options.relink {
+        labels.push(format!("relink={value}"));
+    }
+    if let Some(value) = options.backup {
+        labels.push(format!("backup={value}"));
+    }
+    if let Some(value) = options.relative {
+        labels.push(format!("relative={value}"));
+    }
+    labels.join(", ")
+}
+
+fn format_shell_options(options: &ShellOptions) -> String {
+    let mut labels = Vec::new();
+    if let Some(value) = options.stdout {
+        labels.push(format!("stdout={value}"));
+    }
+    if let Some(value) = options.stderr {
+        labels.push(format!("stderr={value}"));
+    }
+    labels.join(", ")
+}
+
+fn display_path(path: &Path, repo: &Path) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        let home = PathBuf::from(home);
+        if let Ok(rest) = path.strip_prefix(&home) {
+            if rest.as_os_str().is_empty() {
+                return "~".to_string();
+            }
+            return format!("~/{}", rest.display());
+        }
+    }
+
+    if let Ok(rest) = path.strip_prefix(repo)
+        && !rest.as_os_str().is_empty()
+    {
+        return rest.display().to_string();
+    }
+
+    path.display().to_string()
+}
+
+fn condition_matches(config_dir: &Path, condition: &str) -> Result<bool, String> {
     let status = Command::new("sh")
         .arg("-c")
         .arg(condition)
+        .current_dir(config_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

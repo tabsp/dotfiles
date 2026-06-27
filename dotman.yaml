@@ -29,11 +29,9 @@
     - ~/Workspace/tries
 
 - shell:
-    - command: '"$(brew --prefix ruby)/bin/gem" install try-cli --no-document --install-dir "$HOME/.local/share/gem" --bindir "$HOME/.local/bin"'
-      description: Install try experiment manager
-      if: command -v brew >/dev/null 2>&1
     - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
       description: Install and sync fish plugins
+      if: command -v fish >/dev/null 2>&1
     - command: TEALDEER_CONFIG_DIR="$HOME/.config/tealdeer" tldr --update
       description: Update tealdeer pages
       if: command -v tldr >/dev/null 2>&1
