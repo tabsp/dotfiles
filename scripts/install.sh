@@ -86,6 +86,57 @@ need_command mktemp
 need_command sed
 need_command awk
 
+ensure_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    return 0
+  fi
+
+  os=$(uname -s)
+
+  printf '\nHomebrew is required but not found.\n'
+  printf 'Install it with:\n'
+  printf '  /bin/bash -c "%s"\n' "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+  if [ "$yes" -eq 0 ]; then
+    printf '\nInstall Homebrew automatically now? [y/N] '
+    answer=
+    if [ -r /dev/tty ]; then
+      read -r answer </dev/tty 2>/dev/null || true
+    fi
+    case "$answer" in
+      y | Y | yes | YES) ;;
+      *)
+        printf 'Skipping Homebrew installation. Bootstrap steps that depend on brew will fail.\n'
+        return 0
+        ;;
+    esac
+  fi
+
+  printf 'Installing Homebrew...\n'
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+  if [ "$os" = "Darwin" ]; then
+    if [ -x /opt/homebrew/bin/brew ]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -x /usr/local/bin/brew ]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+  elif [ "$os" = "Linux" ]; then
+    if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+      eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    elif [ -x "$HOME/.linuxbrew/bin/brew" ]; then
+      eval "$("$HOME/.linuxbrew/bin/brew" shellenv)"
+    fi
+  fi
+
+  if ! command -v brew >/dev/null 2>&1; then
+    printf 'error: Homebrew installation completed but brew is still not in PATH\n' >&2
+    exit 1
+  fi
+
+  printf 'Homebrew installed successfully.\n'
+}
+
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
@@ -155,6 +206,8 @@ if [ -d "$dotfiles_dir" ]; then
 fi
 mv "$bundle_next" "$dotfiles_dir"
 printf 'installed dotfiles bundle to %s\n' "$dotfiles_dir"
+
+ensure_brew
 
 printf '\nPreviewing bootstrap and deploy...\n'
 (
