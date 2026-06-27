@@ -99,6 +99,25 @@ fn deploy_only_link_still_applies_defaults() {
 }
 
 #[test]
+fn deploy_rejects_only_and_except_together() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    write_deploy_config(repo.path(), "true");
+
+    let output = run_dotman(
+        repo.path(),
+        home.path(),
+        &["deploy", "--only", "link", "--except", "shell"],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--only and --except cannot be used together"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn link_sources_are_resolved_from_config_file_directory() {
     let repo = tempfile::tempdir().expect("repo");
     let home = tempfile::tempdir().expect("home");
@@ -142,6 +161,163 @@ fn link_sources_are_resolved_from_config_file_directory() {
 }
 
 #[test]
+fn link_backup_true_preserves_existing_file_before_linking() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    std::fs::create_dir_all(repo.path().join("config/fish")).expect("source dir");
+    std::fs::write(repo.path().join("config/fish/config.fish"), "new\n").expect("source file");
+    std::fs::create_dir_all(home.path().join(".config")).expect("target parent");
+    std::fs::write(home.path().join(".config/fish"), "old\n").expect("existing file");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        r#"
+- defaults:
+    link:
+      backup: true
+
+- link:
+    ~/.config/fish: config/fish
+"#,
+    )
+    .expect("dotman yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["deploy"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(home.path().join(".config/fish").is_symlink());
+    let backups = std::fs::read_dir(home.path().join(".config"))
+        .expect("backup parent")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("fish.backup.")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(backups.len(), 1, "expected one backup, got {backups:?}");
+    assert_eq!(
+        std::fs::read_to_string(backups[0].path()).expect("backup content"),
+        "old\n"
+    );
+}
+
+#[test]
+fn link_backup_true_preserves_existing_directory_before_linking() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    std::fs::create_dir_all(repo.path().join("config/fish")).expect("source dir");
+    std::fs::write(repo.path().join("config/fish/config.fish"), "new\n").expect("source file");
+    std::fs::create_dir_all(home.path().join(".config/fish")).expect("existing dir");
+    std::fs::write(home.path().join(".config/fish/local.fish"), "old\n").expect("existing file");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        r#"
+- defaults:
+    link:
+      backup: true
+
+- link:
+    ~/.config/fish: config/fish
+"#,
+    )
+    .expect("dotman yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["deploy"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(home.path().join(".config/fish").is_symlink());
+    let backups = std::fs::read_dir(home.path().join(".config"))
+        .expect("backup parent")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("fish.backup.")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(backups.len(), 1, "expected one backup, got {backups:?}");
+    assert_eq!(
+        std::fs::read_to_string(backups[0].path().join("local.fish")).expect("backup content"),
+        "old\n"
+    );
+}
+
+#[test]
+fn link_relink_true_replaces_wrong_symlink() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    std::fs::create_dir_all(repo.path().join("config/fish")).expect("source dir");
+    std::fs::create_dir_all(repo.path().join("old/fish")).expect("old source dir");
+    std::fs::create_dir_all(home.path().join(".config")).expect("target parent");
+    std::os::unix::fs::symlink(
+        repo.path().join("old/fish"),
+        home.path().join(".config/fish"),
+    )
+    .expect("old symlink");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        r#"
+- defaults:
+    link:
+      relink: true
+
+- link:
+    ~/.config/fish: config/fish
+"#,
+    )
+    .expect("dotman yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["deploy"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let link = std::fs::read_link(home.path().join(".config/fish")).expect("fish link");
+    assert_eq!(
+        std::fs::canonicalize(link).expect("actual source"),
+        std::fs::canonicalize(repo.path().join("config/fish")).expect("expected source")
+    );
+}
+
+#[test]
+fn missing_link_source_fails_without_creating_target() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        r#"
+- defaults:
+    link:
+      create: true
+
+- link:
+    ~/.config/fish: config/missing-fish
+"#,
+    )
+    .expect("dotman yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["deploy"]);
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("source does not exist"), "stdout: {stdout}");
+    assert!(stderr.contains("source does not exist"), "stderr: {stderr}");
+    assert!(!home.path().join(".config/fish").exists());
+}
+
+#[test]
 fn deploy_except_shell_skips_shell_commands() {
     let repo = tempfile::tempdir().expect("repo");
     let home = tempfile::tempdir().expect("home");
@@ -156,6 +332,43 @@ fn deploy_except_shell_skips_shell_commands() {
     );
 
     assert!(!marker.exists());
+}
+
+#[test]
+fn shell_failure_stops_after_completed_links() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    std::fs::create_dir_all(repo.path().join("config/fish")).expect("source dir");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        r#"
+- defaults:
+    link:
+      create: true
+
+- link:
+    ~/.config/fish: config/fish
+
+- shell:
+    - command: "false"
+      description: Required failure
+
+- create:
+    - ~/.config/after-failure
+"#,
+    )
+    .expect("dotman yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["deploy"]);
+    assert!(!output.status.success());
+    assert!(home.path().join(".config/fish").is_symlink());
+    assert!(!home.path().join(".config/after-failure").exists());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("Required failure"), "stdout: {stdout}");
+    assert!(stdout.contains("Failed"), "stdout: {stdout}");
+    assert!(stdout.contains("1 link actions"), "stdout: {stdout}");
+    assert!(stderr.contains("shell command failed"), "stderr: {stderr}");
 }
 
 #[test]
@@ -221,6 +434,41 @@ fn shell_condition_skips_command_when_false() {
 }
 
 #[test]
+fn optional_shell_failure_does_not_stop_following_commands() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    let marker = home.path().join("shell-marker");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        format!(
+            r#"
+- shell:
+    - command: "false"
+      description: Optional failure
+      optional: true
+    - command: "touch {}"
+      description: Touch shell marker
+"#,
+            marker.to_string_lossy()
+        ),
+    )
+    .expect("dotman yaml");
+
+    let output = run_dotman(repo.path(), home.path(), &["deploy"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(marker.exists());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("optional command failed"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
 fn bootstrap_uses_bootstrap_config_by_default() {
     let repo = tempfile::tempdir().expect("repo");
     let home = tempfile::tempdir().expect("home");
@@ -245,4 +493,40 @@ fn bootstrap_uses_bootstrap_config_by_default() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(marker.exists());
+}
+
+#[test]
+fn bootstrap_can_be_written_idempotently_with_conditions() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    let marker = home.path().join("bootstrap-marker");
+    std::fs::write(
+        repo.path().join("dotman.bootstrap.yaml"),
+        format!(
+            r#"
+- shell:
+    - command: "printf x >> {}"
+      description: Write marker once
+      if: "test ! -e {}"
+"#,
+            marker.to_string_lossy(),
+            marker.to_string_lossy()
+        ),
+    )
+    .expect("dotman bootstrap yaml");
+
+    let first = run_dotman(repo.path(), home.path(), &["bootstrap"]);
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let second = run_dotman(repo.path(), home.path(), &["bootstrap"]);
+    assert!(
+        second.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    assert_eq!(std::fs::read_to_string(marker).expect("marker"), "x");
 }

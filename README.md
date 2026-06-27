@@ -94,7 +94,7 @@ All packages are installed via `brew bundle --file packages/Brewfile` during boo
 - `bin/`: user scripts linked into `~/.local/bin` (tmux-status, etc.)
 - `config/`: tracked dotfiles for fish, nvim, ghostty, btop, fastfetch, starship, tealdeer, tmux, git
 - `docs/`: setup notes and manual checklists
-- `dotman.yaml`: deploy steps (link configs, run shell commands)
+- `dotman.yaml`: deploy steps (link configs, create directories, sync derived state)
 - `dotman.bootstrap.yaml`: bootstrap steps (install packages, fonts)
 - `packages/`: Brewfile and platform-specific install helpers
 - `src/`: Rust deployer source
@@ -134,7 +134,8 @@ Example:
 
 - shell:
     - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
-      description: Install and sync fish plugins
+      description: Sync fish plugins
+      optional: true
 ```
 
 Field reference:
@@ -151,8 +152,14 @@ Field reference:
 - `shell.command`: command to run through `sh -c`.
 - `shell.description`: human-readable label shown in logs.
 - `shell.if`: shell condition that must succeed before the command runs.
+- `shell.optional`: if `true`, a failed command is reported as a warning and
+  later steps continue. Defaults to `false`.
 - `shell.stdout` / `shell.stderr`: per-command output overrides.
 - `clean`: parsed and shown in dry-runs, but non-dry-run cleanup is not implemented yet.
+
+Deploy is fail-fast for core file operations: link/create failures stop the run.
+Network-sensitive sync commands can be marked with `optional: true` so transient
+failures do not make the whole deploy fail.
 
 ## Local Overrides
 

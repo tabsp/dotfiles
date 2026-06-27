@@ -93,6 +93,8 @@ struct ShellItem {
     command: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    optional: bool,
     #[serde(flatten)]
     options: ShellOptions,
     #[serde(rename = "if")]
@@ -235,6 +237,7 @@ impl OutputStyle {
             (IconChoice::Nerd, Icon::Relink) => "󰑓",
             (IconChoice::Nerd, Icon::Backup) => "󰁯",
             (IconChoice::Nerd, Icon::Skip) => "",
+            (IconChoice::Nerd, Icon::Warn) => "",
             (IconChoice::Nerd, Icon::Fail) => "",
             (IconChoice::Unicode, Icon::App) => "●",
             (IconChoice::Unicode, Icon::Defaults) => "●",
@@ -248,6 +251,7 @@ impl OutputStyle {
             (IconChoice::Unicode, Icon::Relink) => "↻",
             (IconChoice::Unicode, Icon::Backup) => "⤴",
             (IconChoice::Unicode, Icon::Skip) => "-",
+            (IconChoice::Unicode, Icon::Warn) => "!",
             (IconChoice::Unicode, Icon::Fail) => "✗",
             (IconChoice::Ascii, Icon::App) => ">",
             (IconChoice::Ascii, Icon::Defaults) => "*",
@@ -261,6 +265,7 @@ impl OutputStyle {
             (IconChoice::Ascii, Icon::Relink) => "~>",
             (IconChoice::Ascii, Icon::Backup) => "^",
             (IconChoice::Ascii, Icon::Skip) => "-",
+            (IconChoice::Ascii, Icon::Warn) => "!",
             (IconChoice::Ascii, Icon::Fail) => "!!",
         }
     }
@@ -289,6 +294,7 @@ enum Icon {
     Relink,
     Backup,
     Skip,
+    Warn,
     Fail,
 }
 
@@ -324,6 +330,7 @@ struct Summary {
     dirs: usize,
     shell: usize,
     skipped: usize,
+    warnings: usize,
     failed: usize,
 }
 
@@ -387,24 +394,16 @@ impl Reporter {
         display_path(path, &self.repo)
     }
 
-    fn finish(&self, elapsed: std::time::Duration) {
+    fn finish(&self, elapsed: std::time::Duration, failed: bool) {
         println!();
-        let icon = if self.summary.failed == 0 {
-            Icon::Ok
-        } else {
-            Icon::Fail
-        };
-        let color = if self.summary.failed == 0 {
-            Color::Green
-        } else {
-            Color::Red
-        };
+        let icon = if failed { Icon::Fail } else { Icon::Ok };
+        let color = if failed { Color::Red } else { Color::Green };
         let title = if self.dry_run {
             "Dry run complete"
-        } else if self.summary.failed == 0 {
-            "Done"
+        } else if failed {
+            "Failed"
         } else {
-            "Finished with errors"
+            "Done"
         };
         println!(
             "{} {} {}",
@@ -433,6 +432,13 @@ impl Reporter {
                 Color::Dim
             )
         );
+        if self.summary.warnings > 0 {
+            println!(
+                "  {}",
+                self.style
+                    .paint(format!("{} warnings", self.summary.warnings), Color::Yellow)
+            );
+        }
     }
 }
 
@@ -463,24 +469,29 @@ pub fn run_deploy(
             continue;
         }
 
-        match step {
+        let result = match step {
             Step::Defaults { defaults } => {
                 link_defaults.apply(&defaults.link);
                 shell_defaults.apply(&defaults.shell);
                 print_defaults_plan(&reporter, &defaults);
+                Ok(())
             }
             Step::Link { link } => {
-                run_link_step(&config_dir, &link, link_defaults.clone(), &mut reporter)?
+                run_link_step(&config_dir, &link, link_defaults.clone(), &mut reporter)
             }
-            Step::Create { create } => run_create_step(create, &mut reporter)?,
+            Step::Create { create } => run_create_step(create, &mut reporter),
             Step::Shell { shell } => {
-                run_shell_step(&config_dir, &shell, shell_defaults, &mut reporter)?
+                run_shell_step(&config_dir, &shell, shell_defaults, &mut reporter)
             }
-            Step::Clean { clean } => run_clean_step(&clean, &mut reporter)?,
+            Step::Clean { clean } => run_clean_step(&clean, &mut reporter),
+        };
+        if let Err(err) = result {
+            reporter.finish(start.elapsed(), true);
+            return Err(err);
         }
     }
 
-    reporter.finish(start.elapsed());
+    reporter.finish(start.elapsed(), false);
     Ok(())
 }
 
@@ -756,6 +767,7 @@ fn run_shell_step(
             ShellValue::Command(command) => ShellItem {
                 command: command.clone(),
                 description: None,
+                optional: false,
                 options: ShellOptions::default(),
                 condition: None,
             },
@@ -793,6 +805,16 @@ fn run_shell_step(
             .status()
             .map_err(|err| format!("failed to run shell command '{}': {err}", shell.command))?;
         if !status.success() {
+            if shell.optional {
+                reporter.summary.warnings += 1;
+                reporter.row(
+                    Icon::Warn,
+                    Color::Yellow,
+                    label,
+                    format!("optional command failed: {status}"),
+                );
+                continue;
+            }
             return Err(format!("shell command failed: {}", shell.command));
         }
     }

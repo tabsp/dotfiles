@@ -132,6 +132,8 @@ make deploy
 `deploy` 会读取 `dotman.yaml`，链接 dotfiles、创建目录，并运行依赖配置文件的
 同步步骤，例如 fish plugins 和 tealdeer pages。如果 fish 已经提前创建了
 `~/.config/fish`，`dotman` 会先备份它，再链接仓库里的 fish 配置。
+核心文件操作失败会停止本次 deploy；受网络影响的同步步骤标记为 `optional: true`，
+失败时只会显示 warning，并继续后续步骤。
 
 ## 9. 恢复私有配置
 

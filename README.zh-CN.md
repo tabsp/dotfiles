@@ -94,7 +94,7 @@ make deploy ONLY=link
 - `bin/`：链接到 `~/.local/bin` 的用户脚本（tmux-status 等）
 - `config/`：被跟踪的 dotfiles 源文件（fish、nvim、ghostty、btop、fastfetch、starship、tealdeer、tmux、git）
 - `docs/`：设置说明和手动清单
-- `dotman.yaml`：部署步骤（链接配置、运行 shell 命令）
+- `dotman.yaml`：部署步骤（链接配置、创建目录、同步衍生状态）
 - `dotman.bootstrap.yaml`：bootstrap 步骤（安装包、字体）
 - `packages/`：Brewfile 和平台相关的安装辅助脚本
 - `src/`：Rust 部署工具源码
@@ -134,7 +134,8 @@ make deploy ONLY=link
 
 - shell:
     - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
-      description: Install and sync fish plugins
+      description: Sync fish plugins
+      optional: true
 ```
 
 字段说明：
@@ -151,8 +152,13 @@ make deploy ONLY=link
 - `shell.command`：通过 `sh -c` 执行的命令。
 - `shell.description`：日志中显示的人类可读步骤名称。
 - `shell.if`：命令运行前必须成功的 shell 条件。
+- `shell.optional`：为 `true` 时，命令失败只记录为 warning，后续步骤继续执行。
+  默认是 `false`。
 - `shell.stdout` / `shell.stderr`：单条命令的输出覆盖设置。
 - `clean`：目前会被解析并在 dry-run 中显示，但非 dry-run 清理尚未实现。
+
+`deploy` 对核心文件操作采用 fail-fast：link/create 失败会停止本次运行。受网络影响的
+同步命令可以标记为 `optional: true`，临时失败不会导致整个 deploy 失败。
 
 ## 本地覆盖
 

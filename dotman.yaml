@@ -30,8 +30,10 @@
 
 - shell:
     - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
-      description: Install and sync fish plugins
+      description: Sync fish plugins
+      optional: true
       if: command -v fish >/dev/null 2>&1
     - command: TEALDEER_CONFIG_DIR="$HOME/.config/tealdeer" tldr --update
       description: Update tealdeer pages
+      optional: true
       if: command -v tldr >/dev/null 2>&1
