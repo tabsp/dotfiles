@@ -137,6 +137,90 @@ ensure_brew() {
   printf 'Homebrew installed successfully.\n'
 }
 
+ensure_fish() {
+  if command -v fish >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! command -v brew >/dev/null 2>&1; then
+    printf 'Homebrew is not available; skipping fish installation.\n'
+    return 0
+  fi
+
+  printf '\nFish shell is required but not found.\n'
+
+  if [ "$yes" -eq 0 ]; then
+    printf 'Install fish via Homebrew? [y/N] '
+    answer=
+    if [ -r /dev/tty ]; then
+      read -r answer </dev/tty 2>/dev/null || true
+    fi
+    case "$answer" in
+      y | Y | yes | YES) ;;
+      *)
+        printf 'Skipping fish installation.\n'
+        return 0
+        ;;
+    esac
+  fi
+
+  printf 'Installing fish...\n'
+  brew install fish
+
+  if ! command -v fish >/dev/null 2>&1; then
+    printf 'error: fish installation completed but fish is still not in PATH\n' >&2
+    exit 1
+  fi
+
+  printf 'Fish installed successfully.\n'
+}
+
+ensure_fish_login() {
+  if ! command -v fish >/dev/null 2>&1; then
+    return 0
+  fi
+
+  fish_path=$(command -v fish)
+
+  current_shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)
+  if [ -z "$current_shell" ]; then
+    current_shell=$(dscl . -read ~/ UserShell 2>/dev/null | awk '{print $NF}' || printf '')
+  fi
+  if [ -z "$current_shell" ]; then
+    current_shell=${SHELL:-}
+  fi
+
+  if [ "$current_shell" = "$fish_path" ]; then
+    return 0
+  fi
+
+  if [ "$yes" -eq 0 ]; then
+    printf '\nCurrent default shell is %s, not fish.\n' "${current_shell:-unknown}"
+    printf 'Change default shell to fish? (requires password) [y/N] '
+    answer=
+    if [ -r /dev/tty ]; then
+      read -r answer </dev/tty 2>/dev/null || true
+    fi
+    case "$answer" in
+      y | Y | yes | YES) ;;
+      *)
+        printf 'Skipping shell change. Run this later:\n'
+        printf '  chsh -s %s\n' "$fish_path"
+        return 0
+        ;;
+    esac
+  fi
+
+  if chsh -s "$fish_path" 2>/dev/null; then
+    printf 'Default shell changed to fish.\n'
+    printf '\nRun this to switch your current session:\n'
+    printf '  exec fish -l\n'
+  else
+    printf 'chsh failed (may require password). Run this manually:\n'
+    printf '  chsh -s %s\n' "$fish_path"
+  fi
+}
+
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
@@ -208,6 +292,8 @@ mv "$bundle_next" "$dotfiles_dir"
 printf 'installed dotfiles bundle to %s\n' "$dotfiles_dir"
 
 ensure_brew
+ensure_fish
+ensure_fish_login
 
 printf '\nPreviewing bootstrap and deploy...\n'
 (
