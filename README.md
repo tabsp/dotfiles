@@ -12,8 +12,10 @@ It uses a Dotbot-like ordered YAML config to link files, create directories, and
 ## Prerequisites
 
 - curl
-- fish shell
-- `dotman` installed in `~/.local/bin`
+
+The installer can install or update `dotman`, download the published dotfiles
+bundle, install Homebrew when missing, install fish through Homebrew, and then
+run `dotman bootstrap` and `dotman deploy`.
 
 For first-time setup, install `dotman` and the published dotfiles bundle from
 the site:
@@ -21,6 +23,16 @@ the site:
 ```sh
 curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
 ```
+
+For unattended setup:
+
+```sh
+curl -fsSL https://dotfiles.tabsp.com/install.sh | sh -s -- --yes
+```
+
+Fish may live outside the current `PATH` on a fresh machine. The installer
+prints the exact `exec .../fish -l` command for the current terminal, and
+attempts to change the default login shell for future sessions.
 
 When `dotman.yaml` is not present in the current directory, `dotman` falls back
 to `DOTFILES_DIR` and then to the installed bundle in
@@ -186,6 +198,18 @@ make lint
 make test
 make ci
 ```
+
+Run the real Linux install flow in Docker:
+
+```sh
+make e2e-linux
+make e2e-linux E2E_ARGS="--local --inspect --keep"
+```
+
+The E2E script builds `dotman` from the current worktree, serves a local
+installer/manifest/bundle inside Docker, runs the install script, and verifies
+the installed dotfiles. `--inspect` opens the finished container as the `tester`
+user for manual checks.
 
 ## Publishing
 

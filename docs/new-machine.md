@@ -1,9 +1,12 @@
 # New Machine Setup
 
-这份清单用于新机器初始化。`dotman bootstrap` 负责可自动执行的安装步骤；
+这份清单用于新机器初始化。默认路径是直接运行网站安装脚本，让它安装/更新
+`dotman`、下载 dotfiles bundle、安装 Homebrew/fish，并执行 bootstrap/deploy。
 账号登录、SSH/GPG、系统权限和私有配置仍然需要人工处理。
 
-执行 `exec fish -l` 之后，后续命令默认在 fish 中执行。
+安装脚本不会直接把当前父 shell 切换成 fish。它会在结束时打印当前终端可用的
+`exec .../fish -l` 命令；执行后，当前终端才会进入 fish。默认登录 shell 的修改在
+重新登录后生效。
 
 ## 1. 旧机器备份
 
@@ -14,7 +17,7 @@
 
 ## 2. 系统基础工具
 
-先安装基础工具，这部分不由 `dotman` 自动处理：
+先确保系统有基础下载工具：
 
 - `curl`
 - CA certificates
@@ -25,49 +28,10 @@ macOS 先安装 Xcode Command Line Tools：
 xcode-select --install
 ```
 
-Linux 根据发行版安装基础工具。如果需要自动安装 Maple Mono NF CN 字体，还要确保有
-`unzip` 和 `fontconfig`。
+Linux 根据发行版安装基础工具。安装脚本会通过 Homebrew 安装主要 CLI 工具；Linux
+字体安装还需要 `unzip` 和 `fontconfig`，缺失时 bootstrap 会报出具体依赖。
 
-## 3. Homebrew
-
-如果这台机器使用 Homebrew，先按官方方式安装：
-
-```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-安装后，确保当前 shell 能找到 `brew`。按机器实际路径选择一个执行：
-
-```sh
-eval "$(/opt/homebrew/bin/brew shellenv)"
-eval "$(/usr/local/bin/brew shellenv)"
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-```
-
-`dotman bootstrap` 不负责安装 Homebrew；它只会在 `brew` 已可用时运行
-`brew bundle --file packages/Brewfile`。
-
-## 4. Fish
-
-fish 是手动前置条件，不由 `packages/Brewfile` 安装。可以手动用 Homebrew 安装：
-
-```sh
-brew install fish
-```
-
-把 fish 设置为登录 shell，并让当前终端立刻进入 fish。下面这段命令在当前系统
-shell 中执行，适用于 macOS 和 Linux：
-
-```sh
-grep -Fx "$(command -v fish)" /etc/shells || command -v fish | sudo tee -a /etc/shells
-chsh -s "$(command -v fish)"
-exec fish -l
-```
-
-如果 `chsh` 对新窗口没有立刻生效，重新登录系统后再确认。当前终端可以继续通过
-`exec fish -l` 进入 fish。
-
-## 5. 安装 dotman 和 dotfiles bundle
+## 3. 一键安装
 
 从发布站点安装 `dotman`，并下载最新 dotfiles bundle 到
 `~/.local/share/tabsp-dotfiles`：
@@ -83,10 +47,70 @@ curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
 curl -fsSL https://dotfiles.tabsp.com/install.sh | sh -s -- --yes
 ```
 
-`dotman` 会安装到 `~/.local/bin/dotman`。安装脚本首轮运行时会用绝对路径调用它；
-如果当前 shell 还没有把 `~/.local/bin` 加进 `PATH`，脚本结束时会给出提示。
+安装脚本会：
 
-## 6. Bootstrap
+- 安装或更新 `~/.local/bin/dotman`。
+- 安装或更新 `~/.local/share/tabsp-dotfiles`。
+- 缺少 Homebrew 时询问是否自动安装；`--yes` 模式会自动安装。
+- 缺少 fish 时通过 Homebrew 安装。
+- 尝试把 fish 加入 `/etc/shells` 并改为默认登录 shell。
+- 预览并执行 `dotman bootstrap` 和 `dotman deploy`。
+
+如果当前 shell 还没有把 `~/.local/bin` 加进 `PATH`，脚本结束时会给出提示。结束提示
+也会打印绝对路径形式的后续命令，例如：
+
+```sh
+~/.local/bin/dotman bootstrap
+~/.local/bin/dotman deploy
+```
+
+## 4. Fish 生效确认
+
+安装脚本成功修改默认 shell 时，会提示：
+
+```sh
+Default shell changed to fish.
+New login sessions will start fish after you log out and back in.
+```
+
+当前终端需要执行脚本打印的绝对路径命令，例如 Linuxbrew 场景：
+
+```sh
+exec /home/linuxbrew/.linuxbrew/bin/fish -l
+```
+
+macOS 手动让 fish 生效时，按机器实际路径选择一个：
+
+```sh
+sudo grep -Fx /opt/homebrew/bin/fish /etc/shells || echo /opt/homebrew/bin/fish | sudo tee -a /etc/shells
+chsh -s /opt/homebrew/bin/fish
+exec /opt/homebrew/bin/fish -l
+```
+
+```sh
+sudo grep -Fx /usr/local/bin/fish /etc/shells || echo /usr/local/bin/fish | sudo tee -a /etc/shells
+chsh -s /usr/local/bin/fish
+exec /usr/local/bin/fish -l
+```
+
+如果默认 shell 没有生效，先检查：
+
+```sh
+command -v fish
+getent passwd "$USER" | cut -d: -f7
+echo "$SHELL"
+ps -p $$ -o comm=
+```
+
+Linuxbrew 的 fish 通常在 `/home/linuxbrew/.linuxbrew/bin/fish`。可以手动修复：
+
+```sh
+sudo grep -Fx /home/linuxbrew/.linuxbrew/bin/fish /etc/shells || echo /home/linuxbrew/.linuxbrew/bin/fish | sudo tee -a /etc/shells
+sudo chsh -s /home/linuxbrew/.linuxbrew/bin/fish "$USER"
+exec /home/linuxbrew/.linuxbrew/bin/fish -l
+```
+
+## 5. Bootstrap
 
 先预览：
 
@@ -108,7 +132,7 @@ dotman bootstrap
 - Linux 运行 `packages/install-maple-mono-linux.sh`，把 Maple Mono NF CN 安装到
   `~/.local/share/fonts/MapleMono-NF-CN`。
 
-## 7. Deploy
+## 6. Deploy
 
 先预览：
 
@@ -128,13 +152,13 @@ dotman deploy
 核心文件操作失败会停止本次 deploy；受网络影响的同步步骤标记为 `optional: true`，
 失败时只会显示 warning，并继续后续步骤。
 
-## 8. 恢复私有配置
+## 7. 恢复私有配置
 
 - 恢复 `~/.gitconfig.local`。
 - 恢复 `~/.config/fish/local.d/*.fish`。
 - 恢复 SSH/GPG key，并检查权限。
 
-## 9. 手动应用设置
+## 8. 手动应用设置
 
 - 登录 1Password、浏览器、GitHub、云同步等账号。
 - 配置系统权限，例如终端、编辑器和窗口管理工具的 Accessibility 权限。
@@ -145,7 +169,7 @@ dotman deploy
 - 检查字体、输入法、浏览器扩展和 GUI 应用设置。
 - 首次打开 Neovim，让插件和工具完成安装。
 
-## 10. 验证
+## 9. 验证
 
 检查 Homebrew bundle：
 

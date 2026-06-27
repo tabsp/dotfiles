@@ -5,6 +5,8 @@ base_url=${DOTFILES_SITE_URL:-"https://dotfiles.tabsp.com"}
 dotman_bin=${DOTMAN_BIN:-"$HOME/.local/bin/dotman"}
 dotfiles_dir=${DOTFILES_DIR:-"$HOME/.local/share/tabsp-dotfiles"}
 yes=0
+tmp_dir=""
+stage="starting"
 
 usage() {
   cat <<EOF
@@ -61,7 +63,7 @@ json_string() {
 download() {
   url=$1
   output=$2
-  printf 'download: %s\n' "$url"
+  printf 'Downloading %s\n' "$url"
   curl -fsSL "$url" -o "$output"
 }
 
@@ -95,6 +97,42 @@ need_command tar
 need_command mktemp
 need_command sed
 need_command awk
+
+printf 'Installing tabsp dotfiles from %s\n' "$base_url"
+printf '  dotman:   %s\n' "$dotman_bin"
+printf '  dotfiles: %s\n' "$dotfiles_dir"
+
+bundle_next="$dotfiles_dir.next"
+bundle_previous="$dotfiles_dir.previous"
+
+cleanup() {
+  status=$?
+
+  if [ -n "$tmp_dir" ]; then
+    rm -rf "$tmp_dir"
+  fi
+
+  if [ "$status" -eq 130 ] || [ "$status" -eq 143 ]; then
+    rm -rf "$bundle_next"
+    if [ ! -d "$dotfiles_dir" ] && [ -d "$bundle_previous" ]; then
+      mv "$bundle_previous" "$dotfiles_dir"
+    fi
+    printf '\nInstall interrupted during: %s\n' "$stage" >&2
+    printf 'Cleaned temporary files. Existing dotfiles were left in place when possible.\n' >&2
+    if [ -d "$bundle_previous" ]; then
+      printf 'Previous bundle backup is available at: %s\n' "$bundle_previous" >&2
+    fi
+    printf 'Run the installer again to resume.\n' >&2
+  fi
+}
+
+interrupt() {
+  trap - INT TERM
+  exit 130
+}
+
+trap cleanup EXIT
+trap interrupt INT TERM
 
 ensure_brew() {
   if command -v brew >/dev/null 2>&1; then
@@ -218,6 +256,57 @@ ensure_shell_registered() {
   return 1
 }
 
+print_fish_session_hint() {
+  shell_path=$1
+
+  printf '\nTo switch this terminal now, run:\n'
+  printf '  exec %s -l\n' "$shell_path"
+}
+
+print_fish_login_hint() {
+  shell_path=$1
+  user_name=$(id -un)
+
+  printf 'To make future login sessions start fish, run:\n'
+  printf '  sudo grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
+  case "$(uname -s)" in
+    Darwin)
+      printf '  chsh -s %s\n' "$shell_path"
+      ;;
+    *)
+      printf '  sudo chsh -s %s %s\n' "$shell_path" "$user_name"
+      ;;
+  esac
+}
+
+change_login_shell() {
+  shell_path=$1
+
+  if [ "$yes" -eq 1 ]; then
+    if chsh -s "$shell_path" </dev/null 2>/dev/null; then
+      return 0
+    fi
+
+    if command -v sudo >/dev/null 2>&1; then
+      sudo -n chsh -s "$shell_path" "$(id -un)"
+      return $?
+    fi
+
+    return 1
+  fi
+
+  if chsh -s "$shell_path"; then
+    return 0
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    sudo chsh -s "$shell_path" "$(id -un)"
+    return $?
+  fi
+
+  return 1
+}
+
 ensure_fish_login() {
   if ! command -v fish >/dev/null 2>&1; then
     return 0
@@ -244,8 +333,10 @@ ensure_fish_login() {
     case "$answer" in
       y | Y | yes | YES) ;;
       *)
-        printf 'Skipping shell change. Run this later:\n'
-        printf '  chsh -s %s\n' "$fish_path"
+        printf 'Skipping shell change.\n'
+        print_fish_login_hint "$fish_path"
+        printf 'New login sessions will keep using the current default shell until that succeeds.\n'
+        print_fish_session_hint "$fish_path"
         return 0
         ;;
     esac
@@ -253,25 +344,32 @@ ensure_fish_login() {
 
   if ! ensure_shell_registered "$fish_path"; then
     printf 'Skipping shell change until fish is listed in /etc/shells.\n'
+    print_fish_login_hint "$fish_path"
+    printf 'New login sessions will keep using the current default shell until that is fixed.\n'
+    print_fish_session_hint "$fish_path"
     return 0
   fi
 
-  if chsh -s "$fish_path" 2>/dev/null; then
+  if change_login_shell "$fish_path"; then
     printf 'Default shell changed to fish.\n'
-    printf '\nRun this to switch your current session:\n'
-    printf '  exec fish -l\n'
+    printf 'New login sessions will start fish after you log out and back in.\n'
   else
-    printf 'chsh failed (may require password). Run this manually:\n'
-    printf '  chsh -s %s\n' "$fish_path"
+    printf 'chsh failed (may require password).\n'
+    print_fish_login_hint "$fish_path"
+    printf 'New login sessions will keep using the current default shell until that succeeds.\n'
   fi
+
+  print_fish_session_hint "$fish_path"
 }
 
+stage="creating temporary workspace"
 tmp_dir=$(mktemp -d)
-trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
 manifest="$tmp_dir/manifest.json"
+stage="downloading manifest"
 download "$base_url/manifest.json" "$manifest"
 
+stage="reading manifest"
 target=$(detect_target)
 bundle_url=$(json_string bundle_url)
 bundle_sha256=$(json_string bundle_sha256)
@@ -297,6 +395,7 @@ mkdir -p "$(dirname -- "$dotman_bin")"
 if [ -n "$current_version" ] && [ "$current_version" = "$dotman_version" ]; then
   printf 'dotman %s already installed at %s\n' "$current_version" "$dotman_bin"
 else
+  stage="installing dotman"
   dotman_archive="$tmp_dir/$asset_name"
   dotman_extract_dir="$tmp_dir/dotman"
   mkdir -p "$dotman_extract_dir"
@@ -312,11 +411,11 @@ else
 fi
 
 bundle_archive="$tmp_dir/dotfiles-bundle.tar.gz"
-bundle_next="$dotfiles_dir.next"
-bundle_previous="$dotfiles_dir.previous"
 
+stage="downloading dotfiles bundle"
 download "$bundle_url" "$bundle_archive"
 if [ -n "$bundle_sha256" ]; then
+  stage="verifying dotfiles bundle"
   actual_sha256=$(sha256_file "$bundle_archive")
   if [ "$actual_sha256" != "$bundle_sha256" ]; then
     printf 'error: bundle checksum mismatch\n' >&2
@@ -325,10 +424,12 @@ if [ -n "$bundle_sha256" ]; then
   fi
 fi
 
+stage="extracting dotfiles bundle"
 rm -rf "$bundle_next"
 mkdir -p "$bundle_next"
 tar -xzf "$bundle_archive" -C "$bundle_next"
 
+stage="installing dotfiles bundle"
 rm -rf "$bundle_previous"
 if [ -d "$dotfiles_dir" ]; then
   mv "$dotfiles_dir" "$bundle_previous"
@@ -336,10 +437,14 @@ fi
 mv "$bundle_next" "$dotfiles_dir"
 printf 'installed dotfiles bundle to %s\n' "$dotfiles_dir"
 
+stage="installing Homebrew"
 ensure_brew
+stage="installing fish"
 ensure_fish
+stage="configuring fish login shell"
 ensure_fish_login
 
+stage="previewing bootstrap and deploy"
 printf '\nPreviewing bootstrap and deploy...\n'
 (
   cd "$dotfiles_dir"
@@ -360,6 +465,7 @@ if [ "$yes" -eq 0 ]; then
   esac
 fi
 
+stage="applying bootstrap and deploy"
 (
   cd "$dotfiles_dir"
   "$dotman_bin" bootstrap
@@ -381,6 +487,11 @@ case ":$PATH:" in
     ;;
 esac
 
-printf '\nDone. Future runs can use:\n'
-printf '  dotman bootstrap\n'
-printf '  dotman deploy\n'
+stage="done"
+printf '\nDone.\n'
+printf 'Installed dotman:   %s\n' "$dotman_bin"
+printf 'Installed dotfiles: %s\n' "$dotfiles_dir"
+printf '\nFuture runs can use:\n'
+printf '  %s bootstrap\n' "$dotman_bin"
+printf '  %s deploy\n' "$dotman_bin"
+printf 'Once %s is in PATH, you can use dotman directly.\n' "$HOME/.local/bin"

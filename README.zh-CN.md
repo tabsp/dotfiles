@@ -12,14 +12,24 @@ dotman 是一个小型 Rust-based dotfiles 部署工具，用于我的个人 mac
 ## 前置依赖
 
 - curl
-- fish shell
-- 已安装到 `~/.local/bin` 的 `dotman`
+
+安装脚本会负责安装或更新 `dotman`、下载发布好的 dotfiles bundle、在缺失时安装
+Homebrew、通过 Homebrew 安装 fish，然后运行 `dotman bootstrap` 和 `dotman deploy`。
 
 首次设置时，从网站安装 `dotman` 和发布好的 dotfiles bundle：
 
 ```sh
 curl -fsSL https://dotfiles.tabsp.com/install.sh | sh
 ```
+
+无交互安装：
+
+```sh
+curl -fsSL https://dotfiles.tabsp.com/install.sh | sh -s -- --yes
+```
+
+新机器上的 fish 可能还不在当前 shell 的 `PATH` 中。安装脚本会打印当前终端可用的
+`exec .../fish -l` 绝对路径命令，并尝试把 fish 设为后续登录会话的默认 shell。
 
 如果当前目录没有 `dotman.yaml`，`dotman` 会自动 fallback 到 `DOTFILES_DIR`，
 再 fallback 到安装好的 `~/.local/share/tabsp-dotfiles` bundle。
@@ -182,6 +192,17 @@ make lint
 make test
 make ci
 ```
+
+在 Docker 中运行真实 Linux 安装流程：
+
+```sh
+make e2e-linux
+make e2e-linux E2E_ARGS="--local --inspect --keep"
+```
+
+E2E 脚本会基于当前 worktree 构建 `dotman`，在 Docker 内提供本地
+installer/manifest/bundle，执行安装脚本，并验证安装后的 dotfiles。`--inspect` 会以
+`tester` 用户进入完成后的容器，方便人工验收。
 
 ## 发布
 

@@ -1,4 +1,4 @@
-.PHONY: help build dev-deploy dev-bootstrap lint test ci clean
+.PHONY: help build dev-deploy dev-bootstrap e2e-linux lint test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -14,6 +14,8 @@ help:
 		'  make dev-deploy EXCEPT=shell     Skip a directive' \
 		'  make dev-bootstrap               Run bootstrap with target/debug/dotman' \
 		'  make dev-bootstrap DRY_RUN=1     Preview bootstrap with target/debug/dotman' \
+		'  make e2e-linux                   Run real Linux install E2E in Docker' \
+		'  make e2e-linux E2E_ARGS="--inspect --keep"  Inspect Linux E2E' \
 		'  make lint                        Run rustfmt and clippy checks' \
 		'  make test                        Run tests' \
 		'  make ci                          Run lint and tests' \
@@ -29,6 +31,9 @@ dev-deploy: $(DOTMAN)
 
 dev-bootstrap: $(DOTMAN)
 	$(DOTMAN) bootstrap $(if $(filter 1,$(DRY_RUN)),--dry-run,) $(if $(ONLY),--only $(ONLY),) $(if $(EXCEPT),--except $(EXCEPT),)
+
+e2e-linux:
+	scripts/e2e-linux.sh $(E2E_ARGS)
 
 lint:
 	cargo fmt --check

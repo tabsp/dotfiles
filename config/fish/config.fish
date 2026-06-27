@@ -21,7 +21,7 @@ end
 
 for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew
     if test -x $brew_bin
-        eval ($brew_bin shellenv)
+        eval ($brew_bin shellenv fish)
         break
     end
 end
@@ -90,7 +90,7 @@ end
 
 if type -q try
     set -gx TRY_PATH "$HOME/Workspace/tries"
-    eval (try init | string collect)
+    env SHELL=(command -v fish) try init "$TRY_PATH" | string collect | source
 end
 
 if type -q starship
