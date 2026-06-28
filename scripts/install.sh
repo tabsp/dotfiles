@@ -52,6 +52,188 @@ need_command() {
   fi
 }
 
+# ── ANSI helpers ──
+_tty() { [ -t 1 ]; }
+_c() { printf '\033[%sm' "$1"; }
+if _tty; then
+  BOLD="$(_c 1)"
+  GREEN="$(_c '38;2;166;227;161')"
+  YELLOW="$(_c '38;2;249;226;175')"
+  RED="$(_c '38;2;243;139;168')"
+  CYAN="$(_c '38;2;148;226;213')"
+  DIM="$(_c 2)"
+  NC="$(_c 0)"
+else
+  BOLD=''
+  GREEN=''
+  YELLOW=''
+  RED=''
+  CYAN=''
+  DIM=''
+  NC=''
+fi
+
+download_with_progress() {
+  url=$1
+  output=$2
+
+  if ! _tty; then
+    curl -fsSL "$url" -o "$output" || step_fail "download failed"
+    return 0
+  fi
+
+  curl -fsSL -# -o "$output" "$url" 2>&1 || step_fail "download failed"
+}
+
+step_run() {
+  title=$1; shift
+
+  if _tty && [ "$yes" -eq 0 ]; then
+    log="$tmp_dir/step.log"
+    : >"$log"
+    (sh -c "$*") >"$log" 2>&1 &
+    pid=$!
+    i=0
+    while kill -0 "$pid" 2>/dev/null; do
+      case $((i % 4)) in 0) c='◐' ;; 1) c='◓' ;; 2) c='◑' ;; 3) c='◒' ;; esac
+      printf '\r\033[2K  %s %s%s%s' "${CYAN}${c}${NC}" "${DIM}" "$title" "${NC}"
+      i=$((i + 1))
+      sleep 0.12
+    done
+    set +e
+    wait "$pid"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+      printf '\r\033[2K  %s %s\n' "${GREEN}✓${NC}" "$title"
+      return 0
+    fi
+    printf '\r\033[2K  %s %s\n' "${RED}✗${NC}" "$title" >&2
+    cat "$log" >&2
+    return "$rc"
+  fi
+
+  printf '  %s\n' "$title"
+  sh -c "$*"
+}
+
+_spinner_pid=''
+
+step_start() {
+  if _tty && [ "$yes" -eq 0 ]; then
+    title=$1
+    i=0
+    (
+      while true; do
+        case $((i % 4)) in 0) c='◐' ;; 1) c='◓' ;; 2) c='◑' ;; 3) c='◒' ;; esac
+        printf '\r\033[2K  %s %s%s%s' "${CYAN}${c}${NC}" "${DIM}" "$title" "${NC}"
+        i=$((i + 1))
+        sleep 0.12
+      done
+    ) &
+    _spinner_pid=$!
+  else
+    printf '  %s\n' "$1"
+  fi
+}
+
+step_ok() {
+  if [ -n "${_spinner_pid:-}" ]; then
+    kill "$_spinner_pid" 2>/dev/null || true
+    wait "$_spinner_pid" 2>/dev/null || true
+    _spinner_pid=''
+  fi
+  if _tty && [ "$yes" -eq 0 ]; then
+    printf '\r\033[2K  %s %s\n' "${GREEN}✓${NC}" "$1"
+  else
+    printf '  ✓ %s\n' "$1"
+  fi
+}
+
+step_done() {
+  step_ok "$1"
+}
+
+step_fail() {
+  if [ -n "${_spinner_pid:-}" ]; then
+    kill "$_spinner_pid" 2>/dev/null || true
+    wait "$_spinner_pid" 2>/dev/null || true
+    _spinner_pid=''
+  fi
+  printf '\r\033[2K  %s %s\n' "${RED}✗${NC}" "$1" >&2
+  exit 1
+}
+
+prompt() {
+  if [ "$yes" -eq 1 ]; then
+    return 0
+  fi
+
+  if [ -n "${_spinner_pid:-}" ]; then
+    kill "$_spinner_pid" 2>/dev/null || true
+    wait "$_spinner_pid" 2>/dev/null || true
+    _spinner_pid=''
+    printf '\r\033[2K'
+  fi
+
+  if _tty; then
+    printf '%s%s%s [y/N] ' "$BOLD" "$1" "$NC"
+  else
+    printf '%s [y/N] ' "$1"
+  fi
+  answer=$(read_tty)
+  case "$answer" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac
+}
+
+# ── Lock ──
+LOCK_FD=9
+LOCK_DIR=""
+LOCK_STALE_SECS=600
+
+acquire_lock() {
+  lockfile=$1
+  mkdir -p "$(dirname "$lockfile")"
+
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$lockfile"
+    flock 9 || step_fail "failed to acquire lock"
+    return 0
+  fi
+
+  LOCK_DIR="${lockfile}.d"
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if ! [ -d "$LOCK_DIR" ]; then
+      continue
+    fi
+    pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+    started=$(cat "$LOCK_DIR/started_at" 2>/dev/null || true)
+    now=$(date +%s 2>/dev/null || printf '0')
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      sleep 1
+      continue
+    fi
+    if [ "$now" -gt 0 ] && [ "$started" -gt 0 ] && [ $((now - started)) -ge "$LOCK_STALE_SECS" ]; then
+      rm -rf "$LOCK_DIR"
+      continue
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  date +%s >"$LOCK_DIR/started_at" 2>/dev/null || true
+}
+
+release_lock() {
+  if [ -n "$LOCK_DIR" ] && [ -d "$LOCK_DIR" ]; then
+    rm -rf "$LOCK_DIR"
+  fi
+  if [ -n "$lockfile" ]; then
+    exec 9>&- 2>/dev/null || true
+  fi
+}
+
+need_command mktemp
+need_command awk
+
 read_tty() {
   if [ ! -r /dev/tty ]; then
     return 0
@@ -92,118 +274,7 @@ detect_target() {
   esac
 }
 
-# ── gum helpers ──
-use_gum=0
-if [ "$yes" -eq 0 ] && [ -t 0 ] && [ -t 1 ] && command -v gum >/dev/null 2>&1; then
-  use_gum=1
-  export GUM_CONFIRM_PROMPT_FOREGROUND="#89b4fa"
-  export GUM_CONFIRM_SELECTED_FOREGROUND=0
-  export GUM_CONFIRM_SELECTED_BACKGROUND=2
-  export GUM_CONFIRM_UNSELECTED_FOREGROUND=7
-  export GUM_CONFIRM_UNSELECTED_BACKGROUND=0
-fi
-
-gum_header() {
-  if [ "$use_gum" -eq 1 ]; then
-    gum style --foreground "#89b4fa" --bold "$@"
-  else
-    printf '%s\n' "$*"
-  fi
-}
-
-gum_spin() {
-  title=$1; shift
-  if [ "$use_gum" -eq 1 ]; then
-    gum spin --spinner dot --title "$title" -- sh -c "$*"
-  else
-    printf '%s...\n' "$title"
-    sh -c "$*"
-  fi
-}
-
-spin_quiet() {
-  title=$1; shift
-  if [ "$use_gum" -eq 1 ]; then
-    gum spin --spinner dot --title "$title" -- sh -c "$*"
-  elif [ -t 1 ]; then
-    log="$tmp_dir/spin.log"
-    : >"$log"
-    (sh -c "$*") >"$log" 2>&1 &
-    pid=$!
-    i=0
-
-    while kill -0 "$pid" 2>/dev/null; do
-      case $i in
-        0) frame="." ;;
-        1) frame=".." ;;
-        2) frame="..." ;;
-        *) frame="...." ;;
-      esac
-      printf '\r%s %s' "$title" "$frame"
-      i=$(((i + 1) % 4))
-      sleep 0.12
-    done
-
-    set +e
-    wait "$pid"
-    rc=$?
-    set -e
-
-    if [ "$rc" -eq 0 ]; then
-      printf '\r\033[2K%s done.\n' "$title"
-      return 0
-    fi
-
-    printf '\r\033[2K%s failed.\n' "$title" >&2
-    cat "$log" >&2
-    return "$rc"
-  else
-    printf '%s...\n' "$title"
-    sh -c "$*"
-  fi
-}
-
-gum_confirm() {
-  if [ "$yes" -eq 1 ]; then
-    return 0
-  fi
-  if [ "$use_gum" -eq 1 ]; then
-    gum confirm "$1"
-  else
-    printf '%s [y/N] ' "$1"
-    answer=$(read_tty)
-    case "$answer" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac
-  fi
-}
-
-gum_warn() {
-  if [ "$use_gum" -eq 1 ]; then
-    gum style --foreground 3 "$@"
-  else
-    printf '%s\n' "$*"
-  fi
-}
-
-gum_card() {
-  if [ "$use_gum" -eq 1 ]; then
-    gum style --border rounded --border-foreground "#89b4fa" --padding "1 2"
-  else
-    cat
-  fi
-}
-
-need_command mktemp
-need_command awk
-
-gum_header "tabsp dotfiles"
-if [ "$use_gum" -eq 1 ]; then
-  gum style --foreground "#6c7086" "from $base_url"
-  echo
-else
-  printf 'Installing tabsp dotfiles from %s\n' "$base_url"
-  printf '  dotman:   %s\n' "$dotman_bin"
-  printf '  dotfiles: %s\n' "$dotfiles_dir"
-fi
+printf '%s%s%s\n' "$BOLD" "tabsp dotfiles" "$NC"
 
 bundle_next="$dotfiles_dir.next"
 bundle_previous="$dotfiles_dir.previous"
@@ -267,6 +338,11 @@ detect_install_mode
 
 cleanup() {
   status=$?
+  if [ -n "${_spinner_pid:-}" ]; then
+    kill "$_spinner_pid" 2>/dev/null || true
+    _spinner_pid=''
+  fi
+  release_lock
 
   if [ -n "$tmp_dir" ]; then
     rm -rf "$tmp_dir"
@@ -294,6 +370,8 @@ interrupt() {
 trap cleanup EXIT
 trap interrupt INT TERM
 
+acquire_lock "$HOME/.local/share/tabsp-dotfiles/.install.lock"
+
 ensure_brew() {
   if command -v brew >/dev/null 2>&1; then
     return 0
@@ -301,14 +379,14 @@ ensure_brew() {
 
   os=$(uname -s)
 
-  gum_warn "Homebrew is required but not found."
+  printf '%s%s%s\n' "$YELLOW" "Homebrew is required but not found." "$NC"
 
-  if ! gum_confirm "Install Homebrew automatically?"; then
+  if ! prompt "Install Homebrew automatically?"; then
     printf 'Skipping Homebrew installation. Bootstrap steps that depend on brew will fail.\n'
     return 0
   fi
 
-  gum_spin "Installing Homebrew..." \
+  step_run "Installing Homebrew..." \
     'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 
   if [ "$os" = "Darwin" ]; then
@@ -343,14 +421,14 @@ ensure_fish() {
     return 0
   fi
 
-  gum_warn "Fish shell is required but not found."
+  printf '%s%s%s\n' "$YELLOW" "Fish shell is required but not found." "$NC"
 
-  if ! gum_confirm "Install fish via Homebrew?"; then
+  if ! prompt "Install fish via Homebrew?"; then
     printf 'Skipping fish installation.\n'
     return 0
   fi
 
-  gum_spin "Installing fish..." \
+  step_run "Installing fish..." \
     "brew install fish"
 
   if ! command -v fish >/dev/null 2>&1; then
@@ -370,7 +448,7 @@ ensure_shell_registered() {
 
   printf '\n%s is not listed in /etc/shells.\n' "$shell_path"
 
-  if ! gum_confirm "Add it automatically? (may require password)"; then
+  if ! prompt "Add it automatically? (may require password)"; then
     printf 'Skipping shell registration. Run this later:\n'
     printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
     return 1
@@ -397,21 +475,6 @@ ensure_shell_registered() {
   printf 'Could not update /etc/shells. Run this later:\n'
   printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
   return 1
-}
-
-print_fish_login_commands() {
-  shell_path=$1
-  user_name=$(id -un)
-
-  printf '     sudo grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
-  case "$(uname -s)" in
-    Darwin)
-      printf '     chsh -s %s\n' "$shell_path"
-      ;;
-    *)
-      printf '     sudo chsh -s %s %s\n' "$shell_path" "$user_name"
-      ;;
-  esac
 }
 
 current_login_shell() {
@@ -489,7 +552,7 @@ ensure_fish_login() {
 
   printf '\nCurrent default shell is %s, not fish.\n' "${current_shell:-unknown}"
 
-  if ! gum_confirm "Change default shell to fish? (requires password)"; then
+  if ! prompt "Change default shell to fish? (requires password)"; then
     printf 'Skipping shell change. Fish activation details will be shown at the end.\n'
     return 0
   fi
@@ -506,82 +569,11 @@ ensure_fish_login() {
   fi
 }
 
-print_next_step() {
-  printf '  %s. %s\n' "$step_no" "$1"
-  step_no=$((step_no + 1))
-}
-
-print_final_summary() {
-  install_status=$1
-  apply_status=$2
-
-  printf '\n%s\n' "$install_status"
-  printf 'Installed dotman:   %s\n' "$dotman_bin"
-  printf 'Installed dotfiles: %s\n' "$dotfiles_dir"
-
-  printf '\nNext steps:\n'
-  step_no=1
-
-  dotman_command=$dotman_bin
-  case ":$PATH:" in
-    *":$HOME/.local/bin:"*)
-      dotman_command=dotman
-      ;;
-    *)
-      print_next_step "Add dotman to PATH:"
-      current_shell_name=${SHELL:-}
-      if [ "${current_shell_name##*/}" = "fish" ]; then
-        printf '     fish_add_path "$HOME/.local/bin"\n'
-      else
-        printf '     export PATH="$HOME/.local/bin:$PATH"\n'
-      fi
-      ;;
-  esac
-
-  if command -v fish >/dev/null 2>&1; then
-    fish_path=$(command -v fish)
-    current_shell=$(current_login_shell)
-
-    if [ "$current_shell" = "$fish_path" ]; then
-      print_next_step "Open a new login session to start fish automatically."
-      printf '     Current default shell: %s\n' "$fish_path"
-    else
-      print_next_step "Configure fish as the default login shell:"
-      print_fish_login_commands "$fish_path"
-    fi
-
-    print_next_step "Switch this terminal to fish now (optional):"
-    printf '     exec %s -l\n' "$fish_path"
-  fi
-
-  if [ "$apply_status" = "stopped" ]; then
-    print_next_step "Apply bootstrap and deploy:"
-    printf '     cd %s\n' "$dotfiles_dir"
-    printf '     %s bootstrap\n' "$dotman_command"
-    printf '     %s deploy\n' "$dotman_command"
-  else
-    printf '\nLater, re-apply dotfiles with:\n'
-    printf '  %s bootstrap\n' "$dotman_command"
-    printf '  %s deploy\n' "$dotman_command"
-  fi
-}
-
-stage="creating temporary workspace"
-tmp_dir=$(mktemp -d)
-bootstrap_log="$tmp_dir/dotfiles-bootstrap.log"
-deploy_log="$tmp_dir/dotfiles-deploy.log"
-
-if [ "$source_checkout" -eq 1 ]; then
-  install_dotman_from_source
-else
+# ── install_dotman_and_bundle ──
+install_dotman_and_bundle() {
   need_command curl
   need_command tar
   need_command sed
-
-  manifest="$tmp_dir/manifest.json"
-  stage="downloading manifest"
-  spin_quiet "Downloading manifest" \
-    "curl -fsSL '$base_url/manifest.json' -o '$manifest'"
 
   stage="reading manifest"
   target=$(detect_target)
@@ -599,25 +591,22 @@ else
   asset_name=$(printf '%s' "$asset_template" | sed "s/{target}/$target/g")
   dotman_url="$release_base_url/$asset_name"
 
-  current_version=""
+  installed_version=""
   if [ -x "$dotman_bin" ]; then
-    current_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
+    installed_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
   fi
 
   mkdir -p "$(dirname -- "$dotman_bin")"
 
-  if [ -n "$current_version" ] && [ "$current_version" = "$dotman_version" ]; then
-    printf 'dotman %s already installed at %s\n' "$current_version" "$dotman_bin"
-  else
+  if [ -z "$installed_version" ] || [ "$installed_version" != "$dotman_version" ]; then
     stage="installing dotman"
     dotman_archive="$tmp_dir/$asset_name"
     dotman_extract_dir="$tmp_dir/dotman"
     mkdir -p "$dotman_extract_dir"
-    spin_quiet "Installing dotman $dotman_version" \
-      "curl -fsSL '$dotman_url' -o '$dotman_archive' &&
-       tar -xzf '$dotman_archive' -C '$dotman_extract_dir' &&
-       cp '$dotman_extract_dir/dotman' '$dotman_bin' &&
-       chmod 755 '$dotman_bin'"
+    download_with_progress "$dotman_url" "$dotman_archive"
+    tar -xzf "$dotman_archive" -C "$dotman_extract_dir"
+    cp "$dotman_extract_dir/dotman" "$dotman_bin"
+    chmod 755 "$dotman_bin"
     installed_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
     if [ "$installed_version" != "$dotman_version" ]; then
       printf 'error: installed dotman version mismatch\n' >&2
@@ -625,21 +614,19 @@ else
       printf 'asset:    %s\n' "$dotman_url" >&2
       exit 1
     fi
-    printf 'installed dotman %s to %s\n' "$installed_version" "$dotman_bin"
   fi
 
   active_dotman=$(command -v dotman 2>/dev/null || true)
   if [ -n "$active_dotman" ] && [ "$active_dotman" != "$dotman_bin" ]; then
     active_version=$("$active_dotman" --version 2>/dev/null | awk '{print $2}' || true)
-    gum_warn "dotman on PATH resolves to $active_dotman${active_version:+ ($active_version)}, not $dotman_bin."
-    gum_warn "Put $HOME/.local/bin before other dotman installs in PATH, or remove the older dotman."
+    printf '%s%s%s\n' "$YELLOW" "dotman on PATH resolves to $active_dotman${active_version:+ ($active_version)}, not $dotman_bin." "$NC"
+    printf '%s%s%s\n' "$YELLOW" "Put $HOME/.local/bin before other dotman installs in PATH, or remove the older dotman." "$NC"
   fi
 
   bundle_archive="$tmp_dir/dotfiles-bundle.tar.gz"
 
   stage="downloading dotfiles bundle"
-  spin_quiet "Downloading dotfiles bundle" \
-    "curl -fsSL '$bundle_url' -o '$bundle_archive'"
+  download_with_progress "$bundle_url" "$bundle_archive"
   if [ -n "$bundle_sha256" ]; then
     stage="verifying dotfiles bundle"
     actual_sha256=$(sha256_file "$bundle_archive")
@@ -651,8 +638,7 @@ else
   fi
 
   stage="extracting dotfiles bundle"
-  spin_quiet "Extracting dotfiles bundle" \
-    "rm -rf '$bundle_next' && mkdir -p '$bundle_next' && tar -xzf '$bundle_archive' -C '$bundle_next'"
+  rm -rf "$bundle_next" && mkdir -p "$bundle_next" && tar -xzf "$bundle_archive" -C "$bundle_next"
 
   stage="installing dotfiles bundle"
   rm -rf "$bundle_previous"
@@ -660,107 +646,90 @@ else
     mv "$dotfiles_dir" "$bundle_previous"
   fi
   mv "$bundle_next" "$dotfiles_dir"
-  printf 'installed dotfiles bundle to %s\n' "$dotfiles_dir"
+}
+
+# ── install_prerequisites ──
+install_prerequisites() {
+  ensure_brew
+  ensure_fish
+  ensure_fish_login
+}
+
+# ── Main ──
+stage="creating temporary workspace"
+tmp_dir=$(mktemp -d)
+
+manifest="$tmp_dir/manifest.json"
+if [ "$source_checkout" -eq 0 ]; then
+  stage="downloading manifest"
+  download_with_progress "$base_url/manifest.json" "$manifest"
 fi
 
-stage="installing Homebrew"
-ensure_brew
-stage="installing fish"
-ensure_fish
-stage="configuring fish login shell"
-ensure_fish_login
-
-stage="previewing bootstrap and deploy"
-echo
-(
-  cd "$dotfiles_dir"
-  if [ "$use_gum" -eq 1 ]; then
-    "$dotman_bin" --color always bootstrap --dry-run 2>&1
-  else
-    "$dotman_bin" bootstrap --dry-run 2>&1
-  fi
-) >"$bootstrap_log"
-(
-  cd "$dotfiles_dir"
-  if [ "$use_gum" -eq 1 ]; then
-    "$dotman_bin" --color always deploy --dry-run 2>&1
-  else
-    "$dotman_bin" deploy --dry-run 2>&1
-  fi
-) >"$deploy_log"
-
-bootstrap_summary=$(grep -E '[0-9]+ links ok' "$bootstrap_log" | tail -1 || true)
-deploy_summary=$(grep -E '[0-9]+ links ok' "$deploy_log" | tail -1 || true)
-bootstrap_warn=$(grep -oE '[0-9]+ warnings' "$bootstrap_log" | tail -1 || true)
-deploy_warn=$(grep -oE '[0-9]+ warnings' "$deploy_log" | tail -1 || true)
-
-if [ "$use_gum" -eq 1 ]; then
-  gum style --foreground "#89b4fa" --bold "Preview"
-  echo
-  gum style --bold --foreground "#cba6f7" "# Bootstrap"
-  if [ -n "$bootstrap_summary" ]; then
-    gum style --foreground "#6c7086" "  $bootstrap_summary"
-  fi
-  if [ -n "$bootstrap_warn" ]; then
-    gum style --foreground "#f9e2af" "  $bootstrap_warn"
-  fi
-  echo
-  gum style --bold --foreground "#f5c2e7" "# Deploy"
-  if [ -n "$deploy_summary" ]; then
-    gum style --foreground "#6c7086" "  $deploy_summary"
-  fi
-  if [ -n "$deploy_warn" ]; then
-    gum style --foreground "#f9e2af" "  $deploy_warn"
-  fi
-  echo
-  if gum confirm --default=false "Show full details?"; then
-    {
-      gum style --foreground "#cba6f7" --bold "# Bootstrap"
-      cat "$bootstrap_log"
-      echo
-      gum style --foreground "#6c7086" "────────────────────────────────────────────"
-      echo
-      gum style --foreground "#f5c2e7" --bold "# Deploy"
-      cat "$deploy_log"
-    } | ${PAGER:-less -r}
-  fi
-else
-  cat "$bootstrap_log"
-  echo
-  cat "$deploy_log"
+# ── Version check: skip if already latest ──
+current_version=""
+if [ -x "$dotman_bin" ]; then
+  current_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
 fi
-echo
 
-if ! gum_confirm "Apply these changes now?"; then
-  if [ "$use_gum" -eq 1 ]; then
-    { printf 'Stopped before applying changes.\n\n'; printf 'dotman:   %s\n' "$dotman_bin"
-      printf 'dotfiles: %s\n' "$dotfiles_dir"
-      if command -v fish >/dev/null 2>&1; then
-        printf '\nStart fish: exec %s -l\n' "$(command -v fish)"; fi; } | gum_card
-  else
-    print_final_summary "Stopped before applying changes." "stopped"
+if [ "$source_checkout" -eq 0 ] && [ -n "$current_version" ]; then
+  manifest_version=$(json_string dotman_version)
+  if [ "$current_version" = "$manifest_version" ] && [ -d "$dotfiles_dir" ] && [ -f "$dotfiles_dir/dotman.yaml" ]; then
+    step_done "dotman $current_version (already latest)"
+    skip_install=1
   fi
+fi
+
+# ── Step 1: Install dotman & dotfiles ──
+if [ "${skip_install:-0}" -eq 0 ]; then
+  step_start "Installing dotman & dotfiles..."
+  if [ "$source_checkout" -eq 1 ]; then
+    install_dotman_from_source
+    step_done "dotman (source) · dotfiles (checkout)"
+  else
+    install_dotman_and_bundle
+    step_done "dotman $installed_version · bundle"
+  fi
+fi
+
+# ── Prerequisites (silent when satisfied) ──
+need_brew=0 need_fish=0 need_shell_reg=0 need_chsh=0
+if ! command -v brew >/dev/null 2>&1; then need_brew=1; fi
+if ! command -v fish >/dev/null 2>&1; then need_fish=1; fi
+if command -v fish >/dev/null 2>&1; then
+  fish_path=$(command -v fish)
+  if [ -r /etc/shells ] && ! grep -Fx "$fish_path" /etc/shells >/dev/null 2>&1; then need_shell_reg=1; fi
+  if ! login_shell_is "$fish_path"; then need_chsh=1; fi
+fi
+
+if [ "$need_brew" -eq 1 ] || [ "$need_fish" -eq 1 ] || [ "$need_shell_reg" -eq 1 ] || [ "$need_chsh" -eq 1 ]; then
+  step_start "Installing prerequisites (brew, fish, shell)..."
+  install_prerequisites
+  step_done "brew · fish · shell ready"
+fi
+
+# ── Step 2: Apply dotfiles ──
+if ! prompt "Apply dotfiles?"; then
+  echo
+  printf '%s\n' "tabsp dotfiles installed"
+  printf '  Manage: %sdotman%s deploy | bootstrap\n' "$DIM" "$NC"
   exit 0
 fi
 
-stage="applying bootstrap and deploy"
-(
+step_start "Applying..."
+output=$(
   cd "$dotfiles_dir"
-  if [ "$use_gum" -eq 1 ]; then
-    gum spin --spinner dot --title "Applying bootstrap and deploy..." --show-output -- \
-      sh -c '"$1" bootstrap && "$1" deploy' _ "$dotman_bin"
-  else
-    "$dotman_bin" bootstrap
-    "$dotman_bin" deploy
-  fi
-)
+  "$dotman_bin" bootstrap --summary
+  "$dotman_bin" deploy --summary
+) || step_fail "dotman bootstrap/deploy failed"
+links=$(echo "$output" | awk -F': ' '/^link:/ {sum += $2+0} END {print sum}')
+dirs=$(echo "$output" | awk -F': ' '/^create:/ {sum += $2+0} END {print sum}')
+shell=$(echo "$output" | awk -F': ' '/^shell:/ {sum += $2+0} END {print sum}')
+step_done "${links} links · ${dirs} dirs · ${shell} commands deployed"
 
-stage="done"
-if [ "$use_gum" -eq 1 ]; then
-  { printf 'Done.\n\n'; printf 'dotman:   %s\n' "$dotman_bin"
-    printf 'dotfiles: %s\n' "$dotfiles_dir"
-    if command -v fish >/dev/null 2>&1; then
-      printf '\nStart fish now:\n  exec %s -l\n' "$(command -v fish)"; fi; } | gum_card
-else
-  print_final_summary "Done." "applied"
+# ── Step 3: Complete ──
+echo
+printf '%s\n' "tabsp dotfiles installed"
+if command -v fish >/dev/null 2>&1; then
+  printf '  Run: %sexec fish -l%s\n' "$DIM" "$NC"
 fi
+printf '  Manage: %sdotman%s deploy | bootstrap\n' "$DIM" "$NC"

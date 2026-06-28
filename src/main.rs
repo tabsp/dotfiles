@@ -11,8 +11,6 @@ use std::path::{Path, PathBuf};
 struct Cli {
     #[arg(long, value_enum, default_value_t = ColorChoice::Auto, global = true)]
     color: ColorChoice,
-    #[arg(long, value_enum, default_value_t = IconChoice::Nerd, global = true)]
-    icons: IconChoice,
     #[command(subcommand)]
     command: Command,
 }
@@ -22,13 +20,6 @@ pub enum ColorChoice {
     Auto,
     Always,
     Never,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum IconChoice {
-    Nerd,
-    Unicode,
-    Ascii,
 }
 
 #[derive(Debug, Subcommand)]
@@ -42,6 +33,8 @@ enum Command {
         except: Vec<deploy::Directive>,
         #[arg(long)]
         config: Option<String>,
+        #[arg(long)]
+        summary: bool,
     },
     Bootstrap {
         #[arg(long)]
@@ -52,6 +45,8 @@ enum Command {
         except: Vec<deploy::Directive>,
         #[arg(long)]
         config: Option<String>,
+        #[arg(long)]
+        summary: bool,
     },
 }
 
@@ -64,25 +59,36 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
-    let style = deploy::OutputStyle::new(cli.color, cli.icons);
     match cli.command {
         Command::Deploy {
             dry_run,
             only,
             except,
             config,
+            summary,
         } => {
             let config = resolve_config_path(config, "dotman.yaml")?;
-            deploy::run_deploy("deploy", &config, dry_run, &only, &except, style)
+            deploy::run_deploy(
+                "deploy", &config, dry_run, &only, &except, cli.color, summary,
+            )
         }
         Command::Bootstrap {
             dry_run,
             only,
             except,
             config,
+            summary,
         } => {
             let config = resolve_config_path(config, "dotman.bootstrap.yaml")?;
-            deploy::run_deploy("bootstrap", &config, dry_run, &only, &except, style)
+            deploy::run_deploy(
+                "bootstrap",
+                &config,
+                dry_run,
+                &only,
+                &except,
+                cli.color,
+                summary,
+            )
         }
     }
 }

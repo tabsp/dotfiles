@@ -88,11 +88,15 @@ fn installer_uses_source_checkout_from_dotfiles_dir_without_downloading_bundle()
     std::fs::write(
         &dotman,
         r#"#!/usr/bin/env sh
-case "$1" in
-  --version) echo "dotman 0.0.0-test" ;;
-  bootstrap|deploy) exit 0 ;;
-  *) exit 1 ;;
-esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version) echo "dotman 0.0.0-test"; exit 0 ;;
+    --summary) shift ;;
+    --color) shift; shift ;;
+    bootstrap|deploy) exit 0 ;;
+    *) exit 1 ;;
+  esac
+done
 "#,
     )
     .expect("dotman");
@@ -579,7 +583,7 @@ fn shell_failure_stops_after_completed_links() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stdout.contains("Required failure"), "stdout: {stdout}");
     assert!(stdout.contains("Failed"), "stdout: {stdout}");
-    assert!(stdout.contains("1 link actions"), "stdout: {stdout}");
+    assert!(stdout.contains("1 linked"), "stdout: {stdout}");
     assert!(stderr.contains("shell command failed"), "stderr: {stderr}");
 }
 

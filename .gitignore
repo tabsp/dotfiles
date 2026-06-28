@@ -24,3 +24,6 @@ config/fish/themes/
 
 # Machine/platform-specific Ghostty overrides.
 config/ghostty/config.local
+
+# Superpowers working documents
+docs/superpowers/

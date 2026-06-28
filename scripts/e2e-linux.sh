@@ -8,11 +8,12 @@ mode=local
 keep=0
 inspect=0
 interactive_install=0
+manual=0
 verbose=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/e2e-linux.sh [--local|--production] [--interactive-install] [--keep] [--inspect] [--verbose]
+Usage: scripts/e2e-linux.sh [--local|--production] [--manual] [--interactive-install] [--keep] [--inspect] [--verbose]
 
 Run a real Linux install test inside Docker.
 
@@ -21,7 +22,11 @@ Modes:
   --production  Install from DOTFILES_SITE_URL, defaulting to production.
 
 Options:
-  --interactive-install  Exercise install.sh prompts through a pseudo-terminal.
+  --manual              Skip automated install; start a container and drop into
+                        a shell for manual testing. The environment is fully
+                        prepared (dotman built, HTTP server running, tester user
+                        ready). Run the install script manually from the shell.
+  --interactive-install Exercise install.sh prompts through a pseudo-terminal.
   --keep        Keep the temporary Docker work directory after the run.
   --inspect     Open an interactive tester shell after E2E completes.
   --verbose     Enable shell tracing inside this wrapper and the container.
@@ -45,6 +50,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --interactive-install)
       interactive_install=1
+      ;;
+    --manual)
+      manual=1
       ;;
     --keep)
       keep=1
@@ -77,10 +85,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-image=${E2E_DOCKER_IMAGE:-ubuntu:24.04}
+image=${E2E_DOCKER_IMAGE:-${E2E_IMAGE:-ubuntu:24.04}}
 port=${E2E_PORT:-8765}
 production_site_url=${DOTFILES_SITE_URL:-https://dotfiles.tabsp.com}
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/dotman-linux-e2e.XXXXXX")
+chmod 777 "$tmp_dir"
 container_name=""
 
 print_manual_inspect_command() {
@@ -88,20 +97,18 @@ print_manual_inspect_command() {
 }
 
 cleanup() {
-  if [ -n "$container_name" ]; then
-    if [ "$keep" -eq 1 ]; then
+  if [ "$keep" -eq 1 ]; then
+    if [ -n "$container_name" ]; then
       printf 'kept E2E container: %s\n' "$container_name"
       printf 'inspect again with:\n'
       print_manual_inspect_command
-    else
-      docker rm -f "$container_name" >/dev/null 2>&1 || true
     fi
-  fi
-
-  if [ "$keep" -eq 1 ]; then
     printf 'kept E2E work directory: %s\n' "$tmp_dir"
   else
-    rm -rf "$tmp_dir"
+    if [ -n "$container_name" ]; then
+      docker rm -f "$container_name" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$tmp_dir" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
@@ -117,6 +124,7 @@ docker_args+=(
   -e "E2E_INTERACTIVE_INSTALL=$interactive_install"
   -e "E2E_VERBOSE=$verbose"
   -e "DOTFILES_SITE_URL=$production_site_url"
+  -e "E2E_MANUAL=$manual"
   -v "$tmp_dir:/work"
 )
 
@@ -136,32 +144,33 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get update
-apt-get install -y --no-install-recommends \
-  bash \
-  build-essential \
-  ca-certificates \
-  curl \
-  file \
-  fontconfig \
-  git \
-  procps \
-  python3 \
-  sudo \
-  tar \
-  unzip \
-  xz-utils
-if [ "${E2E_INTERACTIVE_INSTALL:-0}" = "1" ]; then
-  apt-get install -y --no-install-recommends expect
+if ! command -v cargo >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    bash \
+    build-essential \
+    ca-certificates \
+    curl \
+    file \
+    fontconfig \
+    git \
+    procps \
+    python3 \
+    sudo \
+    tar \
+    unzip \
+    xz-utils
+  if [ "${E2E_INTERACTIVE_INSTALL:-0}" = "1" ]; then
+    apt-get install -y --no-install-recommends expect
+  fi
 fi
-rm -rf /var/lib/apt/lists/*
 
 if ! id tester >/dev/null 2>&1; then
   useradd -m -s /bin/bash tester
+  printf 'tester ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/tester
+  chmod 0440 /etc/sudoers.d/tester
 fi
-printf 'tester ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/tester
-chmod 0440 /etc/sudoers.d/tester
-chown -R tester:tester /work
+chown -R tester:tester /work 2>/dev/null || true
 
 detect_target() {
   os=$(uname -s)
@@ -181,7 +190,7 @@ run_as_tester() {
   sudo -H -u tester env \
     HOME=/home/tester \
     USER=tester \
-    PATH="/home/tester/.cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    PATH="/home/tester/.cargo/bin:/opt/cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     bash -lc "$1"
 }
 
@@ -189,16 +198,22 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
   target=$(detect_target)
   site_dir=/work/site
   mkdir -p "$site_dir/bundle" "$site_dir/release"
-  cp /repo/scripts/install.sh "$site_dir/install.sh"
+  cp -r /repo /work/repo
+  cp /work/repo/scripts/install.sh "$site_dir/install.sh"
   chmod 755 "$site_dir/install.sh"
 
-  run_as_tester 'curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable'
-  run_as_tester 'cd /repo && cargo build --release --locked --target-dir /work/target'
-
+  run_as_tester 'if ! command -v cargo >/dev/null 2>&1; then curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable; fi'
+  run_as_tester 'cd /work/repo && cargo build --release --locked --target-dir /work/target'
+  /work/target/release/dotman deploy --help 2>&1 | grep -q summary || { printf 'error: built dotman missing --summary flag\n' >&2; exit 1; }
   tar -czf "$site_dir/release/dotman-$target.tar.gz" -C /work/target/release dotman
+  # Verify the packaged binary has --summary
+  mkdir -p /tmp/e2e-verify
+  tar -xzf "$site_dir/release/dotman-$target.tar.gz" -C /tmp/e2e-verify
+  /tmp/e2e-verify/dotman deploy --help 2>&1 | grep -q summary || { printf 'error: packaged dotman missing --summary\n' >&2; exit 1; }
+  rm -rf /tmp/e2e-verify
 
   (
-    cd /repo
+    cd /work/repo
     tar -czf "$site_dir/bundle/latest.tar.gz" \
       dotman.yaml \
       dotman.bootstrap.yaml \
@@ -211,7 +226,7 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
   )
 
   bundle_sha256=$(sha256sum "$site_dir/bundle/latest.tar.gz" | awk '{print $1}')
-  package_version=$(sed -n 's/^version = "\(.*\)"/\1/p' /repo/Cargo.toml | head -n 1)
+  package_version=$(sed -n 's/^version = "\(.*\)"/\1/p' /work/repo/Cargo.toml | head -n 1)
   generated_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
   base_url="http://127.0.0.1:${E2E_PORT}"
 
@@ -239,7 +254,9 @@ EOF
 
   python3 -m http.server "$E2E_PORT" --bind 127.0.0.1 --directory "$site_dir" >/work/http.log 2>&1 &
   http_pid=$!
-  trap 'kill "$http_pid" 2>/dev/null || true' EXIT
+  if [ "${E2E_MANUAL:-0}" != "1" ]; then
+    trap 'kill "$http_pid" 2>/dev/null || true' EXIT
+  fi
 
   for _ in $(seq 1 50); do
     if curl -fsSL "$base_url/manifest.json" >/dev/null 2>&1; then
@@ -254,10 +271,14 @@ else
   install_url="${DOTFILES_SITE_URL%/}/install.sh"
 fi
 
-if [ "${E2E_INTERACTIVE_INSTALL:-0}" = "1" ]; then
+if [ "${E2E_MANUAL:-0}" = "1" ]; then
+  printf 'Manual mode. Environment prepared — ready for manual testing.\n'
+  printf 'To run the installer:\n'
+  printf '  curl -fsSL http://127.0.0.1:%s/install.sh | DOTMAN_BIN=/work/target/release/dotman sh\n\n' "$E2E_PORT"
+elif [ "${E2E_INTERACTIVE_INSTALL:-0}" = "1" ]; then
   cat >/work/install-interactive.expect <<EOF
 set timeout -1
-spawn sudo -H -u tester env HOME=/home/tester USER=tester PATH=/home/tester/.cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DOTFILES_SITE_URL=${install_url%/install.sh} bash -lc {set -o pipefail; curl -fsSL '$install_url' | sh}
+spawn sudo -H -u tester env HOME=/home/tester USER=tester PATH=/opt/cargo/bin:/home/tester/.cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DOTFILES_SITE_URL=${install_url%/install.sh} bash -lc {set -o pipefail; curl -fsSL '$install_url' | sh}
 expect {
   -re {Install Homebrew automatically\\? \\[y/N\\]} { send "y\r"; exp_continue }
   -re {Install fish via Homebrew\\? \\[y/N\\]} { send "y\r"; exp_continue }
@@ -271,15 +292,17 @@ exit [lindex \$result 3]
 EOF
   expect /work/install-interactive.expect
 else
-  run_as_tester "set -o pipefail; curl -fsSL '$install_url' | DOTFILES_SITE_URL='${install_url%/install.sh}' sh -s -- --yes"
-fi
+  run_as_tester "set -o pipefail; curl -fsSL '$install_url' | DOTMAN_BIN=/work/target/release/dotman DOTFILES_SITE_URL='${install_url%/install.sh}' sh -s -- --yes"
+fi  # end manual/interactive/automated block
 
+if [ "${E2E_MANUAL:-0}" != "1" ]; then
 run_as_tester '
   set -euo pipefail
   export PATH="$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
   verify_log=/work/verify.log
 
   test -x "$HOME/.local/bin/dotman"
+  "$HOME/.local/bin/dotman" deploy --help 2>&1 | grep -q summary || { printf 'error: installed dotman missing --summary\n' >&2; exit 1; }
   dotman --version >"$verify_log"
   test -d "$HOME/.local/share/tabsp-dotfiles"
   test -f "$HOME/.local/share/tabsp-dotfiles/dotman.yaml"
@@ -304,12 +327,13 @@ run_as_tester '
 '
 
 printf 'Linux E2E completed successfully.\n'
+fi
 CONTAINER
 chmod 755 "$container_script"
 
-if [ "$inspect" -eq 1 ]; then
+if [ "$inspect" -eq 1 ] || [ "$manual" -eq 1 ]; then
   container_name="dotman-linux-e2e-$(date +%s)-$$"
-  printf 'starting inspectable container: %s\n' "$container_name"
+  printf 'starting container: %s\n' "$container_name"
   docker run -d --name "$container_name" "${docker_args[@]}" "$image" sleep infinity >/dev/null
   set +e
   docker exec -i "$container_name" bash /work/container-e2e.sh
@@ -320,17 +344,25 @@ else
   e2e_status=0
 fi
 
-if [ "$inspect" -eq 1 ]; then
-  if [ "$e2e_status" -ne 0 ]; then
+if [ "$inspect" -eq 1 ] || [ "$manual" -eq 1 ]; then
+  if [ "$e2e_status" -ne 0 ] && [ "$manual" -eq 0 ]; then
     printf '\nE2E failed with status %s. Opening the container for inspection.\n' "$e2e_status"
   fi
   if [ -t 0 ] && [ -t 1 ]; then
     printf '\nEntering E2E container as tester. Exit the shell to finish.\n'
-    docker exec -it "$container_name" sudo -H -u tester env \
-      HOME=/home/tester \
-      USER=tester \
-      PATH="/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-      bash -lc 'cd "$HOME/.local/share/tabsp-dotfiles" && if [ -x /home/linuxbrew/.linuxbrew/bin/fish ]; then exec /home/linuxbrew/.linuxbrew/bin/fish -l; else exec bash -l; fi'
+    if [ "$manual" -eq 1 ]; then
+      docker exec -it "$container_name" sudo -H -u tester env \
+        HOME=/home/tester \
+        USER=tester \
+        PATH="/opt/cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        bash -l
+    else
+      docker exec -it "$container_name" sudo -H -u tester env \
+        HOME=/home/tester \
+        USER=tester \
+        PATH="/opt/cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        bash -lc 'cd "$HOME/.local/share/tabsp-dotfiles" && if [ -x /home/linuxbrew/.linuxbrew/bin/fish ]; then exec /home/linuxbrew/.linuxbrew/bin/fish -l; else exec bash -l; fi'
+    fi
   else
     printf '\nNo interactive TTY detected. Inspect manually with:\n'
     print_manual_inspect_command
