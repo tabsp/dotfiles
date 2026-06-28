@@ -83,6 +83,8 @@ jobs:
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'dotman-latest' }}
           name: ${{ github.ref_type == 'tag' && github.ref_name || 'dotman latest' }}
+          generate_release_notes: true
+          overwrite_files: true
           files: |
             dist/dotman-*.tar.gz
             dist/dotman-*.tar.gz.sha256
