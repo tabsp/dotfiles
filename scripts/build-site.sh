@@ -6,7 +6,7 @@ repo_dir=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 
 public_dir=${PUBLIC_DIR:-"$repo_dir/public"}
 base_url=${DOTFILES_SITE_URL:-"https://dotfiles.tabsp.com"}
-release_base_url=${DOTMAN_RELEASE_BASE_URL:-"https://github.com/tabsp/dotfiles/releases/latest/download"}
+release_base_url=${DOTMAN_RELEASE_BASE_URL:-}
 
 cd "$repo_dir"
 
@@ -14,6 +14,10 @@ package_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 git_sha=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
 bundle_version=$(git describe --tags --always --dirty 2>/dev/null || printf '%s' "$git_sha")
 generated_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+if [ -z "$release_base_url" ]; then
+  release_base_url="https://github.com/tabsp/dotfiles/releases/download/v$package_version"
+fi
 
 rm -rf "$public_dir"
 mkdir -p "$public_dir/bundle"

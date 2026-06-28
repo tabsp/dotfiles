@@ -618,7 +618,21 @@ else
        tar -xzf '$dotman_archive' -C '$dotman_extract_dir' &&
        cp '$dotman_extract_dir/dotman' '$dotman_bin' &&
        chmod 755 '$dotman_bin'"
-    printf 'installed dotman to %s\n' "$dotman_bin"
+    installed_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
+    if [ "$installed_version" != "$dotman_version" ]; then
+      printf 'error: installed dotman version mismatch\n' >&2
+      printf 'expected: %s\nactual:   %s\n' "$dotman_version" "${installed_version:-unknown}" >&2
+      printf 'asset:    %s\n' "$dotman_url" >&2
+      exit 1
+    fi
+    printf 'installed dotman %s to %s\n' "$installed_version" "$dotman_bin"
+  fi
+
+  active_dotman=$(command -v dotman 2>/dev/null || true)
+  if [ -n "$active_dotman" ] && [ "$active_dotman" != "$dotman_bin" ]; then
+    active_version=$("$active_dotman" --version 2>/dev/null | awk '{print $2}' || true)
+    gum_warn "dotman on PATH resolves to $active_dotman${active_version:+ ($active_version)}, not $dotman_bin."
+    gum_warn "Put $HOME/.local/bin before other dotman installs in PATH, or remove the older dotman."
   fi
 
   bundle_archive="$tmp_dir/dotfiles-bundle.tar.gz"
