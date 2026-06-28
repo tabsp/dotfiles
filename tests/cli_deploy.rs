@@ -78,11 +78,7 @@ fn installer_uses_source_checkout_from_dotfiles_dir_without_downloading_bundle()
     std::fs::create_dir_all(repo.path().join(".git")).expect("git dir");
     std::fs::create_dir_all(repo.path().join("scripts")).expect("scripts dir");
     std::fs::write(repo.path().join("dotman.yaml"), "[]\n").expect("dotman yaml");
-    std::fs::write(
-        repo.path().join("scripts/install"),
-        "#!/usr/bin/env sh\n",
-    )
-    .expect("install");
+    std::fs::write(repo.path().join("scripts/install"), "#!/usr/bin/env sh\n").expect("install");
     std::fs::write(repo.path().join("sentinel"), "keep me\n").expect("sentinel");
     let dotman = bin.path().join("dotman");
     std::fs::write(
@@ -161,6 +157,148 @@ done
     assert!(
         sudo_args.lines().any(|line| line.starts_with("-n ")),
         "sudo args: {sudo_args}"
+    );
+}
+
+#[test]
+fn installer_updates_bundle_even_when_dotman_version_matches_manifest() {
+    let site = tempfile::tempdir().expect("site");
+    let home = tempfile::tempdir().expect("home");
+    let bin = tempfile::tempdir().expect("bin");
+    let state = tempfile::tempdir().expect("state");
+    let bundle_src = tempfile::tempdir().expect("bundle source");
+    let package = tempfile::tempdir().expect("dotman package");
+    let dotfiles_dir = home.path().join("dotfiles");
+    let dotman_bin = bin.path().join("dotman");
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        other => panic!("unsupported test platform: {other:?}"),
+    };
+
+    std::fs::create_dir_all(&dotfiles_dir).expect("dotfiles dir");
+    std::fs::write(dotfiles_dir.join("dotman.yaml"), "old\n").expect("old dotman yaml");
+    std::fs::write(dotfiles_dir.join("sentinel"), "old bundle\n").expect("old sentinel");
+
+    std::fs::create_dir_all(site.path().join("bundle")).expect("bundle dir");
+    std::fs::create_dir_all(site.path().join("release")).expect("release dir");
+    std::fs::create_dir_all(bundle_src.path().join("config")).expect("bundle config");
+    std::fs::write(bundle_src.path().join("dotman.yaml"), "new\n").expect("new dotman yaml");
+    std::fs::write(bundle_src.path().join("sentinel"), "new bundle\n").expect("new sentinel");
+    assert!(
+        Command::new("tar")
+            .arg("-czf")
+            .arg(site.path().join("bundle/latest.tar.gz"))
+            .arg("-C")
+            .arg(bundle_src.path())
+            .arg("dotman.yaml")
+            .arg("sentinel")
+            .arg("config")
+            .status()
+            .expect("tar bundle")
+            .success()
+    );
+
+    let dotman_script = r#"#!/usr/bin/env sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version) echo "dotman 9.9.9"; exit 0 ;;
+    --summary) shift ;;
+    --color) shift; shift ;;
+    bootstrap|deploy) exit 0 ;;
+    *) shift ;;
+  esac
+done
+exit 0
+"#;
+    std::fs::write(&dotman_bin, dotman_script).expect("existing dotman");
+    std::fs::write(package.path().join("dotman"), dotman_script).expect("packaged dotman");
+    std::fs::write(bin.path().join("brew"), "#!/usr/bin/env sh\nexit 0\n").expect("brew");
+    std::fs::write(bin.path().join("fish"), "#!/usr/bin/env sh\nexit 0\n").expect("fish");
+    std::fs::write(bin.path().join("sudo"), "#!/usr/bin/env sh\nexit 1\n").expect("sudo");
+    std::fs::write(bin.path().join("chsh"), "#!/usr/bin/env sh\nexit 1\n").expect("chsh");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&dotman_bin)
+            .expect("dotman metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        let executable_paths = [
+            dotman_bin.clone(),
+            package.path().join("dotman"),
+            bin.path().join("brew"),
+            bin.path().join("fish"),
+            bin.path().join("sudo"),
+            bin.path().join("chsh"),
+        ];
+        for path in executable_paths {
+            std::fs::set_permissions(path, permissions.clone()).expect("executable");
+        }
+    }
+    assert!(
+        Command::new("tar")
+            .arg("-czf")
+            .arg(site.path().join(format!("release/dotman-{target}.tar.gz")))
+            .arg("-C")
+            .arg(package.path())
+            .arg("dotman")
+            .status()
+            .expect("tar dotman")
+            .success()
+    );
+
+    let site_url = format!("file://{}", site.path().display());
+    std::fs::write(
+        site.path().join("manifest.json"),
+        format!(
+            r#"{{
+  "schema": 1,
+  "bundle_url": "{site_url}/bundle/latest.tar.gz",
+  "bundle_sha256": "",
+  "dotman_version": "9.9.9",
+  "dotman_release_base_url": "{site_url}/release",
+  "dotman_asset_template": "dotman-{{target}}.tar.gz"
+}}
+"#
+        ),
+    )
+    .expect("manifest");
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install");
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = Command::new("sh")
+        .arg(script)
+        .arg("--yes")
+        .env("HOME", home.path())
+        .env("DOTFILES_DIR", &dotfiles_dir)
+        .env("DOTMAN_BIN", &dotman_bin)
+        .env("DOTFILES_SITE_URL", site_url)
+        .env("XDG_STATE_HOME", state.path())
+        .env("PATH", path)
+        .env("SHELL", "/bin/sh")
+        .output()
+        .expect("run installer");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(dotfiles_dir.join("sentinel")).expect("sentinel"),
+        "new bundle\n"
+    );
+    assert!(
+        state.path().join("tabsp-dotfiles").is_dir(),
+        "lock state should live outside the replaceable dotfiles bundle"
     );
 }
 

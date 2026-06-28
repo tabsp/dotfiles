@@ -4,6 +4,8 @@ set -eu
 base_url=${DOTFILES_SITE_URL:-"https://dotfiles.tabsp.com"}
 dotman_bin=${DOTMAN_BIN:-"$HOME/.local/bin/dotman"}
 dotfiles_dir=${DOTFILES_DIR:-"$HOME/.local/share/tabsp-dotfiles"}
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+install_lock="$state_home/tabsp-dotfiles/install.lock"
 yes=0
 tmp_dir=""
 stage="starting"
@@ -225,7 +227,7 @@ pick_prereqs_show() {
 }
 
 # ── Lock ──
-LOCK_FD=9
+lockfile=""
 LOCK_DIR=""
 LOCK_STALE_SECS=600
 
@@ -407,7 +409,7 @@ interrupt() {
 trap cleanup EXIT
 trap interrupt INT TERM
 
-acquire_lock "$HOME/.local/share/tabsp-dotfiles/.install.lock"
+acquire_lock "$install_lock"
 
 ensure_brew() {
   step_run "Installing Homebrew..." \
@@ -669,30 +671,14 @@ if [ "$source_checkout" -eq 0 ]; then
   download_with_progress "$base_url/manifest.json" "$manifest"
 fi
 
-# ── Version check: skip if already latest ──
-current_version=""
-if [ -x "$dotman_bin" ]; then
-  current_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
-fi
-
-if [ "$source_checkout" -eq 0 ] && [ -n "$current_version" ]; then
-  manifest_version=$(json_string dotman_version)
-  if [ "$current_version" = "$manifest_version" ] && [ -d "$dotfiles_dir" ] && [ -f "$dotfiles_dir/dotman.yaml" ]; then
-    step_done "dotman $current_version (already latest)"
-    skip_install=1
-  fi
-fi
-
 # ── Step 1: Install dotman & dotfiles ──
-if [ "${skip_install:-0}" -eq 0 ]; then
-  step_start "Installing dotman & dotfiles..."
-  if [ "$source_checkout" -eq 1 ]; then
-    install_dotman_from_source
-    step_done "dotman (source) · dotfiles (checkout)"
-  else
-    install_dotman_and_bundle
-    step_done "dotman $installed_version · bundle"
-  fi
+step_start "Installing dotman & dotfiles..."
+if [ "$source_checkout" -eq 1 ]; then
+  install_dotman_from_source
+  step_done "dotman (source) · dotfiles (checkout)"
+else
+  install_dotman_and_bundle
+  step_done "dotman $installed_version · bundle"
 fi
 
 # ── Prerequisites (silent when satisfied) ──
