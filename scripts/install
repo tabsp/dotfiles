@@ -121,6 +121,9 @@ step_run() {
 
 _spinner_pid=''
 _sudo_keepalive_pid=''
+_sudo_ready=0
+shell_manual_action=0
+shell_manual_path=''
 
 stop_sudo_keepalive() {
   if [ -n "${_sudo_keepalive_pid:-}" ]; then
@@ -136,12 +139,22 @@ authenticate_sudo_for_shell() {
   fi
 
   if [ "$yes" -eq 1 ]; then
-    sudo -n -v 2>/dev/null || true
+    if sudo -n -v 2>/dev/null; then
+      _sudo_ready=1
+    fi
     return 0
   fi
 
-  printf 'sudo may ask for your password to register fish and change the login shell.\n'
-  if sudo -v </dev/tty; then
+  if sudo -n -v 2>/dev/null; then
+    _sudo_ready=1
+    printf '  %s sudo\n' "${GREEN}✓${NC}"
+    return 0
+  fi
+
+  printf 'Shell setup needs sudo. Please authenticate now.\n'
+  if sudo -v -p '[sudo] password for %p: ' </dev/tty && sudo -n -v 2>/dev/null; then
+    _sudo_ready=1
+    printf '  %s sudo\n' "${GREEN}✓${NC}"
     (
       while true; do
         sleep 60
@@ -330,6 +343,11 @@ sha256_file() {
   fi
 }
 
+sha256_sum_file_value() {
+  file=$1
+  awk 'NF {print $1; exit}' "$file"
+}
+
 detect_target() {
   os=$(uname -s)
   arch=$(uname -m)
@@ -379,31 +397,27 @@ EOF
 }
 
 install_dotman_from_source() {
-  if [ -x "$dotman_bin" ]; then
-    current_version=$("$dotman_bin" --version 2>/dev/null | awk '{print $2}' || true)
-    printf 'using existing dotman%s at %s\n' "${current_version:+ $current_version}" "$dotman_bin"
-    return 0
-  fi
-
   if ! command -v cargo >/dev/null 2>&1; then
     cat >&2 <<EOF
-error: dotman is not installed at $dotman_bin and cargo is not available
+error: source checkout install requires cargo
 
-Install Rust/Cargo or set DOTMAN_BIN to an existing dotman binary, then run the
-installer again.
+Install Rust/Cargo, then run the installer again.
 EOF
     exit 1
   fi
 
   stage="building dotman from source"
   mkdir -p "$(dirname -- "$dotman_bin")"
-  (
+  build_log="$tmp_dir/dotman-build.log"
+  if ! (
     cd "$dotfiles_dir"
     cargo build --release --locked
-  )
+  ) >"$build_log" 2>&1; then
+    cat "$build_log" >&2
+    exit 1
+  fi
   cp "$dotfiles_dir/target/release/dotman" "$dotman_bin"
   chmod 755 "$dotman_bin"
-  printf 'installed local dotman to %s\n' "$dotman_bin"
 }
 
 detect_install_mode
@@ -494,8 +508,8 @@ ensure_shell_registered() {
 
   if [ -w /etc/shells ]; then
     printf '%s\n' "$shell_path" >>/etc/shells
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo -n sh -c 'grep -Fx "$1" /etc/shells >/dev/null 2>&1 || printf "%s\n" "$1" >>/etc/shells' sh "$shell_path"
+  elif command -v sudo >/dev/null 2>&1 && [ "$_sudo_ready" -eq 1 ]; then
+    sudo -n sh -c 'grep -Fx "$1" /etc/shells >/dev/null 2>&1 || printf "%s\n" "$1" >>/etc/shells' sh "$shell_path" 2>/dev/null
   else
     printf 'Could not update /etc/shells. Run this later:\n' >&2
     printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path" >&2
@@ -546,7 +560,7 @@ change_login_shell() {
       chsh -s "$shell_path" </dev/null 2>/dev/null || true
       ;;
     *)
-      if command -v sudo >/dev/null 2>&1; then
+      if command -v sudo >/dev/null 2>&1 && [ "$_sudo_ready" -eq 1 ]; then
         sudo -n chsh -s "$shell_path" "$user_name" 2>/dev/null || true
       else
         chsh -s "$shell_path" </dev/null 2>/dev/null || true
@@ -558,7 +572,7 @@ change_login_shell() {
     return 0
   fi
 
-  if [ "$(uname -s)" = "Darwin" ] && command -v sudo >/dev/null 2>&1; then
+  if [ "$(uname -s)" = "Darwin" ] && command -v sudo >/dev/null 2>&1 && [ "$_sudo_ready" -eq 1 ]; then
     sudo -n chsh -s "$shell_path" "$user_name" 2>/dev/null || true
     login_shell_is "$shell_path"
     return $?
@@ -595,6 +609,7 @@ install_dotman_and_bundle() {
   dotman_version=$(json_string dotman_version)
   release_base_url=$(json_string dotman_release_base_url)
   asset_template=$(json_string dotman_asset_template)
+  asset_sha256_template=$(json_string dotman_asset_sha256_template)
 
   if [ -z "$bundle_url" ] || [ -z "$release_base_url" ] || [ -z "$asset_template" ]; then
     printf 'error: manifest is missing required fields\n' >&2
@@ -603,6 +618,11 @@ install_dotman_and_bundle() {
 
   asset_name=$(printf '%s' "$asset_template" | sed "s/{target}/$target/g")
   dotman_url="$release_base_url/$asset_name"
+  dotman_sha256_url=""
+  if [ -n "$asset_sha256_template" ]; then
+    asset_sha256_name=$(printf '%s' "$asset_sha256_template" | sed "s/{target}/$target/g")
+    dotman_sha256_url="$release_base_url/$asset_sha256_name"
+  fi
 
   installed_version=""
   if [ -x "$dotman_bin" ]; then
@@ -617,6 +637,19 @@ install_dotman_and_bundle() {
     dotman_extract_dir="$tmp_dir/dotman"
     mkdir -p "$dotman_extract_dir"
     download_with_progress "$dotman_url" "$dotman_archive"
+    if [ -n "$dotman_sha256_url" ]; then
+      stage="verifying dotman"
+      dotman_sha256_file="$tmp_dir/$asset_name.sha256"
+      download_with_progress "$dotman_sha256_url" "$dotman_sha256_file"
+      expected_dotman_sha256=$(sha256_sum_file_value "$dotman_sha256_file")
+      actual_dotman_sha256=$(sha256_file "$dotman_archive")
+      if [ "$actual_dotman_sha256" != "$expected_dotman_sha256" ]; then
+        printf 'error: dotman checksum mismatch\n' >&2
+        printf 'expected: %s\nactual:   %s\n' "$expected_dotman_sha256" "$actual_dotman_sha256" >&2
+        printf 'asset:    %s\n' "$dotman_url" >&2
+        exit 1
+      fi
+    fi
     tar -xzf "$dotman_archive" -C "$dotman_extract_dir"
     cp "$dotman_extract_dir/dotman" "$dotman_bin"
     chmod 755 "$dotman_bin"
@@ -688,15 +721,28 @@ install_prerequisites() {
   fi
 
   if [ "$need_shell" -eq 1 ]; then
-    printf '  shell → fish\n'
     if ensure_shell_registered "$fish_path" && ensure_fish_login; then
       printf '  %s shell → fish\n' "${GREEN}✓${NC}"
     else
-      printf '  %s shell → fish needs manual action\n' "${YELLOW}!${NC}" >&2
-      printf '    Register fish: grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$fish_path" "$fish_path" >&2
-      printf '    Change shell:  sudo chsh -s %s %s\n' "$fish_path" "$(id -un)" >&2
+      shell_manual_action=1
+      shell_manual_path=$fish_path
+      printf '  %s shell → fish deferred\n' "${YELLOW}!${NC}" >&2
     fi
   fi
+}
+
+print_complete() {
+  echo
+  printf '%s\n' "tabsp dotfiles installed"
+  if [ "$shell_manual_action" -eq 1 ]; then
+    printf '  Shell: %smanual setup required%s\n' "$YELLOW" "$NC"
+    printf '    grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_manual_path" "$shell_manual_path"
+    printf '    sudo chsh -s %s %s\n' "$shell_manual_path" "$(id -un)"
+  fi
+  if command -v fish >/dev/null 2>&1; then
+    printf '  Run: %sexec fish -l%s\n' "$DIM" "$NC"
+  fi
+  printf '  Manage: %sdotman%s deploy | bootstrap\n' "$DIM" "$NC"
 }
 
 # ── Main ──
@@ -739,9 +785,7 @@ fi
 
 # ── Step 2: Apply dotfiles ──
 if ! prompt "Apply dotfiles?"; then
-  echo
-  printf '%s\n' "tabsp dotfiles installed"
-  printf '  Manage: %sdotman%s deploy | bootstrap\n' "$DIM" "$NC"
+  print_complete
   exit 0
 fi
 
@@ -757,9 +801,4 @@ shell=$(echo "$output" | awk -F': ' '/^shell:/ {sum += $2+0} END {print sum}')
 step_done "${links} links · ${dirs} dirs · ${shell} commands deployed"
 
 # ── Step 3: Complete ──
-echo
-printf '%s\n' "tabsp dotfiles installed"
-if command -v fish >/dev/null 2>&1; then
-  printf '  Run: %sexec fish -l%s\n' "$DIM" "$NC"
-fi
-printf '  Manage: %sdotman%s deploy | bootstrap\n' "$DIM" "$NC"
+print_complete

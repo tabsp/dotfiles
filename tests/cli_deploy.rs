@@ -40,6 +40,37 @@ fn run_dotman(repo: &Path, home: &Path, args: &[&str]) -> Output {
         .expect("run dotman")
 }
 
+fn sha256_file(path: &Path) -> String {
+    let output = if Command::new("sha256sum")
+        .arg(path)
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        Command::new("sha256sum")
+            .arg(path)
+            .output()
+            .expect("sha256sum")
+    } else {
+        Command::new("shasum")
+            .arg("-a")
+            .arg("256")
+            .arg(path)
+            .output()
+            .expect("shasum")
+    };
+
+    assert!(
+        output.status.success(),
+        "sha command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .expect("sha value")
+        .to_string()
+}
+
 fn run_dotman_from(cwd: &Path, home: &Path, args: &[&str]) -> Output {
     let exe = env!("CARGO_BIN_EXE_dotman");
     Command::new(exe)
@@ -96,6 +127,27 @@ done
 "#,
     )
     .expect("dotman");
+    std::fs::write(
+        bin.path().join("cargo"),
+        r#"#!/usr/bin/env sh
+printf '%s\n' "$*" >"$HOME/cargo-args"
+mkdir -p target/release
+cat >target/release/dotman <<'EOF'
+#!/usr/bin/env sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version) echo "dotman 0.0.1-built"; exit 0 ;;
+    --summary) shift ;;
+    --color) shift; shift ;;
+    bootstrap|deploy) exit 0 ;;
+    *) exit 1 ;;
+  esac
+done
+EOF
+chmod 755 target/release/dotman
+"#,
+    )
+    .expect("cargo");
     std::fs::write(bin.path().join("brew"), "#!/usr/bin/env sh\nexit 0\n").expect("brew");
     std::fs::write(bin.path().join("fish"), "#!/usr/bin/env sh\nexit 0\n").expect("fish");
     std::fs::write(
@@ -112,6 +164,8 @@ done
         use std::os::unix::fs::PermissionsExt;
         permissions.set_mode(0o755);
         std::fs::set_permissions(&dotman, permissions.clone()).expect("dotman executable");
+        std::fs::set_permissions(bin.path().join("cargo"), permissions.clone())
+            .expect("cargo executable");
         std::fs::set_permissions(bin.path().join("brew"), permissions.clone())
             .expect("brew executable");
         std::fs::set_permissions(bin.path().join("fish"), permissions.clone())
@@ -152,6 +206,16 @@ done
     assert_eq!(
         std::fs::read_to_string(repo.path().join("sentinel")).expect("sentinel"),
         "keep me\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("cargo-args")).expect("cargo args"),
+        "build --release --locked\n"
+    );
+    assert!(
+        std::fs::read_to_string(&dotman)
+            .expect("dotman")
+            .contains("0.0.1-built"),
+        "source checkout install should rebuild dotman from the current repo"
     );
     let sudo_args = std::fs::read_to_string(home.path().join("sudo-args")).expect("sudo args");
     assert!(
@@ -249,6 +313,14 @@ exit 0
             .expect("tar dotman")
             .success()
     );
+    let dotman_archive = site.path().join(format!("release/dotman-{target}.tar.gz"));
+    let dotman_sha256 = sha256_file(&dotman_archive);
+    std::fs::write(
+        site.path()
+            .join(format!("release/dotman-{target}.tar.gz.sha256")),
+        format!("{dotman_sha256}  dotman-{target}.tar.gz\n"),
+    )
+    .expect("dotman sha256");
 
     let site_url = format!("file://{}", site.path().display());
     std::fs::write(
@@ -260,7 +332,8 @@ exit 0
   "bundle_sha256": "",
   "dotman_version": "9.9.9",
   "dotman_release_base_url": "{site_url}/release",
-  "dotman_asset_template": "dotman-{{target}}.tar.gz"
+  "dotman_asset_template": "dotman-{{target}}.tar.gz",
+  "dotman_asset_sha256_template": "dotman-{{target}}.tar.gz.sha256"
 }}
 "#
         ),
@@ -299,6 +372,113 @@ exit 0
     assert!(
         state.path().join("tabsp-dotfiles").is_dir(),
         "lock state should live outside the replaceable dotfiles bundle"
+    );
+}
+
+#[test]
+fn installer_rejects_dotman_asset_checksum_mismatch() {
+    let site = tempfile::tempdir().expect("site");
+    let home = tempfile::tempdir().expect("home");
+    let bin = tempfile::tempdir().expect("bin");
+    let package = tempfile::tempdir().expect("dotman package");
+    let dotfiles_dir = home.path().join("dotfiles");
+    let dotman_bin = bin.path().join("dotman");
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        other => panic!("unsupported test platform: {other:?}"),
+    };
+
+    std::fs::create_dir_all(site.path().join("release")).expect("release dir");
+    let existing_dotman_script = r#"#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then
+  echo "dotman 0.0.0-old"
+  exit 0
+fi
+exit 0
+"#;
+    let packaged_dotman_script = r#"#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then
+  echo "dotman 9.9.9"
+  exit 0
+fi
+exit 0
+"#;
+    std::fs::write(&dotman_bin, existing_dotman_script).expect("existing dotman");
+    std::fs::write(package.path().join("dotman"), packaged_dotman_script).expect("packaged dotman");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&dotman_bin)
+            .expect("dotman metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&dotman_bin, permissions.clone()).expect("dotman executable");
+        std::fs::set_permissions(package.path().join("dotman"), permissions)
+            .expect("package dotman executable");
+    }
+    assert!(
+        Command::new("tar")
+            .arg("-czf")
+            .arg(site.path().join(format!("release/dotman-{target}.tar.gz")))
+            .arg("-C")
+            .arg(package.path())
+            .arg("dotman")
+            .status()
+            .expect("tar dotman")
+            .success()
+    );
+    std::fs::write(
+        site.path()
+            .join(format!("release/dotman-{target}.tar.gz.sha256")),
+        format!(
+            "0000000000000000000000000000000000000000000000000000000000000000  dotman-{target}.tar.gz\n"
+        ),
+    )
+    .expect("bad dotman sha256");
+
+    let site_url = format!("file://{}", site.path().display());
+    std::fs::write(
+        site.path().join("manifest.json"),
+        format!(
+            r#"{{
+  "schema": 1,
+  "bundle_url": "{site_url}/bundle/latest.tar.gz",
+  "bundle_sha256": "",
+  "dotman_version": "9.9.9",
+  "dotman_release_base_url": "{site_url}/release",
+  "dotman_asset_template": "dotman-{{target}}.tar.gz",
+  "dotman_asset_sha256_template": "dotman-{{target}}.tar.gz.sha256"
+}}
+"#
+        ),
+    )
+    .expect("manifest");
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install");
+    let output = Command::new("sh")
+        .arg(script)
+        .arg("--yes")
+        .env("HOME", home.path())
+        .env("DOTFILES_DIR", &dotfiles_dir)
+        .env("DOTMAN_BIN", &dotman_bin)
+        .env("DOTFILES_SITE_URL", site_url)
+        .env("SHELL", "/bin/sh")
+        .output()
+        .expect("run installer");
+
+    assert!(
+        !output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("dotman checksum mismatch"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

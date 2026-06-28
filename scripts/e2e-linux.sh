@@ -198,7 +198,14 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
   target=$(detect_target)
   site_dir=/work/site
   mkdir -p "$site_dir/bundle" "$site_dir/release"
-  cp -r /repo /work/repo
+  mkdir -p /work/repo
+  tar \
+    --exclude=.git \
+    --exclude=target \
+    --exclude=dist \
+    --exclude=public \
+    -C /repo -cf - . |
+    tar -C /work/repo -xf -
   cp /work/repo/scripts/install "$site_dir/install"
   chmod 755 "$site_dir/install"
 
@@ -206,6 +213,7 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
   run_as_tester 'cd /work/repo && cargo build --release --locked --target-dir /work/target'
   /work/target/release/dotman deploy --help 2>&1 | grep -q summary || { printf 'error: built dotman missing --summary flag\n' >&2; exit 1; }
   tar -czf "$site_dir/release/dotman-$target.tar.gz" -C /work/target/release dotman
+  sha256sum "$site_dir/release/dotman-$target.tar.gz" > "$site_dir/release/dotman-$target.tar.gz.sha256"
   # Verify the packaged binary has --summary
   mkdir -p /tmp/e2e-verify
   tar -xzf "$site_dir/release/dotman-$target.tar.gz" -C /tmp/e2e-verify
@@ -242,6 +250,7 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
   "dotman_version": "$package_version",
   "dotman_release_base_url": "$base_url/release",
   "dotman_asset_template": "dotman-{target}.tar.gz",
+  "dotman_asset_sha256_template": "dotman-{target}.tar.gz.sha256",
   "bundle": {
     "version": "local-worktree",
     "url": "$base_url/bundle/latest.tar.gz",
@@ -250,7 +259,8 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
   "dotman": {
     "version": "$package_version",
     "release_base_url": "$base_url/release",
-    "asset_template": "dotman-{target}.tar.gz"
+    "asset_template": "dotman-{target}.tar.gz",
+    "asset_sha256_template": "dotman-{target}.tar.gz.sha256"
   }
 }
 EOF

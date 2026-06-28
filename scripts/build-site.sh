@@ -53,6 +53,7 @@ cat >"$public_dir/manifest.json" <<EOF
   "dotman_version": "$package_version",
   "dotman_release_base_url": "$release_base_url",
   "dotman_asset_template": "dotman-{target}.tar.gz",
+  "dotman_asset_sha256_template": "dotman-{target}.tar.gz.sha256",
   "bundle": {
     "version": "$bundle_version",
     "url": "$base_url/bundle/latest.tar.gz",
@@ -62,6 +63,7 @@ cat >"$public_dir/manifest.json" <<EOF
     "version": "$package_version",
     "release_base_url": "$release_base_url",
     "asset_template": "dotman-{target}.tar.gz",
+    "asset_sha256_template": "dotman-{target}.tar.gz.sha256",
     "targets_note": "Keep this list in sync with .github/workflows/release-dotman.yml.",
     "targets": [
       "aarch64-apple-darwin",
