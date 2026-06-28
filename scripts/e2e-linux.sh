@@ -26,7 +26,7 @@ Options:
                         a shell for manual testing. The environment is fully
                         prepared (dotman built, HTTP server running, tester user
                         ready). Run the install script manually from the shell.
-  --interactive-install Exercise install.sh prompts through a pseudo-terminal.
+  --interactive-install Exercise install prompts through a pseudo-terminal.
   --keep        Keep the temporary Docker work directory after the run.
   --inspect     Open an interactive tester shell after E2E completes.
   --verbose     Enable shell tracing inside this wrapper and the container.
@@ -199,8 +199,8 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
   site_dir=/work/site
   mkdir -p "$site_dir/bundle" "$site_dir/release"
   cp -r /repo /work/repo
-  cp /work/repo/scripts/install.sh "$site_dir/install.sh"
-  chmod 755 "$site_dir/install.sh"
+  cp /work/repo/scripts/install "$site_dir/install"
+  chmod 755 "$site_dir/install"
 
   run_as_tester 'if ! command -v cargo >/dev/null 2>&1; then curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable; fi'
   run_as_tester 'cd /work/repo && cargo build --release --locked --target-dir /work/target'
@@ -211,6 +211,9 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
   tar -xzf "$site_dir/release/dotman-$target.tar.gz" -C /tmp/e2e-verify
   /tmp/e2e-verify/dotman deploy --help 2>&1 | grep -q summary || { printf 'error: packaged dotman missing --summary\n' >&2; exit 1; }
   rm -rf /tmp/e2e-verify
+  # Pre-install dotman so install skips HTTP download
+  run_as_tester 'mkdir -p "$HOME/.local/bin" && cp /work/target/release/dotman "$HOME/.local/bin/dotman"'
+  printf 'e2e: pre-installed dotman to ~/.local/bin/dotman\n'
 
   (
     cd /work/repo
@@ -266,25 +269,23 @@ EOF
   done
 
   curl -fsSL "$base_url/manifest.json" >/dev/null
-  install_url="$base_url/install.sh"
+  install_url="$base_url/install"
 else
-  install_url="${DOTFILES_SITE_URL%/}/install.sh"
+  install_url="${DOTFILES_SITE_URL%/}/install"
 fi
 
 if [ "${E2E_MANUAL:-0}" = "1" ]; then
   printf 'Manual mode. Environment prepared — ready for manual testing.\n'
   printf 'To run the installer:\n'
-  printf '  curl -fsSL http://127.0.0.1:%s/install.sh | DOTMAN_BIN=/work/target/release/dotman sh\n\n' "$E2E_PORT"
+  printf '  curl -fsSL http://127.0.0.1:%s/install | sh\n\n' "$E2E_PORT"
 elif [ "${E2E_INTERACTIVE_INSTALL:-0}" = "1" ]; then
   cat >/work/install-interactive.expect <<EOF
 set timeout -1
-spawn sudo -H -u tester env HOME=/home/tester USER=tester PATH=/opt/cargo/bin:/home/tester/.cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DOTFILES_SITE_URL=${install_url%/install.sh} bash -lc {set -o pipefail; curl -fsSL '$install_url' | sh}
+spawn sudo -H -u tester env HOME=/home/tester USER=tester PATH=/opt/cargo/bin:/home/tester/.cargo/bin:/home/tester/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DOTFILES_SITE_URL=${install_url%/install} bash -lc "set -o pipefail; curl -fsSL '$install_url' | sh"
 expect {
-  -re {Install Homebrew automatically\\? \\[y/N\\]} { send "y\r"; exp_continue }
-  -re {Install fish via Homebrew\\? \\[y/N\\]} { send "y\r"; exp_continue }
-  -re {Add it automatically\\? .*\\[y/N\\]} { send "y\r"; exp_continue }
-  -re {Change default shell to fish\\? .*\\[y/N\\]} { send "y\r"; exp_continue }
-  -re {Apply these changes now\\? \\[y/N\\]} { send "y\r"; exp_continue }
+  -re {Missing:} { exp_continue }
+  "install all\\?" { send "\r"; exp_continue }
+  "Apply dotfiles\\?" { send "\r"; exp_continue }
   eof
 }
 catch wait result
@@ -292,39 +293,40 @@ exit [lindex \$result 3]
 EOF
   expect /work/install-interactive.expect
 else
-  run_as_tester "set -o pipefail; curl -fsSL '$install_url' | DOTMAN_BIN=/work/target/release/dotman DOTFILES_SITE_URL='${install_url%/install.sh}' sh -s -- --yes"
+  run_as_tester "set -o pipefail; curl -fsSL '$install_url' | DOTFILES_SITE_URL='${install_url%/install}' sh -s -- --yes"
 fi  # end manual/interactive/automated block
 
 if [ "${E2E_MANUAL:-0}" != "1" ]; then
-run_as_tester '
-  set -euo pipefail
-  export PATH="$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
-  verify_log=/work/verify.log
+cat >/work/verify.sh <<'VERIFY'
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
+verify_log=/work/verify.log
 
-  test -x "$HOME/.local/bin/dotman"
-  "$HOME/.local/bin/dotman" deploy --help 2>&1 | grep -q summary || { printf 'error: installed dotman missing --summary\n' >&2; exit 1; }
-  dotman --version >"$verify_log"
-  test -d "$HOME/.local/share/tabsp-dotfiles"
-  test -f "$HOME/.local/share/tabsp-dotfiles/dotman.yaml"
-  test -d "$HOME/.local/share/tabsp-dotfiles/config"
-  command -v brew >/dev/null
-  command -v fish >/dev/null
-  fish_path=$(command -v fish)
-  test "$(getent passwd tester | cut -d: -f7)" = "$fish_path"
+test -x "$HOME/.local/bin/dotman"
+if ! "$HOME/.local/bin/dotman" deploy --help 2>&1 | grep -q summary; then
+  printf 'error: installed dotman missing --summary\n' >&2
+  exit 1
+fi
+dotman --version >"$verify_log"
+test -d "$HOME/.local/share/tabsp-dotfiles"
+test -f "$HOME/.local/share/tabsp-dotfiles/dotman.yaml"
+test -d "$HOME/.local/share/tabsp-dotfiles/config"
+command -v brew >/dev/null
+command -v fish >/dev/null
+fish_path=$(command -v fish)
+test "$(getent passwd tester | cut -d: -f7)" = "$fish_path"
 
-  cd "$HOME/.local/share/tabsp-dotfiles"
-  if ! {
-    dotman bootstrap --dry-run
-    dotman deploy --dry-run
-  } >>"$verify_log" 2>&1; then
-    cat "$verify_log"
-    exit 1
-  fi
+cd "$HOME/.local/share/tabsp-dotfiles"
+dotman bootstrap --dry-run >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
+dotman deploy --dry-run >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
 
-  test -e "$HOME/.config/fish"
-  test -e "$HOME/.config/nvim"
-  test -e "$HOME/.tmux.conf"
-'
+test -e "$HOME/.config/fish"
+test -e "$HOME/.config/nvim"
+test -e "$HOME/.tmux.conf"
+VERIFY
+chmod 755 /work/verify.sh
+run_as_tester "bash /work/verify.sh"
 
 printf 'Linux E2E completed successfully.\n'
 fi

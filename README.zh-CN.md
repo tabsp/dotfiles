@@ -19,13 +19,13 @@ Homebrew、通过 Homebrew 安装 fish，然后运行 `dotman bootstrap` 和 `do
 首次设置时，从网站安装 `dotman` 和发布好的 dotfiles bundle：
 
 ```sh
-sh -c "$(curl -fsSL https://dotfiles.tabsp.com/install.sh)"
+curl -fsSL https://dotfiles.tabsp.com/install | sh
 ```
 
 无交互安装：
 
 ```sh
-curl -fsSL https://dotfiles.tabsp.com/install.sh | sh -s -- --yes
+curl -fsSL https://dotfiles.tabsp.com/install | sh -s -- --yes
 ```
 
 新机器上的 fish 可能还不在当前 shell 的 `PATH` 中。安装脚本会打印当前终端可用的

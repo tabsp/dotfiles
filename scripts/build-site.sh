@@ -23,8 +23,8 @@ rm -rf "$public_dir"
 mkdir -p "$public_dir/bundle"
 mkdir -p "$public_dir/assets/screenshots"
 
-cp "$repo_dir/scripts/install.sh" "$public_dir/install.sh"
-chmod 755 "$public_dir/install.sh"
+cp "$repo_dir/scripts/install" "$public_dir/install"
+chmod 755 "$public_dir/install"
 cp "$repo_dir/assets/screenshots/terminal-preview.png" "$public_dir/assets/screenshots/terminal-preview.png"
 
 git archive --format=tar HEAD -- \
@@ -213,11 +213,11 @@ cat >"$public_dir/index.html" <<EOF
       <h1>tabsp dotfiles</h1>
       <p>Install dotman and the latest dotfiles bundle without cloning or building on the target machine.</p>
       <div class="command">
-        <pre><code id="install-command">sh -c "\$(curl -fsSL $base_url/install.sh)"</code></pre>
+        <pre><code id="install-command">curl -fsSL $base_url/install | sh</code></pre>
         <button type="button" id="copy-command">Copy</button>
       </div>
       <nav aria-label="Published files">
-        <a href="/install.sh">install.sh</a>
+        <a href="/install">install</a>
         <a href="/manifest.json">manifest.json</a>
         <a href="/bundle/latest.tar.gz">bundle</a>
       </nav>

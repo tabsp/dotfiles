@@ -10,7 +10,7 @@ stage="starting"
 
 usage() {
   cat <<EOF
-Usage: install.sh [--yes]
+Usage: install [--yes]
 
 Install or update dotman and the tabsp dotfiles bundle.
 
@@ -171,18 +171,57 @@ prompt() {
 
   if [ -n "${_spinner_pid:-}" ]; then
     kill "$_spinner_pid" 2>/dev/null || true
+    sleep 0.15
+    kill -0 "$_spinner_pid" 2>/dev/null && kill -9 "$_spinner_pid" 2>/dev/null || true
     wait "$_spinner_pid" 2>/dev/null || true
     _spinner_pid=''
-    printf '\r\033[2K'
+  fi
+  printf '\r\033[2K'
+  if _tty; then
+    printf '%s%s%s [Y/n] ' "$BOLD" "$1" "$NC"
+  else
+    printf '%s [Y/n] ' "$1"
+  fi
+  answer=$(read_input)
+  case "$answer" in n | N | no | NO) return 1 ;; *) return 0 ;; esac
+}
+
+_pick_prereqs_items=''
+
+pick_prereqs_reset() {
+  _pick_prereqs_items=''
+}
+
+pick_prereqs_add() {
+  if [ -z "$_pick_prereqs_items" ]; then
+    _pick_prereqs_items="$1"
+  else
+    _pick_prereqs_items="$_pick_prereqs_items · $1"
+  fi
+}
+
+pick_prereqs_show() {
+  if [ "$yes" -eq 1 ]; then
+    return 0
+  fi
+  if [ -z "$_pick_prereqs_items" ]; then
+    return 1
   fi
 
-  if _tty; then
-    printf '%s%s%s [y/N] ' "$BOLD" "$1" "$NC"
-  else
-    printf '%s [y/N] ' "$1"
+  if [ -n "${_spinner_pid:-}" ]; then
+    kill "$_spinner_pid" 2>/dev/null || true
+    sleep 0.15
+    kill -0 "$_spinner_pid" 2>/dev/null && kill -9 "$_spinner_pid" 2>/dev/null || true
+    wait "$_spinner_pid" 2>/dev/null || true
+    _spinner_pid=''
   fi
-  answer=$(read_tty)
-  case "$answer" in y | Y | yes | YES) return 0 ;; *) return 1 ;; esac
+  printf '\r\033[2K'
+
+  printf '%s%s%s\n' "$YELLOW" "Missing: $_pick_prereqs_items" "$NC"
+  if ! prompt "install all?"; then
+    return 1
+  fi
+  return 0
 }
 
 # ── Lock ──
@@ -234,14 +273,12 @@ release_lock() {
 need_command mktemp
 need_command awk
 
-read_tty() {
-  if [ ! -r /dev/tty ]; then
+read_input() {
+  if [ -r /dev/tty ]; then
+    ( IFS= read -r line </dev/tty && printf '%s' "$line" ) 2>/dev/null || true
+  else
     return 0
   fi
-
-  (
-    IFS= read -r line </dev/tty && printf '%s' "$line"
-  ) 2>/dev/null || true
 }
 
 json_string() {
@@ -286,7 +323,7 @@ looks_like_source_checkout() {
   [ -d "$path" ] || return 1
   [ -e "$path/.git" ] || return 1
   [ -f "$path/dotman.yaml" ] || return 1
-  [ -f "$path/scripts/install.sh" ] || return 1
+  [ -f "$path/scripts/install" ] || return 1
 }
 
 detect_install_mode() {
@@ -373,22 +410,10 @@ trap interrupt INT TERM
 acquire_lock "$HOME/.local/share/tabsp-dotfiles/.install.lock"
 
 ensure_brew() {
-  if command -v brew >/dev/null 2>&1; then
-    return 0
-  fi
-
-  os=$(uname -s)
-
-  printf '%s%s%s\n' "$YELLOW" "Homebrew is required but not found." "$NC"
-
-  if ! prompt "Install Homebrew automatically?"; then
-    printf 'Skipping Homebrew installation. Bootstrap steps that depend on brew will fail.\n'
-    return 0
-  fi
-
   step_run "Installing Homebrew..." \
     'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 
+  os=$(uname -s)
   if [ "$os" = "Darwin" ]; then
     if [ -x /opt/homebrew/bin/brew ]; then
       eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -407,24 +432,11 @@ ensure_brew() {
     printf 'error: Homebrew installation completed but brew is still not in PATH\n' >&2
     exit 1
   fi
-
-  printf 'Homebrew installed successfully.\n'
 }
 
 ensure_fish() {
-  if command -v fish >/dev/null 2>&1; then
-    return 0
-  fi
-
   if ! command -v brew >/dev/null 2>&1; then
-    printf 'Homebrew is not available; skipping fish installation.\n'
-    return 0
-  fi
-
-  printf '%s%s%s\n' "$YELLOW" "Fish shell is required but not found." "$NC"
-
-  if ! prompt "Install fish via Homebrew?"; then
-    printf 'Skipping fish installation.\n'
+    printf 'Skipping fish: Homebrew is not available.\n'
     return 0
   fi
 
@@ -435,46 +447,23 @@ ensure_fish() {
     printf 'error: fish installation completed but fish is still not in PATH\n' >&2
     exit 1
   fi
-
-  printf 'Fish installed successfully.\n'
 }
 
 ensure_shell_registered() {
   shell_path=$1
 
-  if [ -r /etc/shells ] && grep -Fx "$shell_path" /etc/shells >/dev/null 2>&1; then
-    return 0
-  fi
-
-  printf '\n%s is not listed in /etc/shells.\n' "$shell_path"
-
-  if ! prompt "Add it automatically? (may require password)"; then
-    printf 'Skipping shell registration. Run this later:\n'
-    printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
-    return 1
-  fi
-
   if [ -w /etc/shells ]; then
-    if printf '%s\n' "$shell_path" >>/etc/shells; then
-      printf 'Added %s to /etc/shells.\n' "$shell_path"
-      return 0
-    fi
+    printf '%s\n' "$shell_path" >>/etc/shells || true
   elif command -v sudo >/dev/null 2>&1; then
     if [ "$yes" -eq 1 ]; then
-      sudo_command="sudo -n"
+      printf '%s\n' "$shell_path" | sudo -n tee -a /etc/shells >/dev/null || true
     else
-      sudo_command="sudo"
+      printf '%s\n' "$shell_path" | sudo tee -a /etc/shells >/dev/null || true
     fi
-
-    if printf '%s\n' "$shell_path" | $sudo_command tee -a /etc/shells >/dev/null; then
-      printf 'Added %s to /etc/shells.\n' "$shell_path"
-      return 0
-    fi
+  else
+    printf 'Could not update /etc/shells. Run this later:\n'
+    printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
   fi
-
-  printf 'Could not update /etc/shells. Run this later:\n'
-  printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
-  return 1
 }
 
 current_login_shell() {
@@ -517,7 +506,7 @@ change_login_shell() {
       ;;
     *)
       if command -v sudo >/dev/null 2>&1; then
-        sudo chsh -s "$shell_path" "$user_name" || true
+        sudo -n chsh -s "$shell_path" "$user_name" 2>/dev/null || true
       else
         chsh -s "$shell_path" || true
       fi
@@ -529,7 +518,7 @@ change_login_shell() {
   fi
 
   if [ "$(uname -s)" = "Darwin" ] && command -v sudo >/dev/null 2>&1; then
-    sudo chsh -s "$shell_path" "$user_name" || true
+    sudo -n chsh -s "$shell_path" "$user_name" 2>/dev/null || true
     login_shell_is "$shell_path"
     return $?
   fi
@@ -544,29 +533,12 @@ ensure_fish_login() {
 
   fish_path=$(command -v fish)
 
-  current_shell=$(current_login_shell)
-
-  if [ "$current_shell" = "$fish_path" ]; then
+  if login_shell_is "$fish_path"; then
     return 0
   fi
 
-  printf '\nCurrent default shell is %s, not fish.\n' "${current_shell:-unknown}"
-
-  if ! prompt "Change default shell to fish? (requires password)"; then
-    printf 'Skipping shell change. Fish activation details will be shown at the end.\n'
-    return 0
-  fi
-
-  if ! ensure_shell_registered "$fish_path"; then
-    printf 'Skipping shell change until fish is listed in /etc/shells. Details will be shown at the end.\n'
-    return 0
-  fi
-
-  if change_login_shell "$fish_path"; then
-    printf 'Default shell changed to fish. Activation details will be shown at the end.\n'
-  else
-    printf 'chsh failed (may require password). Details will be shown at the end.\n'
-  fi
+  ensure_shell_registered "$fish_path" || return 0
+  change_login_shell "$fish_path"
 }
 
 # ── install_dotman_and_bundle ──
@@ -650,9 +622,41 @@ install_dotman_and_bundle() {
 
 # ── install_prerequisites ──
 install_prerequisites() {
-  ensure_brew
-  ensure_fish
-  ensure_fish_login
+  pick_prereqs_reset
+  [ "$need_brew" -eq 1 ] && pick_prereqs_add "brew"
+  [ "$need_fish" -eq 1 ] && pick_prereqs_add "fish"
+  # shell setup is implicit when fish is newly installed
+  need_shell=0
+  if [ "$need_fish" -eq 1 ] || [ "$need_shell_reg" -eq 1 ] || [ "$need_chsh" -eq 1 ]; then
+    need_shell=1
+    pick_prereqs_add "shell → fish"
+  fi
+
+  pick_prereqs_show || return 0
+
+  # sudo -v upfront for shell operations
+  if [ "$need_shell" -eq 1 ]; then
+    sudo -v 2>/dev/null || true
+  fi
+
+  [ "$need_brew" -eq 1 ] && ensure_brew
+  [ "$need_fish" -eq 1 ] && ensure_fish
+
+  # re-detect after fish install
+  if [ "$need_fish" -eq 1 ] && command -v fish >/dev/null 2>&1; then
+    fish_path=$(command -v fish)
+    need_shell_reg=0 need_chsh=0 need_shell=0
+    if [ -r /etc/shells ] && ! grep -Fx "$fish_path" /etc/shells >/dev/null 2>&1; then need_shell_reg=1; fi
+    if ! login_shell_is "$fish_path"; then need_chsh=1; fi
+    if [ "$need_shell_reg" -eq 1 ] || [ "$need_chsh" -eq 1 ]; then need_shell=1; fi
+  fi
+
+  if [ "$need_shell" -eq 1 ]; then
+    step_start "shell → fish"
+    ensure_shell_registered "$fish_path"
+    ensure_fish_login || true
+    step_done "shell → fish"
+  fi
 }
 
 # ── Main ──
@@ -702,9 +706,7 @@ if command -v fish >/dev/null 2>&1; then
 fi
 
 if [ "$need_brew" -eq 1 ] || [ "$need_fish" -eq 1 ] || [ "$need_shell_reg" -eq 1 ] || [ "$need_chsh" -eq 1 ]; then
-  step_start "Installing prerequisites (brew, fish, shell)..."
   install_prerequisites
-  step_done "brew · fish · shell ready"
 fi
 
 # ── Step 2: Apply dotfiles ──

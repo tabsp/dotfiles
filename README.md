@@ -21,13 +21,13 @@ For first-time setup, install `dotman` and the published dotfiles bundle from
 the site:
 
 ```sh
-sh -c "$(curl -fsSL https://dotfiles.tabsp.com/install.sh)"
+curl -fsSL https://dotfiles.tabsp.com/install | sh
 ```
 
 For unattended setup:
 
 ```sh
-curl -fsSL https://dotfiles.tabsp.com/install.sh | sh -s -- --yes
+curl -fsSL https://dotfiles.tabsp.com/install | sh -s -- --yes
 ```
 
 Fish may live outside the current `PATH` on a fresh machine. The installer

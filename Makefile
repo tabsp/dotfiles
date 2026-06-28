@@ -19,6 +19,7 @@ help:
 		'  make e2e-image                   Build the Docker image used by E2E tests' \
 		'  make e2e-linux                   Run real Linux install E2E in Docker' \
 		'  make e2e-linux E2E_ARGS="--manual --keep"  Manual E2E testing' \
+		'  make e2e-linux E2E_ARGS="--interactive-install"  Interactive prompt E2E' \
 		'  make lint                        Run rustfmt and clippy checks' \
 		'  make test                        Run tests' \
 		'  make ci                          Run lint and tests' \

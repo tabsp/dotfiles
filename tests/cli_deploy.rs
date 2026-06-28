@@ -79,7 +79,7 @@ fn installer_uses_source_checkout_from_dotfiles_dir_without_downloading_bundle()
     std::fs::create_dir_all(repo.path().join("scripts")).expect("scripts dir");
     std::fs::write(repo.path().join("dotman.yaml"), "[]\n").expect("dotman yaml");
     std::fs::write(
-        repo.path().join("scripts/install.sh"),
+        repo.path().join("scripts/install"),
         "#!/usr/bin/env sh\n",
     )
     .expect("install");
@@ -125,7 +125,7 @@ done
         std::fs::set_permissions(bin.path().join("chsh"), permissions).expect("chsh executable");
     }
 
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install");
     let path = format!(
         "{}:{}",
         bin.path().display(),
