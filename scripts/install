@@ -120,6 +120,39 @@ step_run() {
 }
 
 _spinner_pid=''
+_sudo_keepalive_pid=''
+
+stop_sudo_keepalive() {
+  if [ -n "${_sudo_keepalive_pid:-}" ]; then
+    kill "$_sudo_keepalive_pid" 2>/dev/null || true
+    wait "$_sudo_keepalive_pid" 2>/dev/null || true
+    _sudo_keepalive_pid=''
+  fi
+}
+
+authenticate_sudo_for_shell() {
+  if ! command -v sudo >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [ "$yes" -eq 1 ]; then
+    sudo -n -v 2>/dev/null || true
+    return 0
+  fi
+
+  printf 'sudo may ask for your password to register fish and change the login shell.\n'
+  if sudo -v </dev/tty; then
+    (
+      while true; do
+        sleep 60
+        sudo -n -v 2>/dev/null || exit 0
+      done
+    ) &
+    _sudo_keepalive_pid=$!
+  else
+    printf 'Could not authenticate sudo now. Manual shell commands will be shown if needed.\n' >&2
+  fi
+}
 
 step_start() {
   if _tty && [ "$yes" -eq 0 ]; then
@@ -381,6 +414,7 @@ cleanup() {
     kill "$_spinner_pid" 2>/dev/null || true
     _spinner_pid=''
   fi
+  stop_sudo_keepalive
   release_lock
 
   if [ -n "$tmp_dir" ]; then
@@ -454,17 +488,18 @@ ensure_fish() {
 ensure_shell_registered() {
   shell_path=$1
 
+  if [ -r /etc/shells ] && grep -Fx "$shell_path" /etc/shells >/dev/null 2>&1; then
+    return 0
+  fi
+
   if [ -w /etc/shells ]; then
-    printf '%s\n' "$shell_path" >>/etc/shells || true
+    printf '%s\n' "$shell_path" >>/etc/shells
   elif command -v sudo >/dev/null 2>&1; then
-    if [ "$yes" -eq 1 ]; then
-      printf '%s\n' "$shell_path" | sudo -n tee -a /etc/shells >/dev/null || true
-    else
-      printf '%s\n' "$shell_path" | sudo tee -a /etc/shells >/dev/null || true
-    fi
+    sudo -n sh -c 'grep -Fx "$1" /etc/shells >/dev/null 2>&1 || printf "%s\n" "$1" >>/etc/shells' sh "$shell_path"
   else
-    printf 'Could not update /etc/shells. Run this later:\n'
-    printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path"
+    printf 'Could not update /etc/shells. Run this later:\n' >&2
+    printf '  grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$shell_path" "$shell_path" >&2
+    return 1
   fi
 }
 
@@ -502,15 +537,19 @@ change_login_shell() {
     return 1
   fi
 
+  if login_shell_is "$shell_path"; then
+    return 0
+  fi
+
   case "$(uname -s)" in
     Darwin)
-      chsh -s "$shell_path" || true
+      chsh -s "$shell_path" </dev/null 2>/dev/null || true
       ;;
     *)
       if command -v sudo >/dev/null 2>&1; then
         sudo -n chsh -s "$shell_path" "$user_name" 2>/dev/null || true
       else
-        chsh -s "$shell_path" || true
+        chsh -s "$shell_path" </dev/null 2>/dev/null || true
       fi
       ;;
   esac
@@ -636,11 +675,6 @@ install_prerequisites() {
 
   pick_prereqs_show || return 0
 
-  # sudo -v upfront for shell operations
-  if [ "$need_shell" -eq 1 ]; then
-    sudo -v 2>/dev/null || true
-  fi
-
   [ "$need_brew" -eq 1 ] && ensure_brew
   [ "$need_fish" -eq 1 ] && ensure_fish
 
@@ -654,14 +688,31 @@ install_prerequisites() {
   fi
 
   if [ "$need_shell" -eq 1 ]; then
-    step_start "shell → fish"
-    ensure_shell_registered "$fish_path"
-    ensure_fish_login || true
-    step_done "shell → fish"
+    printf '  shell → fish\n'
+    if ensure_shell_registered "$fish_path" && ensure_fish_login; then
+      printf '  %s shell → fish\n' "${GREEN}✓${NC}"
+    else
+      printf '  %s shell → fish needs manual action\n' "${YELLOW}!${NC}" >&2
+      printf '    Register fish: grep -Fx %s /etc/shells || printf "%%s\\n" %s | sudo tee -a /etc/shells\n' "$fish_path" "$fish_path" >&2
+      printf '    Change shell:  sudo chsh -s %s %s\n' "$fish_path" "$(id -un)" >&2
+    fi
   fi
 }
 
 # ── Main ──
+need_brew=0 need_fish=0 need_shell_reg=0 need_chsh=0
+if ! command -v brew >/dev/null 2>&1; then need_brew=1; fi
+if ! command -v fish >/dev/null 2>&1; then need_fish=1; fi
+if command -v fish >/dev/null 2>&1; then
+  fish_path=$(command -v fish)
+  if [ -r /etc/shells ] && ! grep -Fx "$fish_path" /etc/shells >/dev/null 2>&1; then need_shell_reg=1; fi
+  if ! login_shell_is "$fish_path"; then need_chsh=1; fi
+fi
+
+if [ "$need_fish" -eq 1 ] || [ "$need_shell_reg" -eq 1 ] || [ "$need_chsh" -eq 1 ]; then
+  authenticate_sudo_for_shell
+fi
+
 stage="creating temporary workspace"
 tmp_dir=$(mktemp -d)
 
@@ -682,15 +733,6 @@ else
 fi
 
 # ── Prerequisites (silent when satisfied) ──
-need_brew=0 need_fish=0 need_shell_reg=0 need_chsh=0
-if ! command -v brew >/dev/null 2>&1; then need_brew=1; fi
-if ! command -v fish >/dev/null 2>&1; then need_fish=1; fi
-if command -v fish >/dev/null 2>&1; then
-  fish_path=$(command -v fish)
-  if [ -r /etc/shells ] && ! grep -Fx "$fish_path" /etc/shells >/dev/null 2>&1; then need_shell_reg=1; fi
-  if ! login_shell_is "$fish_path"; then need_chsh=1; fi
-fi
-
 if [ "$need_brew" -eq 1 ] || [ "$need_fish" -eq 1 ] || [ "$need_shell_reg" -eq 1 ] || [ "$need_chsh" -eq 1 ]; then
   install_prerequisites
 fi
