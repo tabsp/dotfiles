@@ -152,7 +152,7 @@ authenticate_sudo_for_shell() {
   fi
 
   printf 'Shell setup needs sudo. Please authenticate now.\n'
-  if sudo -v -p '[sudo] password for %p: ' </dev/tty && sudo -n -v 2>/dev/null; then
+  if sudo -v </dev/tty && sudo -n -v 2>/dev/null; then
     _sudo_ready=1
     printf '  %s sudo\n' "${GREEN}✓${NC}"
     (
