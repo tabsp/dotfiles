@@ -1,5 +1,6 @@
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 fn write_deploy_config(repo: &Path, command: &str) {
     std::fs::create_dir_all(repo.join("config/fish")).expect("config");
@@ -1092,4 +1093,54 @@ fn bootstrap_can_be_written_idempotently_with_conditions() {
     );
 
     assert_eq!(std::fs::read_to_string(marker).expect("marker"), "x");
+}
+
+#[test]
+fn shell_commands_do_not_inherit_stdin() {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    let captured = home.path().join("stdin-captured");
+    std::fs::write(
+        repo.path().join("dotman.yaml"),
+        format!(
+            r#"
+- shell:
+    - command: "cat > {} || true"
+      description: Capture stdin
+"#,
+            captured.to_string_lossy()
+        ),
+    )
+    .expect("dotman yaml");
+
+    let exe = env!("CARGO_BIN_EXE_dotman");
+    let mut child = Command::new(exe)
+        .current_dir(repo.path())
+        .env("HOME", home.path())
+        .env_remove("DOTFILES_DIR")
+        .args(["deploy"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn dotman");
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(b"SENTINEL_STDIN_POLLUTION\n")
+            .expect("write stdin");
+    }
+
+    let output = child.wait_with_output().expect("dotman output");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let content = std::fs::read_to_string(&captured).unwrap_or_default();
+    assert!(
+        !content.contains("SENTINEL_STDIN_POLLUTION"),
+        "stdin pollution: shell command captured piped stdin content: {content:?}"
+    );
 }

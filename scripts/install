@@ -792,8 +792,8 @@ fi
 step_start "Applying..."
 output=$(
   cd "$dotfiles_dir"
-  "$dotman_bin" bootstrap --summary
-  "$dotman_bin" deploy --summary
+  "$dotman_bin" bootstrap --summary </dev/null
+  "$dotman_bin" deploy --summary </dev/null
 ) || step_fail "dotman bootstrap/deploy failed"
 links=$(echo "$output" | awk -F': ' '/^link:/ {sum += $2+0} END {print sum}')
 dirs=$(echo "$output" | awk -F': ' '/^create:/ {sum += $2+0} END {print sum}')

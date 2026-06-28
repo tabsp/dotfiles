@@ -830,6 +830,7 @@ fn run_shell_step(
         let mut command = Command::new("sh");
         command.arg("-c").arg(&shell.command);
         command.current_dir(config_dir);
+        command.stdin(Stdio::null());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
         let output = run_shell_command(command, reporter, label, can_animate)
