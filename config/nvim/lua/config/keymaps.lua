@@ -9,4 +9,3 @@ map("i", "jj", "<ESC>", { desc = "esc" })
 
 -- Normal
 map("n", "<C-c>", "<cmd> %y+ <CR>", { desc = "copy whole file" })
-map("n", "<leader>rc", "<cmd> e $MYVIMRC<CR>", { desc = "open init.lua" })
