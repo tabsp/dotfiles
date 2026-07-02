@@ -79,7 +79,7 @@ dotman deploy --only link
 ## Tools
 
 | Tool | Purpose |
-|------|---------|
+| ---- | ------- |
 | [fish](https://fishshell.com) | Shell with built-in autosuggestions |
 | [starship](https://starship.rs) | Cross-shell prompt |
 | [direnv](https://direnv.net) | Per-directory environment variables |

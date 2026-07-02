@@ -75,7 +75,7 @@ dotman deploy --only link
 ## 工具
 
 | 工具 | 用途 |
-|------|------|
+| ---- | ---- |
 | [fish](https://fishshell.com) | 自带自动补全的 shell |
 | [starship](https://starship.rs) | 跨 shell 的提示符 |
 | [direnv](https://direnv.net) | 按目录加载环境变量 |

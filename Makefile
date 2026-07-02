@@ -1,4 +1,4 @@
-.PHONY: help build dev-deploy dev-bootstrap e2e-linux e2e-image lint test ci clean
+.PHONY: help build dev-deploy dev-bootstrap e2e-linux e2e-image lint nvim-check test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -21,6 +21,7 @@ help:
 		'  make e2e-linux E2E_ARGS="--manual --keep"  Manual E2E testing' \
 		'  make e2e-linux E2E_ARGS="--interactive-install"  Interactive prompt E2E' \
 		'  make lint                        Run rustfmt and clippy checks' \
+		'  make nvim-check                  Check Neovim config loads headlessly' \
 		'  make test                        Run tests' \
 		'  make ci                          Run lint and tests' \
 		'  make clean                       Remove build artifacts' \
@@ -48,6 +49,9 @@ e2e-linux: e2e-image
 lint:
 	cargo fmt --check
 	cargo clippy --all-targets --all-features -- -D warnings
+
+nvim-check:
+	XDG_STATE_HOME=/private/tmp/nvim-state-check XDG_CACHE_HOME=/private/tmp/nvim-cache-check nvim --headless -u config/nvim/init.lua +qa
 
 test:
 	cargo test
