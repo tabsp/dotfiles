@@ -2,8 +2,8 @@
 
 [中文](README.zh-CN.md)
 
-dotman is a tiny Rust-based dotfiles deployer for my personal macOS/Linux environment.
-It uses a Dotbot-like ordered YAML config to link files, create directories, and run setup commands.
+dotman is a tiny Rust-based TUI dotfiles deployer for my personal macOS/Linux environment.
+It uses a flat YAML config to install software, link config files, and run setup commands — all in a Plan → Confirm → Run flow with per-machine state and persistent run history.
 
 ## Preview
 
@@ -13,9 +13,7 @@ It uses a Dotbot-like ordered YAML config to link files, create directories, and
 
 - curl
 
-The installer can install or update `dotman`, download the published dotfiles
-bundle, install Homebrew when missing, install fish through Homebrew, and then
-run `dotman bootstrap` and `dotman deploy`.
+The installer downloads `dotman` and the latest dotfiles bundle. From there, `dotman` handles the rest (Homebrew, fish, /etc/shells, etc.) interactively in the TUI.
 
 For first-time setup, install `dotman` and the published dotfiles bundle from
 the site:
@@ -24,158 +22,134 @@ the site:
 curl -fsSL https://dotfiles.tabsp.com/install | sh
 ```
 
-For unattended setup:
+This runs the new-user wizard inside the TUI: detect platform → install missing
+package manager → clone your dotfiles → plan → confirm → run.
+
+For unattended setup (CI, scripted setup):
 
 ```sh
 curl -fsSL https://dotfiles.tabsp.com/install | sh -s -- --yes
 ```
 
-Fish may live outside the current `PATH` on a fresh machine. The installer
-prints the exact `exec .../fish -l` command for the current terminal, and
-attempts to change the default login shell for future sessions.
-
-When `dotman.yaml` is not present in the current directory, `dotman` falls back
-to `DOTFILES_DIR` and then to the installed bundle in
-`~/.local/share/tabsp-dotfiles`.
-
 ## Usage
 
-Preview the deployment:
+The TUI is the primary interface. `dotman` with no args opens the main menu.
 
 ```sh
-dotman deploy --dry-run
+dotman                  # TUI main menu
+dotman deploy           # TUI: plan → confirm → run deploy
+dotman bootstrap        # TUI: plan → confirm → run bootstrap
+dotman plan             # TUI: show plan only, no execution
+dotman history          # TUI: browse past runs
+dotman run <ulid>       # TUI: replay a past run
+dotman --auto deploy    # headless: plan → auto-confirm → run (for scripts)
 ```
 
-Deploy dotfiles:
+## TUI Keys
 
-```sh
-dotman deploy
-```
-
-Preview bootstrap steps:
-
-```sh
-dotman bootstrap --dry-run
-```
-
-Run bootstrap steps:
-
-```sh
-dotman bootstrap
-```
-
-Skip shell commands such as plugin sync:
-
-```sh
-dotman deploy --except shell
-```
-
-Run only link steps:
-
-```sh
-dotman deploy --only link
-```
-
-## Tools
-
-| Tool | Purpose |
-| ---- | ------- |
-| [fish](https://fishshell.com) | Shell with built-in autosuggestions |
-| [starship](https://starship.rs) | Cross-shell prompt |
-| [direnv](https://direnv.net) | Per-directory environment variables |
-| [mise](https://mise.jdx.dev) | Runtime and tool version manager |
-| [fzf](https://github.com/junegunn/fzf) | Fuzzy finder (files, history, zoxide jump) |
-| [zoxide](https://github.com/ajeetdsouza/zoxide) | Smarter `cd` with directory ranking |
-| [fd](https://github.com/sharkdp/fd) | Fast `find` replacement |
-| [ripgrep](https://github.com/BurntSushi/ripgrep) | Fast `grep` replacement |
-| [eza](https://github.com/eza-community/eza) | Modern `ls` replacement with icons |
-| [bat](https://github.com/sharkdp/bat) | `cat` with syntax highlighting |
-| [tealdeer](https://github.com/dbrgn/tealdeer) | Fast `tldr` client |
-| [btop](https://github.com/aristocratos/btop) | Resource monitor |
-| [fastfetch](https://github.com/fastfetch-cli/fastfetch) | System info display |
-| [dua-cli](https://github.com/Byron/dua-cli) | Disk usage analyzer |
-| [neovim](https://neovim.io) | Editor |
-| [lazygit](https://github.com/jesseduffield/lazygit) | Terminal Git UI |
-| [yazi](https://github.com/sachinsenal/yazi) | Terminal file manager |
-| [tmux](https://github.com/tmux/tmux) | Terminal multiplexer with Catppuccin theme |
-| [ghostty](https://ghostty.org) | GPU-accelerated terminal with Catppuccin Mocha theme |
-| [jq](https://github.com/jqlang/jq) + [yq](https://github.com/mikefarah/yq) | JSON/YAML CLI processors |
-| [ruby](https://www.ruby-lang.org) | Runtime for `try` experiment manager |
-
-All packages are installed via `brew bundle --file packages/Brewfile` during bootstrap. Fish integrates most tools on startup and defines custom functions: `zi` (fzf+zoxide jump), `ff` (fzf file picker), `y` (yazi with auto-cd), `t` (tmux attach/create). See `config/fish/config.fish`.
-
-## Layout
-
-- `bin/`: user scripts linked into `~/.local/bin` (tmux-status, etc.)
-- `config/`: tracked dotfiles for fish, nvim, ghostty, btop, fastfetch, starship, tealdeer, tmux, git
-- `docs/`: setup notes and manual checklists
-- `dotman.yaml`: deploy steps (link configs, create directories, sync derived state)
-- `dotman.bootstrap.yaml`: bootstrap steps (install packages, fonts)
-- `packages/`: Brewfile and platform-specific install helpers
-- `scripts/`: install and static site build scripts
-- `src/`: Rust deployer source
-- `tests/`: CLI integration tests
+| Key | Action |
+| --- | --- |
+| `↑↓` or `j k` | Navigate |
+| `space` | Toggle current step |
+| `a` / `n` | Select all / none |
+| `s` | Save selection to state |
+| `r` | Run |
+| `i` | Detail for current step |
+| `e` | Back to plan view (from result) |
+| `q` or `Esc` | Back / quit |
 
 ## Configuration
 
-Deployment steps live in `dotman.yaml`. Bootstrap steps live in
-`dotman.bootstrap.yaml`.
-
-Supported directives:
-
-- `defaults`
-- `link`
-- `create`
-- `shell`
-- `clean`: planned / dry-run placeholder
-
-Example:
+Deployment steps live in `dotman.yaml` (and optionally `dotman.bootstrap.yaml`
+for bootstrap-specific commands).
 
 ```yaml
-- defaults:
-    link:
-      create: true
-      relink: true
-      relative: true
-    shell:
-      stdout: true
-      stderr: true
+package_managers:
+  macos: brew
+  ubuntu: brew
+  arch: pacman
 
-- link:
-    ~/.config/fish: config/fish
-    ~/.config/nvim: config/nvim
+install: [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship]
 
-- create:
-    - ~/.config/fish/local.d
+links:
+  ~/.config/fish:    config/fish
+  ~/.config/nvim:    config/nvim
+  ~/.config/ghostty: config/ghostty
+  ~/.tmux.conf:      config/tmux.conf
 
-- shell:
-    - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
-      description: Sync fish plugins
-      optional: true
+create:
+  - ~/.config/fish/local.d
+  - ~/Workspace/tries
+
+shell:
+  - command: fish -lc 'fisher update'
+    description: Sync fish plugins
+    optional: true
 ```
 
-Field reference:
+YAML field reference:
 
-- `defaults.link.create`: create missing parent directories for link targets.
-- `defaults.link.relink`: replace an existing symlink when it points somewhere else.
-- `defaults.link.backup`: move an existing conflicting target aside before linking.
-- `defaults.link.relative`: create relative symlinks.
-- `defaults.shell.stdout`: inherit stdout from shell commands.
-- `defaults.shell.stderr`: inherit stderr from shell commands.
-- `link`: maps target paths to source paths. A link item can also use `path` plus
-  per-item `create`, `relink`, `backup`, `relative`, and `if` overrides.
-- `create`: creates directories, following existing symlinked path components.
-- `shell.command`: command to run through `sh -c`.
-- `shell.description`: human-readable label shown in logs.
-- `shell.if`: shell condition that must succeed before the command runs.
-- `shell.optional`: if `true`, a failed command is reported as a warning and
-  later steps continue. Defaults to `false`.
-- `shell.stdout` / `shell.stderr`: per-command output overrides.
-- `clean`: parsed and shown in dry-runs, but non-dry-run cleanup is not implemented yet.
+- `package_managers` — per-platform package manager (used to look up the
+  right install command for each tool). Tools themselves are listed by name
+  in `install:`; the actual install commands live in dotman's internal
+  tool database (TOML, ~20 entries, ships compiled in).
+- `install: [name]` — list of tool names to install. dotman picks the right
+  install command for your platform.
+- `links:` — map of target → source. dotman handles relative/absolute,
+  backup, and relink based on the source state.
+- `create:` — directories to ensure exist.
+- `shell:` — list of shell commands to run. Supports `description`,
+  `optional: true` (warn on failure, don't abort), and `if:` (condition
+  guard).
 
-Deploy is fail-fast for core file operations: link/create failures stop the run.
-Network-sensitive sync commands can be marked with `optional: true` so transient
-failures do not make the whole deploy fail.
+State (per-machine selection) lives at
+`~/.local/share/dotman/state.toml` — first-run defaults are applied
+automatically based on layer strategy (pick-one for terminal/shell/multiplexer,
+all for software/enhancement).
+
+Run logs are at `~/.local/share/dotman/runs/<ulid>.json` and can be
+browsed with `dotman history` or `dotman run <id>`.
+
+## Status (v0.2 alpha)
+
+This is a working rewrite of dotman but not yet production-ready. The
+architecture and core data flow are complete; the items below are known
+gaps that need real-world testing or follow-up work.
+
+### Known bugs
+
+- `dotman --auto plan` fails to parse `dotman.yaml` in real terminal runs
+  (`cargo test config::` passes; needs real shell debugging).
+- E2E Docker test not actually run — `make e2e-linux` is configured but
+  not executed in this iteration.
+
+### Not yet implemented
+
+- **BackupReview screen**: plan stage supports `backup: true` and creates
+  backup paths, but there's no pre-run TUI screen that lists which files
+  will be backed up and asks for confirmation.
+- **FirstRunScreen**: when no `dotman.yaml` is found, dotman errors out.
+  A first-run wizard (auto-install package manager, clone repo) was
+  planned but not implemented.
+- **TUI log streaming**: the RunView shows a placeholder log pane.
+  Live `stdout` from running shell commands is captured by `execute.rs`
+  but not piped into the TUI in real time.
+- **Visual mockups / screenshots**: no PNG mockups in `assets/screenshots/`.
+
+### What works
+
+- 33 unit tests pass (`cargo test`)
+- `cargo build --release` produces a 3.7MB binary
+- `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` clean
+- All 6 TUI screens scaffolded (MainMenu / PlanView / RunView /
+  ResultView / HistoryView / RunReplay) with Catppuccin Mocha theme
+  and Nerd Font icons
+- Tool DB has 17 entries covering the user's actual tools
+- `dotman --auto deploy` runs end-to-end (loads config → builds plan →
+  executes → saves run log)
+- Per-step retry for install actions (5s/10s/20s exponential backoff)
+- `dotman history` and `dotman run <ulid>` browse and replay past runs
+- State persistence to `~/.local/share/dotman/state.toml`
 
 ## Local Overrides
 
@@ -199,31 +173,4 @@ make test
 make ci
 ```
 
-Run the real Linux install flow in Docker:
-
-```sh
-make e2e-linux
-make e2e-linux E2E_ARGS="--local --inspect --keep"
-```
-
-The E2E script builds `dotman` from the current worktree, serves a local
-installer/manifest/bundle inside Docker, runs the install script, and verifies
-the installed dotfiles. `--inspect` opens the finished container as the `tester`
-user for manual checks.
-
-## Publishing
-
-The website build publishes the installer and runtime bundle:
-
-```sh
-scripts/build-site.sh
-```
-
-Use this for Vercel:
-
-- Build Command: `scripts/build-site.sh`
-- Output Directory: `public`
-
-`public/manifest.json` points at `bundle/latest.tar.gz` on
-`dotfiles.tabsp.com` and at dotman binaries from the latest GitHub Release.
-Tagging `v*` runs the release workflow that builds those dotman binaries.
+`make e2e-linux` runs the real Linux install flow in Docker.

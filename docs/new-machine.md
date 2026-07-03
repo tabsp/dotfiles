@@ -114,7 +114,7 @@ exec /home/linuxbrew/.linuxbrew/bin/fish -l
 先预览：
 
 ```fish
-dotman bootstrap --dry-run
+dotman --auto bootstrap 2>&1 | head -50
 ```
 
 确认无误后执行：
@@ -123,7 +123,7 @@ dotman bootstrap --dry-run
 dotman bootstrap
 ```
 
-`bootstrap` 会读取 `dotman.bootstrap.yaml`：
+`bootstrap` 会读取 `dotman.yaml` 的 `install:` 列表：
 
 - 使用 `packages/Brewfile` 安装 Homebrew 管理的 CLI 工具和 macOS cask。
 - 如果 `try` 尚不可用，通过 Homebrew 的 Ruby 安装 `try-cli`。
@@ -136,8 +136,10 @@ dotman bootstrap
 先预览：
 
 ```fish
-dotman deploy --dry-run
+dotman plan
 ```
+
+`dotman plan` 在 TUI 里显示 plan 但不执行。检查无误后：
 
 确认无误后执行：
 

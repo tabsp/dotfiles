@@ -211,13 +211,13 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
 
   run_as_tester 'if ! command -v cargo >/dev/null 2>&1; then curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable; fi'
   run_as_tester 'cd /work/repo && cargo build --release --locked --target-dir /work/target'
-  /work/target/release/dotman deploy --help 2>&1 | grep -q summary || { printf 'error: built dotman missing --summary flag\n' >&2; exit 1; }
+  /work/target/release/dotman deploy --help 2>&1 | grep -q "Open TUI" || { printf 'error: built dotman deploy subcommand missing\n' >&2; exit 1; }
   tar -czf "$site_dir/release/dotman-$target.tar.gz" -C /work/target/release dotman
   sha256sum "$site_dir/release/dotman-$target.tar.gz" > "$site_dir/release/dotman-$target.tar.gz.sha256"
-  # Verify the packaged binary has --summary
+  # Verify the packaged binary has the deploy subcommand
   mkdir -p /tmp/e2e-verify
   tar -xzf "$site_dir/release/dotman-$target.tar.gz" -C /tmp/e2e-verify
-  /tmp/e2e-verify/dotman deploy --help 2>&1 | grep -q summary || { printf 'error: packaged dotman missing --summary\n' >&2; exit 1; }
+  /tmp/e2e-verify/dotman deploy --help 2>&1 | grep -q "Open TUI" || { printf 'error: packaged dotman deploy subcommand missing\n' >&2; exit 1; }
   rm -rf /tmp/e2e-verify
   # Pre-install dotman so install skips HTTP download
   run_as_tester 'mkdir -p "$HOME/.local/bin" && cp /work/target/release/dotman "$HOME/.local/bin/dotman"'
@@ -314,8 +314,8 @@ export PATH="$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.li
 verify_log=/work/verify.log
 
 test -x "$HOME/.local/bin/dotman"
-if ! "$HOME/.local/bin/dotman" deploy --help 2>&1 | grep -q summary; then
-  printf 'error: installed dotman missing --summary\n' >&2
+if ! "$HOME/.local/bin/dotman" deploy --help 2>&1 | grep -q "Open TUI"; then
+  printf 'error: installed dotman deploy subcommand missing\n' >&2
   exit 1
 fi
 dotman --version >"$verify_log"
@@ -328,8 +328,8 @@ fish_path=$(command -v fish)
 test "$(getent passwd tester | cut -d: -f7)" = "$fish_path"
 
 cd "$HOME/.local/share/tabsp-dotfiles"
-dotman bootstrap --dry-run >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
-dotman deploy --dry-run >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
+dotman --auto bootstrap >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
+dotman --auto deploy >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
 
 test -e "$HOME/.config/fish"
 test -e "$HOME/.config/nvim"

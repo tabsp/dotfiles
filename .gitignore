@@ -27,3 +27,4 @@ config/ghostty/config.local
 
 # Superpowers working documents
 docs/superpowers/
+.superpowers/

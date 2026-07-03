@@ -1,0 +1,203 @@
+# Tool database. ~20 entries covering the user's actual tools.
+# Each tool has: name, binary (for command -v), layer, per-platform install commands.
+#
+# Adding a tool: append a [[tools]] block. Skills/agents can edit this file.
+
+[[tools]]
+name = "ghostty"
+binary = "ghostty"
+layer = "terminal"
+
+[tools.platforms]
+macos = "brew install --cask ghostty"
+
+[[tools]]
+name = "kitty"
+binary = "kitty"
+layer = "terminal"
+
+[tools.platforms]
+macos = "brew install --cask kitty"
+
+[[tools]]
+name = "fish"
+binary = "fish"
+layer = "shell"
+
+[tools.platforms]
+macos = "brew install fish"
+ubuntu = "brew install fish"
+debian = "brew install fish"
+arch = "sudo pacman -S fish"
+fedora = "sudo dnf install fish"
+
+[[tools]]
+name = "tmux"
+binary = "tmux"
+layer = "multiplexer"
+
+[tools.platforms]
+macos = "brew install tmux"
+ubuntu = "brew install tmux"
+debian = "brew install tmux"
+arch = "sudo pacman -S fish"
+fedora = "sudo dnf install tmux"
+
+[[tools]]
+name = "neovim"
+binary = "nvim"
+layer = "software"
+
+[tools.platforms]
+macos = "brew install neovim"
+ubuntu = "brew install neovim"
+debian = "brew install neovim"
+arch = "sudo pacman -S neovim"
+fedora = "sudo dnf install neovim"
+
+[[tools]]
+name = "lazygit"
+binary = "lazygit"
+layer = "software"
+
+[tools.platforms]
+macos = "brew install lazygit"
+ubuntu = "brew install lazygit"
+debian = "brew install lazygit"
+arch = "sudo pacman -S lazygit"
+fedora = "sudo dnf install lazygit"
+
+[[tools]]
+name = "btop"
+binary = "btop"
+layer = "software"
+
+[tools.platforms]
+macos = "brew install btop"
+ubuntu = "brew install btop"
+debian = "brew install btop"
+arch = "sudo pacman -S btop"
+fedora = "sudo dnf install btop"
+
+[[tools]]
+name = "fastfetch"
+binary = "fastfetch"
+layer = "software"
+
+[tools.platforms]
+macos = "brew install fastfetch"
+ubuntu = "brew install fastfetch"
+debian = "brew install fastfetch"
+arch = "sudo pacman -S fastfetch"
+fedora = "sudo dnf install fastfetch"
+
+[[tools]]
+name = "yazi"
+binary = "yazi"
+layer = "software"
+
+[tools.platforms]
+macos = "brew install yazi"
+ubuntu = "brew install yazi"
+debian = "brew install yazi"
+arch = "sudo pacman -S yazi"
+
+[[tools]]
+name = "ripgrep"
+binary = "rg"
+layer = "enhancement"
+
+[tools.platforms]
+macos = "brew install ripgrep"
+ubuntu = "brew install ripgrep"
+debian = "brew install ripgrep"
+arch = "sudo pacman -S ripgrep"
+fedora = "sudo dnf install ripgrep"
+
+[[tools]]
+name = "fd"
+binary = "fd"
+layer = "enhancement"
+
+[tools.platforms]
+macos = "brew install fd"
+ubuntu = "brew install fd"
+debian = "sudo apt install fd-find"
+arch = "sudo pacman -S fd"
+fedora = "sudo dnf install fd-find"
+
+[[tools]]
+name = "bat"
+binary = "bat"
+layer = "enhancement"
+
+[tools.platforms]
+macos = "brew install bat"
+ubuntu = "brew install bat"
+debian = "sudo apt install bat"
+arch = "sudo pacman -S bat"
+fedora = "sudo dnf install bat"
+
+[[tools]]
+name = "eza"
+binary = "eza"
+layer = "enhancement"
+
+[tools.platforms]
+macos = "brew install eza"
+ubuntu = "brew install eza"
+debian = "brew install eza"
+arch = "sudo pacman -S eza"
+
+[[tools]]
+name = "jq"
+binary = "jq"
+layer = "enhancement"
+
+[tools.platforms]
+macos = "brew install jq"
+ubuntu = "sudo apt install jq"
+debian = "sudo apt install jq"
+arch = "sudo pacman -S jq"
+fedora = "sudo dnf install jq"
+
+[[tools]]
+name = "yq"
+binary = "yq"
+layer = "enhancement"
+
+[tools.platforms]
+macos = "brew install yq"
+ubuntu = "brew install yq"
+arch = "sudo pacman -S yq"
+
+[[tools]]
+name = "starship"
+binary = "starship"
+layer = "enhancement"
+
+[tools.platforms]
+macos = "brew install starship"
+ubuntu = "brew install starship"
+debian = "brew install starship"
+arch = "sudo pacman -S starship"
+fedora = "sudo dnf install starship"
+
+[[tools]]
+name = "tealdeer"
+binary = "tldr"
+layer = "enhancement"
+
+[tools.platforms]
+macos = "brew install tealdeer"
+ubuntu = "brew install tealdeer"
+debian = "sudo apt install tealdeer"
+arch = "sudo pacman -S tealdeer"
+fedora = "sudo dnf install tealdeer"
+
+[[tools]]
+name = "font-maple-mono-nf-cn"
+binary = "font-maple-mono-nf-cn"
+layer = "enhancement"
+kind = "font"
+source_url = "https://github.com/subframe7536/Maple-font/releases/latest/download/MapleMono-NF-CN-unhinted.zip"

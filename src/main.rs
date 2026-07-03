@@ -1,54 +1,22 @@
-mod deploy;
+#![allow(dead_code)] // Phase 0: many placeholder functions not yet wired in
+
+use clap::Parser;
+
+mod cli;
+mod config;
+mod execute;
+mod headless;
+mod icons;
+mod model;
+mod ops;
+mod package_managers;
 mod path;
+mod plan;
+mod store;
+mod theme;
+mod tui;
 
-use clap::{Parser, Subcommand, ValueEnum};
-use std::path::{Path, PathBuf};
-
-#[derive(Debug, Parser)]
-#[command(name = "dotman")]
-#[command(version)]
-#[command(about = "Small dotfiles deployer")]
-struct Cli {
-    #[arg(long, value_enum, default_value_t = ColorChoice::Auto, global = true)]
-    color: ColorChoice,
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum ColorChoice {
-    Auto,
-    Always,
-    Never,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    Deploy {
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long, value_delimiter = ',')]
-        only: Vec<deploy::Directive>,
-        #[arg(long, value_delimiter = ',')]
-        except: Vec<deploy::Directive>,
-        #[arg(long)]
-        config: Option<String>,
-        #[arg(long)]
-        summary: bool,
-    },
-    Bootstrap {
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long, value_delimiter = ',')]
-        only: Vec<deploy::Directive>,
-        #[arg(long, value_delimiter = ',')]
-        except: Vec<deploy::Directive>,
-        #[arg(long)]
-        config: Option<String>,
-        #[arg(long)]
-        summary: bool,
-    },
-}
+use cli::{Cli, Command};
 
 fn main() {
     if let Err(err) = run() {
@@ -58,57 +26,54 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
+    init_tracing();
+
     let cli = Cli::parse();
+
     match cli.command {
-        Command::Deploy {
-            dry_run,
-            only,
-            except,
-            config,
-            summary,
-        } => {
-            let config = resolve_config_path(config, "dotman.yaml")?;
-            deploy::run_deploy(
-                "deploy", &config, dry_run, &only, &except, cli.color, summary,
-            )
-        }
-        Command::Bootstrap {
-            dry_run,
-            only,
-            except,
-            config,
-            summary,
-        } => {
-            let config = resolve_config_path(config, "dotman.bootstrap.yaml")?;
-            deploy::run_deploy(
-                "bootstrap",
-                &config,
-                dry_run,
-                &only,
-                &except,
-                cli.color,
-                summary,
-            )
-        }
+        Some(Command::Deploy) | None => run_tui_or_headless(&cli, Mode::Deploy),
+        Some(Command::Bootstrap) => run_tui_or_headless(&cli, Mode::Bootstrap),
+        Some(Command::Plan) => run_tui_or_headless(&cli, Mode::Plan),
+        Some(Command::History) => run_tui_or_headless(&cli, Mode::History),
+        Some(Command::Run { ref id }) => run_tui_or_headless(&cli, Mode::Run(id.clone())),
+        Some(Command::NewLink { target, source }) => add_link(&target, &source),
     }
 }
 
-fn resolve_config_path(config: Option<String>, default_file: &str) -> Result<PathBuf, String> {
-    if let Some(config) = config {
-        return Ok(PathBuf::from(config));
-    }
+#[derive(Debug, Clone)]
+enum Mode {
+    Deploy,
+    Bootstrap,
+    Plan,
+    History,
+    Run(String),
+}
 
-    let local_config = Path::new(default_file);
-    if local_config.exists() {
-        return Ok(local_config.to_path_buf());
+fn run_tui_or_headless(cli: &Cli, mode: Mode) -> Result<(), String> {
+    if cli.auto {
+        headless::run(mode)
+    } else if is_tty() {
+        tui::run(mode)
+    } else {
+        eprintln!("warning: not a TTY, falling back to headless mode");
+        headless::run(mode)
     }
+}
 
-    if let Some(dotfiles_dir) = std::env::var_os("DOTFILES_DIR") {
-        return Ok(PathBuf::from(dotfiles_dir).join(default_file));
-    }
+fn is_tty() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
 
-    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?;
-    Ok(PathBuf::from(home)
-        .join(".local/share/tabsp-dotfiles")
-        .join(default_file))
+fn init_tracing() {
+    use tracing_subscriber::{EnvFilter, fmt};
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("dotman=info"));
+    let _ = fmt().with_env_filter(filter).try_init();
+}
+
+fn add_link(target: &str, source: &str) -> Result<(), String> {
+    // Phase 8: real implementation
+    eprintln!("would add link: {target} -> {source}");
+    Ok(())
 }

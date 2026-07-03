@@ -36,41 +36,82 @@ curl -fsSL https://dotfiles.tabsp.com/install | sh -s -- --yes
 
 ## 使用
 
-预览部署计划：
+TUI 是主入口。`dotman` 无参数打开主菜单：
 
 ```sh
-dotman deploy --dry-run
+dotman                  # TUI 主菜单
+dotman deploy           # TUI: plan → 确认 → 跑 deploy
+dotman bootstrap        # TUI: plan → 确认 → 跑 bootstrap
+dotman plan             # TUI: 只看 plan
+dotman history          # TUI: 历史 run
+dotman run <ulid>       # TUI: 回放某次 run
+dotman --auto deploy    # headless: plan → 自动确认 → 跑（脚本用）
 ```
 
-部署 dotfiles：
+只查看 plan 不执行：
 
 ```sh
-dotman deploy
+dotman plan
 ```
 
-预览 bootstrap 步骤：
+Headless 模式（脚本用）：
 
 ```sh
-dotman bootstrap --dry-run
+dotman --auto deploy
 ```
 
-运行 bootstrap 步骤：
+## TUI 键位
 
-```sh
-dotman bootstrap
+| 键 | 动作 |
+| --- | --- |
+| `↑↓` 或 `j k` | 上下导航 |
+| `space` | 切换当前 step |
+| `a` / `n` | 全选 / 全不选 |
+| `s` | 把 selection 存到 state |
+| `r` | 跑 |
+| `i` | 看当前 step 的 detail |
+| `e` | 从 result 回到 plan view |
+| `q` 或 `Esc` | 退回 / 退出 |
+
+## 配置
+
+部署步骤写在 `dotman.yaml`（和可选的 `dotman.bootstrap.yaml`，专门放 bootstrap 命令）：
+
+```yaml
+package_managers:
+  macos: brew
+  ubuntu: brew
+  arch: pacman
+
+install: [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship]
+
+links:
+  ~/.config/fish:    config/fish
+  ~/.config/nvim:    config/nvim
+  ~/.config/ghostty: config/ghostty
+  ~/.tmux.conf:      config/tmux.conf
+
+create:
+  - ~/.config/fish/local.d
+  - ~/Workspace/tries
+
+shell:
+  - command: fish -lc 'fisher update'
+    description: Sync fish plugins
+    optional: true
 ```
 
-跳过 shell 命令，例如插件同步：
+字段说明：
 
-```sh
-dotman deploy --except shell
-```
+- `package_managers` — 每平台包管理器（用来查工具的安装命令）。工具名本身列在 `install:` 里；具体的安装命令在 dotman 内部的工具库（TOML，约 20 条，编译进 binary）。
+- `install: [name]` — 要装的工具名列表。dotman 自动选对平台的安装命令。
+- `links:` — target → source 映射。dotman 处理相对/绝对路径、备份、relink 等情况。
+- `create:` — 确保存在的目录。
+- `shell:` — 要跑的 shell 命令列表。支持 `description`、`optional: true`（失败只警告不中断）、`if:`（条件守卫）。
 
-只运行链接步骤：
+State（per-machine selection）在 `~/.local/share/dotman/state.toml`——首次跑按 layer 策略自动应用默认（terminal/shell/multiplexer 是 pick-one，software/enhancement 是 all）。
 
-```sh
-dotman deploy --only link
-```
+Run log 在 `~/.local/share/dotman/runs/<ulid>.json`，可以用 `dotman history` 或 `dotman run <id>` 浏览。
 
 ## 工具
 
@@ -203,6 +244,34 @@ make e2e-linux E2E_ARGS="--local --inspect --keep"
 E2E 脚本会基于当前 worktree 构建 `dotman`，在 Docker 内提供本地
 installer/manifest/bundle，执行安装脚本，并验证安装后的 dotfiles。`--inspect` 会以
 `tester` 用户进入完成后的容器，方便人工验收。
+
+## 状态（v0.2 alpha）
+
+这是 dotman 的工作版本重写，但还**没到生产可用**。架构和核心数据流完整；下面列出的是已知缺口，需要真实环境测试或后续工作。
+
+### 已知 bug
+
+- `dotman --auto plan` 在真实 shell 跑时解析 `dotman.yaml` 失败（`cargo test config::` 通过；需要真实终端调试）
+- E2E Docker 测试还没真跑过 — `make e2e-linux` 配好了但本轮没执行
+
+### 还没做的
+
+- **BackupReview 屏**：plan 阶段支持 `backup: true` 并生成备份路径，但没有 run 前的 TUI 确认页（列出哪些文件要备份 + 让用户确认）
+- **FirstRunScreen**：找不到 `dotman.yaml` 时直接报错。首跑向导（自动装包管理器 + clone 仓库）plan 里有但没做
+- **TUI log 流式输出**：RunView 显示的是占位 log pane。shell 命令的实时 stdout 在 `execute.rs` 里抓了，但没接进 TUI
+- **visual mockup 截图**：`assets/screenshots/` 还没有 PNG
+
+### 能跑的
+
+- 33 个 unit tests 通过（`cargo test`）
+- `cargo build --release` 产出 3.7MB binary
+- `cargo clippy --all-targets -- -D warnings` 和 `cargo fmt --check` 干净
+- 6 个 TUI 屏都搭好（MainMenu / PlanView / RunView / ResultView / HistoryView / RunReplay），Catppuccin Mocha 主题 + Nerd Font 图标
+- 工具 db 17 条，覆盖用户实际用的所有工具
+- `dotman --auto deploy` 端到端跑通（读 config → build plan → 执行 → 存 run log）
+- install 步的 retry（5s/10s/20s exponential backoff）
+- `dotman history` 和 `dotman run <ulid>` 浏览 / 回放历史
+- State 持久化到 `~/.local/share/dotman/state.toml`
 
 ## 发布
 

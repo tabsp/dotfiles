@@ -10,12 +10,8 @@ help:
 	@printf '%s\n' \
 		'Usage:' \
 		'  make build                       Build dotman' \
-		'  make dev-deploy                  Deploy with target/debug/dotman' \
-		'  make dev-deploy DRY_RUN=1        Preview deployment with target/debug/dotman' \
-		'  make dev-deploy ONLY=link        Run only a directive' \
-		'  make dev-deploy EXCEPT=shell     Skip a directive' \
-		'  make dev-bootstrap               Run bootstrap with target/debug/dotman' \
-		'  make dev-bootstrap DRY_RUN=1     Preview bootstrap with target/debug/dotman' \
+		'  make dev-deploy                  Deploy with target/debug/dotman (auto mode, headless)' \
+		'  make dev-bootstrap               Run bootstrap with target/debug/dotman (auto mode, headless)' \
 		'  make e2e-image                   Build the Docker image used by E2E tests' \
 		'  make e2e-linux                   Run real Linux install E2E in Docker' \
 		'  make e2e-linux E2E_ARGS="--manual --keep"  Manual E2E testing' \
@@ -35,10 +31,10 @@ $(DOTMAN): Cargo.toml Cargo.lock $(RUST_SOURCES)
 build: $(DOTMAN)
 
 dev-deploy: $(DOTMAN)
-	$(DOTMAN) deploy $(if $(filter 1,$(DRY_RUN)),--dry-run,) $(if $(ONLY),--only $(ONLY),) $(if $(EXCEPT),--except $(EXCEPT),)
+	$(DOTMAN) --auto deploy
 
 dev-bootstrap: $(DOTMAN)
-	$(DOTMAN) bootstrap $(if $(filter 1,$(DRY_RUN)),--dry-run,) $(if $(ONLY),--only $(ONLY),) $(if $(EXCEPT),--except $(EXCEPT),)
+	$(DOTMAN) --auto bootstrap
 
 e2e-image:
 	docker build -t $(E2E_IMAGE) -f scripts/e2e-image.dockerfile scripts/
