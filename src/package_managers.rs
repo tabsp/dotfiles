@@ -8,7 +8,6 @@ use std::path::PathBuf;
 pub enum Os {
     Mac,
     Linux,
-    Unknown,
 }
 
 pub fn detect_os() -> Os {
@@ -24,7 +23,6 @@ pub fn resolve_pkg_mgr_name(cfg: &PackageManagerConfig) -> Option<String> {
     match detect_os() {
         Os::Mac => cfg.macos.clone(),
         Os::Linux => detect_distro_pkg_mgr(cfg),
-        Os::Unknown => None,
     }
 }
 
@@ -87,6 +85,5 @@ mod tests {
     fn os_debug_roundtrip() {
         assert_eq!(format!("{:?}", Os::Mac), "Mac");
         assert_eq!(format!("{:?}", Os::Linux), "Linux");
-        assert_eq!(format!("{:?}", Os::Unknown), "Unknown");
     }
 }

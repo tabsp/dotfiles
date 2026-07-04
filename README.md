@@ -9,45 +9,51 @@ It uses a flat YAML config to install software, link config files, and run setup
 
 ![Terminal setup preview](assets/screenshots/terminal-preview.png)
 
-## Prerequisites
+## Quick Start
 
-- curl
-
-The installer downloads `dotman` and the latest dotfiles bundle. Full
-first-run automation (package manager, fish, login shell) is still planned;
-v0.2 alpha focuses on the TUI Plan → Confirm → Run flow.
-
-For first-time setup, install `dotman` and the published dotfiles bundle from
-the site:
+Install `dotman` via Homebrew (or any other method):
 
 ```sh
-curl -fsSL https://dotfiles.tabsp.com/install | sh
+brew install tabsp/tap/dotman
 ```
 
-This installs the binary and expands the bundle to
-`~/.local/share/tabsp-dotfiles`.
+Then run it. The first time, dotman will auto-initialize with the default dotfiles repo:
+
+```sh
+dotman
+```
+
+This clones `https://github.com/tabsp/dotfiles.git` to `~/.local/share/dotman/repos/main`,
+loads the deployment config from `dotman.yaml`, and opens the TUI plan view.
 
 For unattended setup (CI, scripted setup):
 
 ```sh
-curl -fsSL https://dotfiles.tabsp.com/install | sh -s -- --yes
+dotman deploy --headless
 ```
 
-`--yes` verifies the installed bundle with `dotman --auto plan`; it does not
-run a full deploy yet.
+For a custom dotfiles repo:
+
+```sh
+dotman init https://github.com/you/dotfiles.git
+dotman deploy
+```
 
 ## Usage
 
-The TUI is the primary interface. `dotman` with no args opens the main menu.
-
 ```sh
-dotman                  # TUI main menu
-dotman deploy           # TUI: plan → confirm → run deploy
-dotman bootstrap        # TUI: plan → confirm → run bootstrap
-dotman plan             # TUI: show plan only, no execution
-dotman history          # TUI: browse past runs
-dotman run <ulid>       # TUI: replay a past run
-dotman --auto deploy    # headless: plan → auto-confirm → run (for scripts)
+dotman                       # TUI main menu (auto-inits on first run)
+dotman deploy                # TUI: sync → plan → confirm → run
+dotman plan                  # TUI: show plan only, no execution
+dotman init [repo]           # initialize dotfiles profile
+dotman sync                  # git pull current profile
+dotman status                # show profile and repo state
+dotman doctor                # check prerequisites
+dotman profile list          # list configured profiles
+dotman history               # TUI: browse past runs
+dotman run <ulid>            # TUI: replay a past run
+dotman deploy --headless     # headless: non-interactive deploy
+dotman plan --headless       # headless: emit JSON plan to stdout
 ```
 
 ## TUI Keys
@@ -57,22 +63,23 @@ dotman --auto deploy    # headless: plan → auto-confirm → run (for scripts)
 | `↑↓` or `j k` | Navigate |
 | `space` | Toggle current step |
 | `a` / `n` | Select all / none |
+| `1-6` | Fold/unfold layer |
 | `s` | Save selection to state |
 | `r` | Run |
-| `i` | Detail for current step |
 | `e` | Back to plan view (from result) |
 | `q` or `Esc` | Back / quit |
 
 ## Configuration
 
-Deployment steps live in `dotman.yaml` (and optionally `dotman.bootstrap.yaml`
-for bootstrap-specific commands).
+Deployment steps live in `dotman.yaml` in your dotfiles repo:
 
 ```yaml
 package_managers:
   macos: brew
   ubuntu: brew
   arch: pacman
+
+auto_install_pkg_manager: true
 
 install: [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship]
 
@@ -94,69 +101,71 @@ shell:
 
 YAML field reference:
 
-- `package_managers` — per-platform package manager (used to look up the
-  right install command for each tool). Tools themselves are listed by name
-  in `install:`; the actual install commands live in dotman's internal
-  tool database (TOML, ~20 entries, ships compiled in).
+- `package_managers` — per-platform package manager.
+- `auto_install_pkg_manager` — if true, attempts to install the package
+  manager itself (e.g. Homebrew) before any install steps.
 - `install: [name]` — list of tool names to install. dotman picks the right
-  install command for your platform.
+  install command for your platform from its internal tool database.
 - `links:` — map of target → source. dotman handles relative/absolute,
-  backup, and relink based on the source state.
+  backup, and relink based on source state.
 - `create:` — directories to ensure exist.
-- `shell:` — list of shell commands to run. Supports `description`,
-  `optional: true` (warn on failure, don't abort), and `if:` (condition
-  guard).
+- `shell:` — list of shell commands. Supports `description`,
+  `optional: true`, and `if:` (condition guard).
+
+Profile configuration (repo URL, branch, checkout path, auto-sync) lives at
+`~/.config/dotman/config.toml`. dotman manages this automatically — you
+don't need to create or edit it by hand.
 
 State (per-machine selection) lives at
 `~/.local/share/dotman/state.toml` — first-run defaults are applied
-automatically based on layer strategy (pick-one for terminal/shell/multiplexer,
-all for software/enhancement).
+automatically based on layer strategy.
 
 Run logs are at `~/.local/share/dotman/runs/<ulid>.json` and can be
 browsed with `dotman history` or `dotman run <id>`.
 
-## Status (v0.2 alpha)
+## How It Works
 
-This is a working rewrite of dotman but not yet production-ready. The
-architecture and core data flow are complete; the items below are known
-gaps that need real-world testing or follow-up work.
+The deployment pipeline is:
 
-### Known bugs
+```
+resolve profile → sync repo (git pull) → load dotman.yaml → build plan → confirm → execute → save history
+```
 
-- No known blocking bug after local unit/lint checks and Docker E2E smoke.
+dotman's profile system manages the dotfiles repo itself (URL, branch, clone
+path, auto-sync). The deployment config (`dotman.yaml`) only describes *what*
+to deploy — installs, links, creates, shell commands.
 
-### Not yet implemented
+Auto-init triggers automatically when no profile or config is found. In
+headless mode all defaults are used; in interactive mode you're prompted to
+confirm.
 
-- **FirstRunScreen**: when no `dotman.yaml` is found, dotman errors out.
-  A first-run wizard (auto-install package manager, clone repo) was
-  planned but not implemented.
-- **Subprocess live pipe**: RunView receives execution events and captured
-  command output, but long-running subprocess stdout/stderr is still delivered
-  after each action completes rather than line-by-line while the process runs.
-- **Visual mockups / screenshots**: no PNG mockups in `assets/screenshots/`.
+## Status
 
 ### What works
 
-- 39 unit tests pass (`cargo test`)
-- `cargo build --release` produces a 3.7MB binary
+- 80 tests pass (`cargo test`)
+- `cargo build --release` produces a ~4MB binary
 - `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` clean
-- TUI flow includes MainMenu / PlanView / ConfirmView / RunView /
-  ResultView / HistoryView / RunReplay with Catppuccin Mocha theme
-  and Nerd Font icons
-- Explicit TUI subcommands open their target screens directly
+- TUI: MainMenu / PlanView / ConfirmView / RunView / ResultView /
+  HistoryView / RunReplay with Catppuccin Mocha theme and Nerd Font icons
+- First-run auto-init (clone repo, write profile, load config)
+- Profile management (add/remove/list, multiple dotfiles repos)
+- Git bootstrap (auto-install git on macOS/Linux in headless mode with
+  `--bootstrap-git`)
+- Headless mode (`--headless`) for scripts, CI, and remote bootstrap
 - Plan selections persist to `~/.local/share/dotman/state.toml`
-- RunView shows execution events, captured command output, and supports
-  cooperative abort between actions
+- RunView shows execution events, live streaming stdout/stderr from
+  subprocesses, with abort that kills the current process group
 - Tool DB has 17 entries covering the user's actual tools
-- `dotman --auto plan` parses the real `dotman.yaml` and emits JSON
-- `dotman --auto deploy` runs end-to-end (loads config → builds plan →
-  executes → saves run log)
+- `dotman plan --headless` emits JSON
+- `dotman deploy --headless` runs end-to-end
 - Per-step retry for install actions (5s/10s/20s exponential backoff)
-- `dotman new-link <target> <source>` updates the `links:` map in
-  `dotman.yaml`
-- `make e2e-linux` passes the installer/bundle/plan Docker smoke test
+- `dotman new-link <target> <source>` updates `dotman.yaml`
 - `dotman history` and `dotman run <ulid>` browse and replay past runs
-- State persistence to `~/.local/share/dotman/state.toml`
+
+### Not yet implemented
+
+- E2E coverage for early bootstrap and auto-clone is still in progress.
 
 ## Local Overrides
 
@@ -179,5 +188,3 @@ make lint
 make test
 make ci
 ```
-
-`make e2e-linux` runs the real Linux install flow in Docker.

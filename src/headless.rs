@@ -1,14 +1,19 @@
+//! Headless runner (--headless mode, no TUI).
+//!
+//! Non-interactive execution: uses safe defaults, fails on ambiguity.
+//! Suitable for scripts, CI, new machine automation, and remote bootstrap.
+
+use crate::cli::Mode;
 use crate::config;
 use crate::execute;
-use crate::model::{Mode as PlanMode, Run};
+use crate::execute::ExecuteEvent;
+use crate::model::{Mode as PlanMode, OutputStream, Run};
 use crate::plan;
 use crate::store;
 use std::path::PathBuf;
 
-use crate::Mode;
-
-pub fn run(mode: Mode) -> Result<(), String> {
-    let config_path = find_config_path().map_err(|e| e.to_string())?;
+/// Run with a resolved config path (for plan/deploy commands).
+pub fn run_with_mode(config_path: PathBuf, mode: Mode) -> Result<(), String> {
     let cfg = config::load(&config_path).map_err(|e| e.to_string())?;
 
     match mode {
@@ -18,20 +23,58 @@ pub fn run(mode: Mode) -> Result<(), String> {
             println!("{json}");
             Ok(())
         }
-        Mode::History => run_history(),
-        Mode::Run(_) => Err("dotman run <id> requires TUI".into()),
-        Mode::Menu | Mode::Deploy | Mode::Bootstrap => run_full(&cfg, mode),
+        Mode::Deploy => run_full(&cfg),
+        Mode::Menu => Err(
+            "headless mode requires an explicit subcommand (deploy, plan, sync, status, doctor). \
+             run `dotman --help` for available commands"
+                .into(),
+        ),
+        _ => Err(format!("mode {mode:?} requires TUI")),
     }
 }
 
-fn run_full(cfg: &config::Config, mode: Mode) -> Result<(), String> {
-    let plan_mode = match mode {
-        Mode::Menu | Mode::Deploy => PlanMode::Deploy,
-        Mode::Bootstrap => PlanMode::Bootstrap,
-        _ => unreachable!(),
-    };
-    let plan = plan::build(cfg, plan_mode).map_err(|e| e.to_string())?;
-    let run = execute::execute(&plan, cfg).map_err(|e| e.to_string())?;
+/// Run without a config (for history commands that don't need config).
+pub fn run_no_config(mode: Mode) -> Result<(), String> {
+    match mode {
+        Mode::History => run_history(),
+        _ => Err(format!("mode {mode:?} requires config")),
+    }
+}
+
+fn run_full(cfg: &config::Config) -> Result<(), String> {
+    let plan = plan::build(cfg, PlanMode::Deploy).map_err(|e| e.to_string())?;
+    let run = execute::execute_with_events(
+        &plan,
+        cfg,
+        |event| match event {
+            ExecuteEvent::Output { item, stream, line } => {
+                let prefix = match stream {
+                    OutputStream::Stdout => "stdout",
+                    OutputStream::Stderr => "stderr",
+                    OutputStream::Action => "action",
+                };
+                println!("[{item} {prefix}] {line}");
+            }
+            ExecuteEvent::ActionMessage { item, message } => {
+                println!("[{item} action] {message}");
+            }
+            ExecuteEvent::ItemStarted { name, .. } => {
+                println!("[dotman] started {name}");
+            }
+            ExecuteEvent::ItemFinished { name, status, .. } => {
+                println!("[dotman] finished {name}: {status:?}");
+            }
+            ExecuteEvent::Aborted => {
+                println!("[dotman] run aborted");
+            }
+            ExecuteEvent::ActionStarted { .. } => {
+                // Headless: action starts are implicit from the output that follows.
+            }
+        },
+        || false,
+    )
+    .map_err(|e| e.to_string())?;
+
     let saved = store::save(&run).map_err(|e| e.to_string())?;
     print_summary(&run, &saved);
     match run.status {
@@ -56,33 +99,6 @@ fn run_history() -> Result<(), String> {
         );
     }
     Ok(())
-}
-
-fn find_config_path() -> anyhow::Result<PathBuf> {
-    // Order: cwd/dotman.yaml, DOTFILES_DIR/dotman.yaml, ~/.local/share/tabsp-dotfiles/dotman.yaml.
-    let candidates = [
-        PathBuf::from("dotman.yaml"),
-        PathBuf::from("dotman.bootstrap.yaml"),
-    ];
-    for c in &candidates {
-        if c.exists() {
-            return Ok(c.clone());
-        }
-    }
-    if let Ok(dir) = std::env::var("DOTFILES_DIR") {
-        let p = PathBuf::from(dir).join("dotman.yaml");
-        if p.exists() {
-            return Ok(p);
-        }
-    }
-    let home = std::env::var("HOME").unwrap_or_default();
-    let p = PathBuf::from(home)
-        .join(".local/share/tabsp-dotfiles")
-        .join("dotman.yaml");
-    if p.exists() {
-        return Ok(p);
-    }
-    anyhow::bail!("no dotman.yaml found in any standard location")
 }
 
 fn print_summary(run: &Run, saved: &std::path::Path) {
@@ -112,7 +128,6 @@ mod tests {
     fn print_summary_does_not_panic() {
         let run = Run {
             id: "test".into(),
-            plan_id: "test".into(),
             mode: crate::model::Mode::Deploy,
             started_at: "2026-01-01T00:00:00Z".into(),
             finished_at: Some("2026-01-01T00:01:00Z".into()),
@@ -127,10 +142,10 @@ mod tests {
                 duration_ms: Some(100),
                 attempts: 1,
                 error: None,
+                output: vec![],
             }],
         };
         let saved = std::path::Path::new("/tmp/test-run.json");
-        // Should not panic — just prints to stdout
         print_summary(&run, saved);
     }
 }

@@ -134,12 +134,11 @@ pub fn unique_backup_path(target: &Path) -> PathBuf {
 }
 
 fn expand_home(path: &Path) -> PathBuf {
-    if let Some(rest) = path.to_str().and_then(|s| s.strip_prefix("~/"))
-        && let Ok(home) = std::env::var("HOME")
-    {
-        return PathBuf::from(home).join(rest);
+    if let Some(s) = path.to_str() {
+        crate::path::expand_home(s).unwrap_or_else(|_| path.to_path_buf())
+    } else {
+        path.to_path_buf()
     }
-    path.to_path_buf()
 }
 
 fn relative_link_source(source: &Path, target: &Path) -> Result<PathBuf> {

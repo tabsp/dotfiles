@@ -1,7 +1,10 @@
 # dotman v2 config — sync tool, source of truth for this machine.
 # Plan/Confirm/Run flow in TUI; per-machine selection in ~/.local/share/dotman/state.toml.
+#
+# Profile management (repo URL, clone, sync) is handled by dotman's own profile
+# system (~/.config/dotman/config.toml), not by this file.
 
-# Layer 0: per-platform package manager
+# Per-platform package manager
 package_managers:
   macos:   brew
   ubuntu:  brew
@@ -11,12 +14,6 @@ package_managers:
 
 # Auto-install pkg manager if missing (idempotent: skips if already present).
 auto_install_pkg_manager: true
-
-# Auto-clone dotfiles repo before linking (idempotent: skips if target exists).
-auto_clone_repo:
-  url: https://github.com/tabsp/dotfiles.git
-  target: ~/Workspace/dotfiles
-  branch: main
 
 # 1. Terminal / 2. Shell / 3. Multiplexer / 4. Software / 5. Enhancement
 install:

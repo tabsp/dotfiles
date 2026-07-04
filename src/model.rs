@@ -12,7 +12,6 @@ pub type RunId = String;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
     Deploy,
-    Bootstrap,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -109,10 +108,35 @@ pub enum ActionStatus {
     WillBackupRemove,
 }
 
+impl PartialOrd for ActionStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ActionStatus {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        fn rank(s: &ActionStatus) -> u8 {
+            match s {
+                ActionStatus::NoChange => 0,
+                ActionStatus::WillRun => 1,
+                ActionStatus::WillSkip => 1,
+                ActionStatus::WillLink => 2,
+                ActionStatus::WillCreate => 2,
+                ActionStatus::WillInstall => 2,
+                ActionStatus::WillClean => 2,
+                ActionStatus::WillBackupLink => 3,
+                ActionStatus::WillBackupRemove => 3,
+                ActionStatus::WillFail => 4,
+            }
+        }
+        rank(self).cmp(&rank(other))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Run {
     pub id: RunId,
-    pub plan_id: RunId,
     pub mode: Mode,
     pub started_at: String,
     pub finished_at: Option<String>,
@@ -139,7 +163,31 @@ pub struct RunItem {
     pub duration_ms: Option<u64>,
     pub attempts: u32,
     pub error: Option<String>,
+    /// Per-action output lines, capped at MAX_HISTORY_OUTPUT_LINES (500 by default).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output: Vec<OutputLine>,
 }
+
+/// A single line of output from an action (for run history).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OutputLine {
+    pub stream: OutputStream,
+    pub line: String,
+}
+
+/// Stream kind for output lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OutputStream {
+    #[serde(rename = "stdout")]
+    Stdout,
+    #[serde(rename = "stderr")]
+    Stderr,
+    #[serde(rename = "action")]
+    Action,
+}
+
+/// Maximum output lines stored per step in run history (default 500).
+pub const MAX_HISTORY_OUTPUT_LINES: usize = 500;
 
 /// Per-machine selection state (read/written to ~/.local/share/dotman/state.toml).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

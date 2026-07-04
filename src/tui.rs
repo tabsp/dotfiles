@@ -2,8 +2,9 @@
 //!
 //! Phase 5+7 minimal: MainMenu, PlanView, RunView, ResultView, HistoryView.
 
-use crate::Mode;
+use crate::cli::Mode;
 use crate::config;
+use crate::execute::MAX_TUI_OUTPUT_LINES;
 use crate::icons;
 use crate::model::{
     Action, ActionStatus, Mode as PlanMode, Plan, PlanItem, Run, RunStatus, Selection,
@@ -78,9 +79,16 @@ pub struct App {
     pub run_events: Option<mpsc::Receiver<crate::execute::ExecuteEvent>>,
     pub abort_flag: Option<Arc<AtomicBool>>,
     pub progress: (usize, usize), // (done, total)
-    pub current_log: Vec<String>,
+    pub current_log: Vec<LogLine>,
     pub current_item: Option<usize>,
     pub run_started: Option<Instant>,
+}
+
+/// A single log line with optional color.
+#[derive(Debug, Clone)]
+pub struct LogLine {
+    pub text: String,
+    pub fg: Option<Color>,
 }
 
 impl App {
@@ -112,8 +120,20 @@ impl App {
     }
 
     pub fn load_config(&mut self) -> Result<(), String> {
-        let path = find_config_path().map_err(|e| e.to_string())?;
+        let path = if std::path::Path::new("dotman.yaml").exists() {
+            std::path::PathBuf::from("dotman.yaml")
+        } else if let Ok(Some(p)) = crate::profile::active_config_path() {
+            p
+        } else {
+            return Err("no dotman.yaml found in current directory or active profile".into());
+        };
         let cfg = config::load(&path).map_err(|e| e.to_string())?;
+        self.config = Some(cfg);
+        Ok(())
+    }
+
+    pub fn load_config_from(&mut self, config_path: &std::path::Path) -> Result<(), String> {
+        let cfg = config::load(config_path).map_err(|e| e.to_string())?;
         self.config = Some(cfg);
         Ok(())
     }
@@ -122,11 +142,7 @@ impl App {
         let cfg = self.config.as_ref().ok_or("config not loaded")?;
         let plan_mode = match self.mode {
             Mode::Menu => PlanMode::Deploy,
-            Mode::Deploy | Mode::Bootstrap => match self.mode {
-                Mode::Deploy => PlanMode::Deploy,
-                Mode::Bootstrap => PlanMode::Bootstrap,
-                _ => unreachable!(),
-            },
+            Mode::Deploy | Mode::Plan => PlanMode::Deploy,
             _ => PlanMode::Deploy,
         };
         let mut plan = plan::build(cfg, plan_mode).map_err(|e| e.to_string())?;
@@ -144,6 +160,30 @@ impl App {
     pub fn tick(&mut self) {
         self.spinner_frame = (self.spinner_frame + 1) % icons::SPINNER_BRAILLE.len();
     }
+}
+
+/// Entry point when a config path has already been resolved by init.rs.
+pub fn run_with_config(config_path: std::path::PathBuf, mode: Mode) -> Result<(), String> {
+    let mut terminal = setup_terminal().map_err(|e| e.to_string())?;
+    let mut app = App::new(mode);
+    if let Err(e) = app.load_config_from(&config_path) {
+        // Defer error to first render; user sees message.
+        app.status_message = e;
+    }
+    initialize_screen(&mut app);
+    let res = run_event_loop(&mut app, &mut terminal);
+    restore_terminal().map_err(|e| e.to_string())?;
+    res.map_err(|e| e.to_string())
+}
+
+/// Entry point when no config is needed (menu, history).
+pub fn run_no_config(mode: Mode) -> Result<(), String> {
+    let mut terminal = setup_terminal().map_err(|e| e.to_string())?;
+    let mut app = App::new(mode);
+    initialize_screen(&mut app);
+    let res = run_event_loop(&mut app, &mut terminal);
+    restore_terminal().map_err(|e| e.to_string())?;
+    res.map_err(|e| e.to_string())
 }
 
 pub fn run(mode: Mode) -> Result<(), String> {
@@ -164,7 +204,7 @@ fn initialize_screen(app: &mut App) {
         Mode::Menu => {
             app.runs = store::list().unwrap_or_default();
         }
-        Mode::Deploy | Mode::Bootstrap | Mode::Plan => {
+        Mode::Deploy | Mode::Plan => {
             if let Err(e) = app.build_plan() {
                 app.status_message = e;
             }
@@ -226,32 +266,6 @@ fn restore_terminal() -> Result<(), io::Error> {
     Ok(())
 }
 
-fn find_config_path() -> anyhow::Result<std::path::PathBuf> {
-    let candidates = [
-        std::path::PathBuf::from("dotman.yaml"),
-        std::path::PathBuf::from("dotman.bootstrap.yaml"),
-    ];
-    for c in &candidates {
-        if c.exists() {
-            return Ok(c.clone());
-        }
-    }
-    if let Ok(dir) = std::env::var("DOTFILES_DIR") {
-        let p = std::path::PathBuf::from(dir).join("dotman.yaml");
-        if p.exists() {
-            return Ok(p);
-        }
-    }
-    let home = std::env::var("HOME").unwrap_or_default();
-    let p = std::path::PathBuf::from(home)
-        .join(".local/share/tabsp-dotfiles")
-        .join("dotman.yaml");
-    if p.exists() {
-        return Ok(p);
-    }
-    anyhow::bail!("no dotman.yaml found in standard locations")
-}
-
 fn run_event_loop<B: ratatui::backend::Backend>(
     app: &mut App,
     terminal: &mut ratatui::Terminal<B>,
@@ -297,17 +311,16 @@ fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
         KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
         KeyCode::Char('d') => {
             app.mode = Mode::Deploy;
-            app.build_plan().ok();
-            app.screen = Screen::PlanView;
-        }
-        KeyCode::Char('b') => {
-            app.mode = Mode::Bootstrap;
-            app.build_plan().ok();
+            if let Err(e) = app.build_plan() {
+                app.status_message = e;
+            }
             app.screen = Screen::PlanView;
         }
         KeyCode::Char('p') => {
             app.mode = Mode::Plan;
-            app.build_plan().ok();
+            if let Err(e) = app.build_plan() {
+                app.status_message = e;
+            }
             app.screen = Screen::PlanView;
         }
         KeyCode::Char('h') => {
@@ -316,7 +329,7 @@ fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
         }
         KeyCode::Down | KeyCode::Char('j') => {
             let i = app.list_state.selected().unwrap_or(0);
-            if i + 1 < 5 {
+            if i + 1 < 4 {
                 app.list_state.select(Some(i + 1));
             }
         }
@@ -329,24 +342,23 @@ fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
         KeyCode::Enter => match app.list_state.selected() {
             Some(0) => {
                 app.mode = Mode::Deploy;
-                app.build_plan().ok();
+                if let Err(e) = app.build_plan() {
+                    app.status_message = e;
+                }
                 app.screen = Screen::PlanView;
             }
             Some(1) => {
-                app.mode = Mode::Bootstrap;
-                app.build_plan().ok();
+                app.mode = Mode::Plan;
+                if let Err(e) = app.build_plan() {
+                    app.status_message = e;
+                }
                 app.screen = Screen::PlanView;
             }
             Some(2) => {
-                app.mode = Mode::Plan;
-                app.build_plan().ok();
-                app.screen = Screen::PlanView;
-            }
-            Some(3) => {
                 app.runs = store::list().unwrap_or_default();
                 app.screen = Screen::HistoryView;
             }
-            Some(4) => app.should_quit = true,
+            Some(3) => app.should_quit = true,
             _ => {}
         },
         _ => {}
@@ -355,38 +367,9 @@ fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
 }
 
 fn render_main_menu(f: &mut Frame, app: &mut App) {
-    fn fmt_epoch(s: &str) -> String {
-        let secs = s
-            .strip_prefix("epoch:")
-            .and_then(|s| s.parse::<i64>().ok())
-            .unwrap_or(0);
-        let days = secs / 86400;
-        let mut y = 1970i64;
-        let mut d = days;
-        loop {
-            let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
-            let ny = if leap { 366 } else { 365 };
-            if d < ny {
-                break;
-            }
-            d -= ny;
-            y += 1;
-        }
-        let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
-        let mdays: &[i64] = if leap {
-            &[31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        } else {
-            &[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        };
-        let mut m = 1usize;
-        for &md in mdays {
-            if d < md {
-                break;
-            }
-            d -= md;
-            m += 1;
-        }
-        format!("{}-{:02}-{:02}", y, m, d + 1)
+    fn fmt_date(s: &str) -> String {
+        // RFC 3339: "2026-07-05T12:00:00+08:00" → "2026-07-05"
+        s.split('T').next().unwrap_or(s).to_string()
     }
 
     let area = f.area();
@@ -410,11 +393,11 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
         ])
         .split(area);
 
-    let title_prefix = format!("{} dotman - Main Menu ", icons::ICON_GEAR);
+    let title_prefix = format!("{}  dotman - Main Menu ", icons::ICON_GEAR);
     let divider_width = usize::from(chunks[0].width).saturating_sub(title_prefix.chars().count());
     let title = Paragraph::new(Line::from(vec![
         Span::styled(
-            format!("{} dotman - Main Menu", icons::ICON_GEAR),
+            format!("{}  dotman - Main Menu", icons::ICON_GEAR),
             Style::default()
                 .fg(CATPPUCCIN_MOCHA.fg_dim)
                 .add_modifier(Modifier::BOLD),
@@ -427,13 +410,8 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
     f.render_widget(title, chunks[0]);
 
     // Menu items with two-line layout (title + description)
-    let menu_items: [(&str, &str, &str); 5] = [
+    let menu_items: [(&str, &str, &str); 4] = [
         ("\u{f0425}", "Deploy", "Sync dotfiles to this machine"),
-        (
-            "\u{f01a7}",
-            "Bootstrap",
-            "Provision a new machine from scratch",
-        ),
         (
             "\u{f0349}",
             "Plan only",
@@ -554,7 +532,7 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
             RunStatus::Aborted | RunStatus::Running => CATPPUCCIN_MOCHA.warning,
         };
         let mode_str = format!("{:?}", run.mode).to_lowercase();
-        let date_str = fmt_epoch(&run.started_at);
+        let date_str = fmt_date(&run.started_at);
         let total = run.items.len();
         let failed = run.items.iter().filter(|i| i.error.is_some()).count();
         summary_lines.push(Line::from(vec![
@@ -579,8 +557,6 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
         hint(" select  "),
         keycap("d"),
         hint(" deploy  "),
-        keycap("b"),
-        hint(" bootstrap  "),
         keycap("p"),
         hint(" plan  "),
         keycap("h"),
@@ -672,8 +648,7 @@ fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
         }
         KeyCode::Char('r') => {
             if matches!(app.mode, Mode::Plan) {
-                app.status_message =
-                    "plan mode is read-only; choose deploy or bootstrap to run".into();
+                app.status_message = "plan mode is read-only; choose deploy to run".into();
             } else if selected_item_count(app.plan.as_ref()) == 0 {
                 app.status_message = "nothing selected".into();
             } else {
@@ -716,13 +691,13 @@ fn render_plan(f: &mut Frame, app: &mut App) {
     let actions = selected_action_count(Some(plan));
     let state = if app.dirty { "unsaved" } else { "saved" };
     let status_prefix = format!(
-        "{} dotman - Plan (○ {state})  {selected} selected · {actions} actions ",
+        "{}  dotman - Plan (○ {state})  {selected} selected · {actions} actions ",
         icons::ICON_GEAR
     );
     let divider_width = usize::from(chunks[0].width).saturating_sub(status_prefix.chars().count());
     let status = Paragraph::new(Line::from(vec![
         Span::styled(
-            format!("{} dotman - Plan (", icons::ICON_GEAR),
+            format!("{}  dotman - Plan (", icons::ICON_GEAR),
             Style::default()
                 .fg(CATPPUCCIN_MOCHA.fg_dim)
                 .add_modifier(Modifier::BOLD),
@@ -1420,7 +1395,7 @@ fn handle_run(app: &mut App, key: KeyCode) -> Result<()> {
             if let Some(flag) = &app.abort_flag {
                 flag.store(true, Ordering::SeqCst);
                 app.status_message = "abort requested; waiting for current action".into();
-                push_log(app, "abort requested; waiting for current action");
+                push_log(app, "abort requested; waiting for current action", None);
             }
         }
         _ => {}
@@ -1561,7 +1536,10 @@ fn render_run(f: &mut Frame, app: &mut App) {
     let log_lines: Vec<Line> = app
         .current_log
         .iter()
-        .map(|s| Line::from(s.as_str()))
+        .map(|entry| {
+            let style = entry.fg.map(|c| Style::default().fg(c)).unwrap_or_default();
+            Line::styled(entry.text.clone(), style)
+        })
         .collect();
     f.render_widget(
         Paragraph::new(log_lines)
@@ -1590,13 +1568,25 @@ fn drain_run_events(app: &mut App) {
         match event {
             crate::execute::ExecuteEvent::ItemStarted { index, name } => {
                 app.current_item = Some(index);
-                push_log(app, &format!("started {name}"));
+                push_log(app, &format!("started {name}"), None);
             }
             crate::execute::ExecuteEvent::ActionStarted { item, action } => {
-                push_log(app, &format!("{item}: {action}"));
+                push_log(app, &format!("{item}: {action}"), None);
             }
-            crate::execute::ExecuteEvent::ActionOutput { item, output } => {
-                push_log(app, &format!("{item}: {output}"));
+            crate::execute::ExecuteEvent::Output { item, stream, line } => {
+                let color = match stream {
+                    crate::model::OutputStream::Stderr => Some(CATPPUCCIN_MOCHA.danger),
+                    crate::model::OutputStream::Stdout => None,
+                    crate::model::OutputStream::Action => Some(CATPPUCCIN_MOCHA.primary),
+                };
+                push_log(app, &format!("{item}: {line}"), color);
+            }
+            crate::execute::ExecuteEvent::ActionMessage { item, message } => {
+                push_log(
+                    app,
+                    &format!("{item}: {message}"),
+                    Some(CATPPUCCIN_MOCHA.primary),
+                );
             }
             crate::execute::ExecuteEvent::ItemFinished {
                 index,
@@ -1605,21 +1595,24 @@ fn drain_run_events(app: &mut App) {
             } => {
                 app.progress.0 = app.progress.0.max(index.saturating_add(1));
                 app.current_item = None;
-                push_log(app, &format!("finished {name}: {status:?}"));
+                push_log(app, &format!("finished {name}: {status:?}"), None);
             }
             crate::execute::ExecuteEvent::Aborted => {
-                push_log(app, "run aborted");
+                push_log(app, "run aborted", Some(CATPPUCCIN_MOCHA.warning));
             }
         }
     }
     app.run_events = Some(rx);
 }
 
-fn push_log(app: &mut App, line: &str) {
-    app.current_log.push(line.to_string());
-    const MAX_LOG_LINES: usize = 300;
-    if app.current_log.len() > MAX_LOG_LINES {
-        let drop_count = app.current_log.len() - MAX_LOG_LINES;
+fn push_log(app: &mut App, line: &str, fg: Option<Color>) {
+    app.current_log.push(LogLine {
+        text: line.to_string(),
+        fg,
+    });
+    // Cap per-step TUI log at MAX_TUI_OUTPUT_LINES (1000).
+    if app.current_log.len() > MAX_TUI_OUTPUT_LINES {
+        let drop_count = app.current_log.len() - MAX_TUI_OUTPUT_LINES;
         app.current_log.drain(0..drop_count);
     }
 }

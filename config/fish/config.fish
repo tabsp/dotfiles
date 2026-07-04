@@ -43,7 +43,7 @@ function __dotfiles_dir
     if set -q DOTFILES_DIR
         set -a candidates "$DOTFILES_DIR"
     end
-    set -a candidates "$HOME/Workspace/dotfiles" "$HOME/.local/share/tabsp-dotfiles"
+    set -a candidates "$HOME/.local/share/dotman/repos/main" "$HOME/Workspace/dotfiles"
 
     for dir in $candidates
         if test -d "$dir"
@@ -67,9 +67,9 @@ end
 
 set -gx GEM_HOME "$HOME/.local/share/gem"
 
-set -l workspace_dotfiles "$HOME/Workspace/dotfiles"
-if test -d $workspace_dotfiles
-    set -gx DOTFILES_DIR $workspace_dotfiles
+set -l dotfiles_dir (__dotfiles_dir)
+if test -n "$dotfiles_dir"
+    set -gx DOTFILES_DIR "$dotfiles_dir"
 end
 
 for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew
@@ -269,9 +269,12 @@ function dots --description 'open dotfiles config actions'
         "Edit fish config" \
         "Edit nvim config" \
         "Reload fish config" \
+        "Dotman status" \
+        "Dotman sync" \
+        "Dotman plan" \
         "Sync fish plugins" \
         "Update tldr pages" \
-        "Open lazygit" | gum filter --height 10 --placeholder "dotfiles action")
+        "Open lazygit" | gum filter --height 12 --placeholder "dotfiles action")
 
     if test -z "$choice"
         return 0
@@ -298,6 +301,12 @@ function dots --description 'open dotfiles config actions'
         case "Reload fish config"
             source "$HOME/.config/fish/config.fish"
             __gum_info "fish config reloaded"
+        case "Dotman status"
+            dotman status
+        case "Dotman sync"
+            dotman sync
+        case "Dotman plan"
+            dotman plan --headless
         case "Sync fish plugins"
             if not type -q fisher
                 __gum_warn "fisher is not installed"

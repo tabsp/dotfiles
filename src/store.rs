@@ -66,7 +66,9 @@ pub fn save(run: &Run) -> Result<PathBuf> {
     // Update latest.json symlink.
     let latest = latest_link()?;
     let _ = std::fs::remove_file(&latest);
-    let _ = std::os::unix::fs::symlink(&path, &latest);
+    if let Err(e) = std::os::unix::fs::symlink(&path, &latest) {
+        tracing::warn!("failed to update latest.json symlink: {e}");
+    }
 
     Ok(path)
 }
@@ -124,7 +126,6 @@ mod tests {
     fn sample_run(id: &str) -> Run {
         Run {
             id: id.to_string(),
-            plan_id: id.to_string(),
             mode: Mode::Deploy,
             started_at: format!("epoch:{}", 1_000_000),
             finished_at: Some(format!("epoch:{}", 1_000_010)),
@@ -139,6 +140,7 @@ mod tests {
                 duration_ms: Some(1000),
                 attempts: 1,
                 error: None,
+                output: vec![],
             }],
         }
     }

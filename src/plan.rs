@@ -1,6 +1,7 @@
 //! Plan: pure function from config + filesystem state to Plan.
 //!
-//! Phase 2: drift detection (B level), layer assignment, tool grouping.
+//! Converts Config to Plan with layer grouping, auto-attachment of links
+//! to install items, and smart defaults.
 
 use crate::config::Config;
 use crate::model::{Action, ActionStatus, Plan, PlanItem};
@@ -18,25 +19,14 @@ pub enum LayerStrategy {
 }
 
 /// Returns the layer name for a given tool name.
-///
-/// "Misc" tools (link/create not paired to any tool) are not routed through here.
 pub fn tool_layer(tool: &str) -> Option<&'static str> {
     match tool {
-        // Layer 1: Terminal
         "ghostty" | "kitty" | "alacritty" | "wezterm" => Some("terminal"),
-
-        // Layer 2: Shell
         "fish" | "zsh" | "nushell" | "bash" => Some("shell"),
-
-        // Layer 3: Multiplexer
         "tmux" | "zellij" | "herdr" => Some("multiplexer"),
-
-        // Layer 4: Software
         "neovim" | "nvim" | "lazygit" | "btop" | "fastfetch" | "yazi" | "dua" | "jq" | "yq" => {
             Some("software")
         }
-
-        // Layer 5: Enhancement (incl. fonts, fzf, ripgrep, etc.)
         "ripgrep"
         | "fd"
         | "bat"
@@ -46,7 +36,6 @@ pub fn tool_layer(tool: &str) -> Option<&'static str> {
         | "tealdeer"
         | "tldr"
         | "font-maple-mono-nf-cn" => Some("enhancement"),
-
         _ => None,
     }
 }
@@ -65,48 +54,10 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     let config_hash = hash_file(&config_path).unwrap_or_default();
     let id = Ulid::new().to_string();
 
-    // PlanItems keyed by step id (lowercase tool name with disambiguation).
     let mut items: Vec<PlanItem> = Vec::new();
     let mut used_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // Step 0a: auto-clone repo (runs first)
-    if let Some(repo) = &config.auto_clone_repo {
-        let id = unique_id("auto-clone-repo", &mut used_ids);
-        let name = repo
-            .url
-            .rsplit('/')
-            .next()
-            .unwrap_or(&repo.url)
-            .trim_end_matches(".git")
-            .to_string();
-        let mut cmd = format!("git clone {}", repo.url);
-        if let Some(branch) = &repo.branch {
-            cmd.push_str(&format!(" --branch {branch}"));
-        }
-        // Expand leading `~/` to $HOME so the shell command works on all POSIX shells.
-        let target_str = repo.target.to_string_lossy();
-        let expanded = if let Some(rest) = target_str.strip_prefix("~/") {
-            format!("$HOME/{rest}")
-        } else {
-            target_str.to_string()
-        };
-        cmd.push_str(&format!(" {expanded}"));
-        let guard = format!("! test -d {expanded}");
-        items.push(PlanItem {
-            id,
-            name: format!("clone {name}"),
-            layer: "misc".into(),
-            actions: vec![Action::Shell {
-                command: cmd,
-                description: Some("Auto-clone dotfiles repository".into()),
-                optional: false,
-                if_condition: Some(guard),
-            }],
-            selected: true,
-        });
-    }
-
-    // Step 0b: auto-install package manager
+    // Step 0b: auto-install package manager (runs before install items)
     if config.auto_install_pkg_manager
         && let Some(install_cmd) = auto_pkg_mgr_install_cmd(&config.package_managers)
     {
@@ -136,9 +87,9 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
             actions: vec![Action::Install {
                 pkg_mgr: "auto".into(),
                 binary: tool.clone(),
-                source: format!("install {tool}"), // overridden in Phase 3
+                source: format!("install {tool}"),
             }],
-            selected: false, // filled in by apply_defaults
+            selected: false,
         });
     }
 
@@ -246,13 +197,11 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
 }
 
 /// Find an owner PlanItem whose install name matches the target path.
-/// Uses path component + prefix matching.
 fn find_owner<'a>(target: &Path, items: &'a mut [PlanItem]) -> Option<&'a mut PlanItem> {
-    // First, look for an install whose name is a path component of the target.
     let target_str = target.to_string_lossy();
     for item in items.iter_mut() {
         if item.layer == "misc" {
-            continue; // only attach to install items
+            continue;
         }
         if let Some(Action::Install { binary, .. }) = item.actions.first() {
             for owner_name in owner_names(binary) {
@@ -264,7 +213,6 @@ fn find_owner<'a>(target: &Path, items: &'a mut [PlanItem]) -> Option<&'a mut Pl
                 {
                     return Some(item);
                 }
-                // Prefix match: e.g. tmux-status matches tmux
                 if let Some(stripped) = target_str
                     .rsplit('/')
                     .next()
@@ -289,36 +237,13 @@ fn owner_names(tool: &str) -> Vec<&str> {
     }
 }
 
-/// Check drift for a link target.
-fn check_link_status(target: &Path, source: &Path) -> ActionStatus {
-    if !target.exists() && !target.is_symlink() {
-        return ActionStatus::WillLink;
-    }
-    if let Ok(actual) = std::fs::read_link(target) {
-        if paths_match(&actual, target, source) {
-            ActionStatus::NoChange
-        } else {
-            ActionStatus::WillBackupLink
-        }
-    } else {
-        // target exists, not a symlink -> conflict
-        ActionStatus::WillBackupLink
-    }
-}
-
-fn paths_match(link_target: &Path, link_path: &Path, expected: &Path) -> bool {
-    let abs = if link_target.is_absolute() {
-        link_target.to_path_buf()
-    } else {
-        link_path
-            .parent()
-            .map(|p| p.join(link_target))
-            .unwrap_or_else(|| link_target.to_path_buf())
-    };
-    if let (Ok(a), Ok(e)) = (std::fs::canonicalize(&abs), std::fs::canonicalize(expected)) {
-        return a == e;
-    }
-    abs == expected
+fn hash_file(path: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path)?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let digest = hasher.finalize();
+    Ok(format!("{digest:x}"))
 }
 
 /// Smart defaults for selection:
@@ -326,7 +251,6 @@ fn paths_match(link_target: &Path, link_path: &Path, expected: &Path) -> bool {
 /// - All layers: all selected
 /// - Misc: all selected
 fn apply_smart_defaults(items: &mut [PlanItem]) {
-    // For each pick-one layer, mark first as selected, rest unselected
     let mut seen_pick_one: std::collections::HashMap<String, bool> =
         std::collections::HashMap::new();
     for item in items.iter_mut() {
@@ -376,14 +300,17 @@ fn sanitize_id(s: &str) -> String {
         .collect()
 }
 
-fn hash_file(path: &Path) -> Result<String> {
-    use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(path)?;
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    let digest = hasher.finalize();
-    // Lowercase hex without external crate.
-    Ok(format!("{digest:x}"))
+fn hostname() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()))
+        .unwrap_or_default()
+}
+
+fn now_iso() -> String {
+    time::OffsetDateTime::now_local()
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| String::new())
 }
 
 /// Map configured package manager name to an auto-install shell command and guard.
@@ -403,46 +330,6 @@ fn auto_pkg_mgr_install_cmd(
             guard: "! command -v brew".into(),
         }),
         _ => None,
-    }
-}
-
-fn hostname() -> String {
-    std::env::var("HOSTNAME")
-        .or_else(|_| std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()))
-        .unwrap_or_default()
-}
-
-fn now_iso() -> String {
-    time::OffsetDateTime::now_local()
-        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| String::new())
-}
-
-// PartialOrd on ActionStatus so we can keep the "worst" status.
-impl PartialOrd for ActionStatus {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ActionStatus {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        fn rank(s: &ActionStatus) -> u8 {
-            match s {
-                ActionStatus::NoChange => 0,
-                ActionStatus::WillRun => 1,
-                ActionStatus::WillSkip => 1,
-                ActionStatus::WillLink => 2,
-                ActionStatus::WillCreate => 2,
-                ActionStatus::WillInstall => 2,
-                ActionStatus::WillClean => 2,
-                ActionStatus::WillBackupLink => 3,
-                ActionStatus::WillBackupRemove => 3,
-                ActionStatus::WillFail => 4,
-            }
-        }
-        rank(self).cmp(&rank(other))
     }
 }
 
@@ -522,7 +409,6 @@ mod tests {
             }],
             clean: vec![],
             auto_install_pkg_manager: false,
-            auto_clone_repo: None,
         }
     }
 
@@ -541,7 +427,6 @@ mod tests {
         let cfg = sample_config();
         let plan = build(&cfg, Mode::Deploy).unwrap();
         let fish = plan.items.iter().find(|i| i.name == "fish").unwrap();
-        // fish should have install + link
         assert_eq!(fish.actions.len(), 2);
         assert!(matches!(fish.actions[0], Action::Install { .. }));
         assert!(matches!(fish.actions[1], Action::Link { .. }));
@@ -552,7 +437,6 @@ mod tests {
         let cfg = sample_config();
         let plan = build(&cfg, Mode::Deploy).unwrap();
         let tmux = plan.items.iter().find(|i| i.name == "tmux").unwrap();
-        // tmux-status should attach to tmux
         assert_eq!(tmux.actions.len(), 3);
         assert!(tmux
             .actions
@@ -590,10 +474,8 @@ mod tests {
     fn smart_default_pick_one_layer() {
         let cfg = sample_config();
         let plan = build(&cfg, Mode::Deploy).unwrap();
-        // terminal layer not present, so check shell
         let fish = plan.items.iter().find(|i| i.name == "fish").unwrap();
         assert!(fish.selected);
-        // shell layer has only 1 item, so it's the first
     }
 
     #[test]
@@ -607,63 +489,18 @@ mod tests {
                 i.layer == "misc" && i.actions.iter().any(|a| matches!(a, Action::Shell { .. }))
             })
             .unwrap();
-        assert!(shell.selected); // misc default on
-    }
-
-    #[test]
-    fn auto_clone_repo_adds_shell_action() {
-        let mut cfg = sample_config();
-        cfg.auto_clone_repo = Some(crate::config::CloneRepo {
-            url: "https://github.com/user/dotfiles.git".into(),
-            target: PathBuf::from("/tmp/test-dotfiles"),
-            branch: None,
-        });
-        let plan = build(&cfg, Mode::Deploy).unwrap();
-        let clone = plan
-            .items
-            .iter()
-            .find(|i| i.name.starts_with("clone "))
-            .unwrap();
-        assert!(clone.selected);
-        assert!(matches!(
-            clone.actions[0],
-            Action::Shell { ref command, .. } if command.contains("git clone")
-        ));
-        assert_eq!(clone.layer, "misc");
-    }
-
-    #[test]
-    fn auto_clone_repo_uses_branch_when_set() {
-        let mut cfg = sample_config();
-        cfg.auto_clone_repo = Some(crate::config::CloneRepo {
-            url: "https://github.com/user/dotfiles.git".into(),
-            target: PathBuf::from("/tmp/test-dotfiles"),
-            branch: Some("main".into()),
-        });
-        let plan = build(&cfg, Mode::Deploy).unwrap();
-        let clone = plan
-            .items
-            .iter()
-            .find(|i| i.name.starts_with("clone "))
-            .unwrap();
-        let cmd = match &clone.actions[0] {
-            Action::Shell { command, .. } => command,
-            _ => panic!("expected Shell action"),
-        };
-        assert!(cmd.contains(" --branch main"));
+        assert!(shell.selected);
     }
 
     #[test]
     fn auto_install_pkg_manager_adds_shell_action_when_brew() {
         let mut cfg = sample_config();
         cfg.auto_install_pkg_manager = true;
-        cfg.package_managers.macos = Some("brew".into());
         let plan = build(&cfg, Mode::Deploy).unwrap();
         let pkg = plan
             .items
             .iter()
             .find(|i| i.name == "auto-install package manager");
-        // On macOS brew is recognized; on Linux with no distro match it's None.
         if cfg!(target_os = "macos") {
             let pkg = pkg.expect("auto-install item should exist on macOS with brew configured");
             assert!(pkg.selected);
@@ -678,13 +515,12 @@ mod tests {
     fn auto_install_no_action_when_pkg_mgr_unknown() {
         let mut cfg = sample_config();
         cfg.auto_install_pkg_manager = true;
-        cfg.package_managers = PackageManagerConfig::default(); // no pkg mgr configured
+        cfg.package_managers = PackageManagerConfig::default();
         let plan = build(&cfg, Mode::Deploy).unwrap();
         let pkg = plan
             .items
             .iter()
             .find(|i| i.name == "auto-install package manager");
-        // No recognized pkg mgr → no plan item added
         assert!(pkg.is_none());
     }
 }

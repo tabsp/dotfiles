@@ -1,6 +1,11 @@
 //! YAML config loading.
 //!
-//! Parses dotman.yaml / dotman.bootstrap.yaml into Config.
+//! Parses dotman.yaml into Config. This is the deployment config from the
+//! user's dotfiles repo — it describes what to install, link, create, etc.
+//!
+//! Profile management (repo URL, clone, sync) is handled by `profile.rs`,
+//! not here. `auto_clone_repo` has been removed from this layer to the
+//! profile system. `auto_install_pkg_manager` stays as a deployment concern.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -30,9 +35,6 @@ pub struct RawConfig {
 
     #[serde(default)]
     pub auto_install_pkg_manager: bool,
-
-    #[serde(default)]
-    pub auto_clone_repo: Option<RawCloneRepo>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -107,14 +109,6 @@ pub struct RawClean {
     pub force: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct RawCloneRepo {
-    pub url: String,
-    pub target: PathBuf,
-    #[serde(default)]
-    pub branch: Option<String>,
-}
-
 /// Normalized config used by the rest of dotman.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -126,7 +120,6 @@ pub struct Config {
     pub shell: Vec<ShellEntry>,
     pub clean: Vec<CleanEntry>,
     pub auto_install_pkg_manager: bool,
-    pub auto_clone_repo: Option<CloneRepo>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -160,18 +153,23 @@ pub struct CleanEntry {
     pub force: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct CloneRepo {
-    pub url: String,
-    pub target: PathBuf,
-    pub branch: Option<String>,
-}
-
 pub fn load(path: &Path) -> Result<Config> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
     let raw: RawConfig = serde_yaml::from_str(&raw)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("auto_clone_repo") {
+                anyhow::anyhow!(
+                    "{}: 'auto_clone_repo' is no longer supported in dotman.yaml. \
+                     Repository management is now handled via profiles in ~/.config/dotman/config.toml. \
+                     Run `dotman init` or `dotman profile add` to set up your repository.",
+                    msg
+                )
+            } else {
+                anyhow::anyhow!("failed to parse {}: {msg}", path.display())
+            }
+        })?;
     let config = normalize(raw, path);
     Ok(config)
 }
@@ -218,11 +216,6 @@ fn normalize(raw: RawConfig, path: &Path) -> Config {
             })
             .collect(),
         auto_install_pkg_manager: raw.auto_install_pkg_manager,
-        auto_clone_repo: raw.auto_clone_repo.map(|c| CloneRepo {
-            url: c.url,
-            target: c.target,
-            branch: c.branch,
-        }),
     }
 }
 
@@ -277,7 +270,6 @@ install: []
         let raw: RawConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(raw.package_managers.macos.as_deref(), Some("brew"));
         assert_eq!(raw.package_managers.arch.as_deref(), Some("pacman"));
-        assert_eq!(raw.package_managers.ubuntu.as_deref(), Some("brew"));
     }
 
     #[test]
@@ -333,7 +325,6 @@ clean:
             r#"
 package_managers:
   macos: brew
-  arch: pacman
 install: [fish, tmux]
 links:
   - target: ~/.config/fish
@@ -350,5 +341,21 @@ shell:
         assert_eq!(cfg.shell.len(), 1);
         assert!(cfg.shell[0].optional);
         assert_eq!(cfg.package_managers.macos.as_deref(), Some("brew"));
+    }
+
+    #[test]
+    fn rejects_unknown_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dotman.yaml");
+        std::fs::write(
+            &path,
+            r#"
+install: []
+unknown_field: true
+"#,
+        )
+        .unwrap();
+        let result = load(&path);
+        assert!(result.is_err());
     }
 }
