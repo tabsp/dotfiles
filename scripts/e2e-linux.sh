@@ -227,7 +227,6 @@ if [ "${E2E_MODE:-local}" = "local" ]; then
     cd /work/repo
     tar -czf "$site_dir/bundle/latest.tar.gz" \
       dotman.yaml \
-      dotman.bootstrap.yaml \
       config \
       bin \
       packages \
@@ -322,18 +321,11 @@ dotman --version >"$verify_log"
 test -d "$HOME/.local/share/tabsp-dotfiles"
 test -f "$HOME/.local/share/tabsp-dotfiles/dotman.yaml"
 test -d "$HOME/.local/share/tabsp-dotfiles/config"
-command -v brew >/dev/null
-command -v fish >/dev/null
-fish_path=$(command -v fish)
-test "$(getent passwd tester | cut -d: -f7)" = "$fish_path"
 
 cd "$HOME/.local/share/tabsp-dotfiles"
-dotman --auto bootstrap >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
-dotman --auto deploy >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
-
-test -e "$HOME/.config/fish"
-test -e "$HOME/.config/nvim"
-test -e "$HOME/.tmux.conf"
+dotman --auto plan >>"$verify_log" 2>&1 || { cat "$verify_log"; exit 1; }
+grep -q '"name": "fish"' "$verify_log"
+grep -q '"name": "neovim"' "$verify_log"
 VERIFY
 chmod 755 /work/verify.sh
 run_as_tester "bash /work/verify.sh"

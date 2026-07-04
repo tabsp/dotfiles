@@ -29,7 +29,6 @@ cp "$repo_dir/assets/screenshots/terminal-preview.png" "$public_dir/assets/scree
 
 git archive --format=tar HEAD -- \
   dotman.yaml \
-  dotman.bootstrap.yaml \
   config \
   bin \
   packages \

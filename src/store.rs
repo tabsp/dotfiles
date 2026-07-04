@@ -1,9 +1,10 @@
-//! Store: read/write run logs to ~/.local/share/dotman/runs/.
+//! Store: read/write run logs and per-machine selection state.
 //!
 //! Phase 4: save/load/list runs, ULID naming, latest.json symlink, dir creation.
 
 use crate::model::Run;
 use crate::model::RunId;
+use crate::model::Selection;
 use crate::package_managers::dotman_data_dir;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -14,6 +15,36 @@ pub fn runs_dir() -> Result<PathBuf> {
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create runs dir {}", dir.display()))?;
     Ok(dir)
+}
+
+/// Return the per-machine selection state path.
+pub fn selection_path() -> Result<PathBuf> {
+    Ok(dotman_data_dir()?.join("state.toml"))
+}
+
+/// Load per-machine selection state, returning defaults when no state exists yet.
+pub fn load_selection() -> Result<Selection> {
+    let path = selection_path()?;
+    if !path.exists() {
+        return Ok(Selection::default());
+    }
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read selection state {}", path.display()))?;
+    toml::from_str(&raw)
+        .with_context(|| format!("failed to parse selection state {}", path.display()))
+}
+
+/// Save per-machine selection state.
+pub fn save_selection(selection: &Selection) -> Result<PathBuf> {
+    let path = selection_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create state dir {}", parent.display()))?;
+    }
+    let raw = toml::to_string_pretty(selection).context("failed to serialize selection state")?;
+    std::fs::write(&path, raw)
+        .with_context(|| format!("failed to write selection state {}", path.display()))?;
+    Ok(path)
 }
 
 pub fn path_for(id: &RunId) -> Result<PathBuf> {
@@ -126,5 +157,18 @@ mod tests {
     fn new_run_id_is_ulid_format() {
         let id = new_run_id();
         assert_eq!(id.len(), 26);
+    }
+
+    #[test]
+    fn selection_roundtrips_through_toml() {
+        let mut selection = Selection::default();
+        selection.items.insert("fish".into(), true);
+        selection.items.insert("ghostty".into(), false);
+
+        let raw = toml::to_string_pretty(&selection).unwrap();
+        let parsed: Selection = toml::from_str(&raw).unwrap();
+
+        assert_eq!(parsed.items.get("fish"), Some(&true));
+        assert_eq!(parsed.items.get("ghostty"), Some(&false));
     }
 }

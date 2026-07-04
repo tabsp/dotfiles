@@ -20,13 +20,13 @@ pub fn run(mode: Mode) -> Result<(), String> {
         }
         Mode::History => run_history(),
         Mode::Run(_) => Err("dotman run <id> requires TUI".into()),
-        Mode::Deploy | Mode::Bootstrap => run_full(&cfg, mode),
+        Mode::Menu | Mode::Deploy | Mode::Bootstrap => run_full(&cfg, mode),
     }
 }
 
 fn run_full(cfg: &config::Config, mode: Mode) -> Result<(), String> {
     let plan_mode = match mode {
-        Mode::Deploy => PlanMode::Deploy,
+        Mode::Menu | Mode::Deploy => PlanMode::Deploy,
         Mode::Bootstrap => PlanMode::Bootstrap,
         _ => unreachable!(),
     };

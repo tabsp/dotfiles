@@ -4,6 +4,7 @@
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -16,7 +17,7 @@ pub struct RawConfig {
     pub install: Vec<String>,
 
     #[serde(default)]
-    pub links: Vec<RawLink>,
+    pub links: RawLinks,
 
     #[serde(default)]
     pub create: Vec<PathBuf>,
@@ -56,6 +57,36 @@ pub struct RawLink {
     pub backup: Option<bool>,
     #[serde(default)]
     pub relink: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum RawLinks {
+    List(Vec<RawLink>),
+    Map(BTreeMap<PathBuf, PathBuf>),
+}
+
+impl Default for RawLinks {
+    fn default() -> Self {
+        Self::List(Vec::new())
+    }
+}
+
+impl RawLinks {
+    fn into_vec(self) -> Vec<RawLink> {
+        match self {
+            Self::List(links) => links,
+            Self::Map(links) => links
+                .into_iter()
+                .map(|(target, source)| RawLink {
+                    target,
+                    source,
+                    backup: None,
+                    relink: None,
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,6 +189,7 @@ fn normalize(raw: RawConfig, path: &Path) -> Config {
         install: raw.install,
         links: raw
             .links
+            .into_vec()
             .into_iter()
             .map(|l| LinkEntry {
                 target: l.target,
@@ -208,8 +240,29 @@ links:
 "#;
         let raw: RawConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(raw.install, vec!["nvim", "fish"]);
-        assert_eq!(raw.links.len(), 1);
-        assert_eq!(raw.links[0].target.to_string_lossy(), "~/.config/fish");
+        let links = raw.links.into_vec();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target.to_string_lossy(), "~/.config/fish");
+    }
+
+    #[test]
+    fn parses_link_map_shorthand() {
+        let yaml = r#"
+links:
+  ~/.config/fish: config/fish
+  ~/.tmux.conf: config/tmux.conf
+"#;
+        let raw: RawConfig = serde_yaml::from_str(yaml).unwrap();
+        let links = raw.links.into_vec();
+        assert_eq!(links.len(), 2);
+        assert!(links.iter().any(|link| {
+            link.target.to_string_lossy() == "~/.config/fish"
+                && link.source.to_string_lossy() == "config/fish"
+        }));
+        assert!(links.iter().any(|link| {
+            link.target.to_string_lossy() == "~/.tmux.conf"
+                && link.source.to_string_lossy() == "config/tmux.conf"
+        }));
     }
 
     #[test]

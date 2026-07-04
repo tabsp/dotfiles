@@ -213,24 +213,38 @@ fn find_owner<'a>(target: &Path, items: &'a mut [PlanItem]) -> Option<&'a mut Pl
             continue; // only attach to install items
         }
         if let Some(Action::Install { binary, .. }) = item.actions.first() {
-            if target_str.contains(&format!("/{binary}/"))
-                || target_str.ends_with(&format!("/{binary}"))
-                || target_str.contains(&format!("/{binary}."))
-            {
-                return Some(item);
-            }
-            // Prefix match: e.g. tmux-status matches tmux
-            if let Some(stripped) = target_str
-                .rsplit('/')
-                .next()
-                .and_then(|base| base.strip_prefix(&format!("{binary}-")))
-                && !stripped.is_empty()
-            {
-                return Some(item);
+            for owner_name in owner_names(binary) {
+                if target_str.contains(&format!("/{owner_name}/"))
+                    || target_str.ends_with(&format!("/{owner_name}"))
+                    || target_str.contains(&format!("/{owner_name}."))
+                    || target_str.contains(&format!("/.{owner_name}."))
+                    || target_str.ends_with(&format!("/.{owner_name}"))
+                {
+                    return Some(item);
+                }
+                // Prefix match: e.g. tmux-status matches tmux
+                if let Some(stripped) = target_str
+                    .rsplit('/')
+                    .next()
+                    .and_then(|base| base.strip_prefix(&format!("{owner_name}-")))
+                    && !stripped.is_empty()
+                {
+                    return Some(item);
+                }
             }
         }
     }
     None
+}
+
+fn owner_names(tool: &str) -> Vec<&str> {
+    match tool {
+        "neovim" => vec!["neovim", "nvim"],
+        "ripgrep" => vec!["ripgrep", "rg"],
+        "tealdeer" => vec!["tealdeer", "tldr"],
+        "font-maple-mono-nf-cn" => vec!["font-maple-mono-nf-cn", "maple-mono"],
+        _ => vec![tool],
+    }
 }
 
 /// Check drift for a link target.
@@ -430,8 +444,20 @@ mod tests {
                     relink: None,
                 },
                 LinkEntry {
+                    target: PathBuf::from("/tmp/home/.tmux.conf"),
+                    source: PathBuf::from("config/tmux.conf"),
+                    backup: None,
+                    relink: None,
+                },
+                LinkEntry {
                     target: PathBuf::from("/tmp/home/some/random"),
                     source: PathBuf::from("config/random"),
+                    backup: None,
+                    relink: None,
+                },
+                LinkEntry {
+                    target: PathBuf::from("/tmp/home/.config/nvim"),
+                    source: PathBuf::from("config/nvim"),
                     backup: None,
                     relink: None,
                 },
@@ -476,7 +502,25 @@ mod tests {
         let plan = build(&cfg, Mode::Deploy).unwrap();
         let tmux = plan.items.iter().find(|i| i.name == "tmux").unwrap();
         // tmux-status should attach to tmux
-        assert_eq!(tmux.actions.len(), 2);
+        assert_eq!(tmux.actions.len(), 3);
+        assert!(tmux
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::Link { target, .. } if target == &PathBuf::from("/tmp/home/.tmux.conf"))));
+    }
+
+    #[test]
+    fn plan_auto_attaches_binary_alias_match() {
+        let cfg = Config {
+            install: vec!["neovim".into()],
+            ..sample_config()
+        };
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let neovim = plan.items.iter().find(|i| i.name == "neovim").unwrap();
+        assert!(neovim
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::Link { target, .. } if target == &PathBuf::from("/tmp/home/.config/nvim"))));
     }
 
     #[test]

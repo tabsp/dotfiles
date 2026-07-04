@@ -1,11 +1,13 @@
 #!/usr/bin/env sh
-# dotman installer (v2 minimal).
-# Detects platform, downloads pre-built binary, exits.
-# Bootstrap (brew, sudo, /etc/shells) is handled by `dotman` itself.
+# dotman installer (v2 alpha).
+# Installs the pre-built dotman binary and the latest dotfiles bundle.
 set -eu
 
-base_url=${DOTFILES_SITE_URL:-"https://github.com/tabsp/dotfiles/releases/latest/download"}
+site_url=${DOTFILES_SITE_URL:-"https://dotfiles.tabsp.com"}
+release_base_url=${DOTMAN_RELEASE_BASE_URL:-"https://github.com/tabsp/dotfiles/releases/latest/download"}
+bundle_url="${site_url%/}/bundle/latest.tar.gz"
 bin_path=${DOTMAN_BIN:-"$HOME/.local/bin/dotman"}
+bundle_dir=${DOTFILES_DIR:-"$HOME/.local/share/tabsp-dotfiles"}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -14,18 +16,23 @@ usage() {
 Usage: install [options]
 
 Options:
-  --bin-path DIR   Install dotman binary to DIR (default: ~/.local/bin/dotman)
+  --bin-path PATH  Install dotman binary to PATH (default: ~/.local/bin/dotman)
+  --bundle-dir DIR Install dotfiles bundle to DIR (default: ~/.local/share/tabsp-dotfiles)
   --version VER    Install a specific version (default: latest)
+  --yes            Non-interactive smoke setup (runs dotman --auto plan)
   -h, --help       Show this help
 EOF
 }
 
 bin_dir=$(dirname "$bin_path")
 version="latest"
+yes=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --bin-path) bin_path="$2"; shift 2 ;;
+    --bundle-dir) bundle_dir="$2"; shift 2 ;;
     --version) version="$2"; shift 2 ;;
+    --yes|-y) yes=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -44,14 +51,26 @@ detect_target() {
 }
 
 target=$(detect_target)
-[ "$version" = "latest" ] && version="latest" || version="tags/v$version"
+if [ "$version" != "latest" ] && [ -z "${DOTMAN_RELEASE_BASE_URL:-}" ]; then
+  release_base_url="https://github.com/tabsp/dotfiles/releases/download/v$version"
+fi
+
+manifest="$tmp_dir/manifest.json"
+if curl -fsSL "${site_url%/}/manifest.json" -o "$manifest" 2>/dev/null; then
+  manifest_release_base_url=$(sed -n 's/.*"dotman_release_base_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1)
+  manifest_bundle_url=$(sed -n 's/.*"bundle_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1)
+  [ -n "$manifest_release_base_url" ] && release_base_url="$manifest_release_base_url"
+  [ -n "$manifest_bundle_url" ] && bundle_url="$manifest_bundle_url"
+fi
 
 archive="$tmp_dir/dotman-$target.tar.gz"
 asset_name="dotman-$target.tar.gz"
-download_url="$base_url/$asset_name"
+download_url="${release_base_url%/}/$asset_name"
+bundle_archive="$tmp_dir/dotfiles-bundle.tar.gz"
 
 if command -v curl >/dev/null 2>&1; then
   curl -fsSL "$download_url" -o "$archive" || { echo "error: download failed" >&2; exit 1; }
+  curl -fsSL "$bundle_url" -o "$bundle_archive" || { echo "error: bundle download failed" >&2; exit 1; }
 else
   echo "error: curl required" >&2; exit 1
 fi
@@ -60,5 +79,15 @@ mkdir -p "$bin_dir"
 tar -xzf "$archive" -C "$tmp_dir"
 install -m 755 "$tmp_dir/dotman" "$bin_path"
 
+mkdir -p "$bundle_dir"
+tar -xzf "$bundle_archive" -C "$bundle_dir"
+
 echo "dotman installed to $bin_path"
-echo "Run: $bin_path"
+echo "dotfiles bundle installed to $bundle_dir"
+
+if [ "$yes" -eq 1 ]; then
+  (cd "$bundle_dir" && "$bin_path" --auto plan >/dev/null)
+  echo "dotman plan verified"
+else
+  echo "Run: cd $bundle_dir && $bin_path"
+fi

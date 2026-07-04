@@ -13,7 +13,9 @@ It uses a flat YAML config to install software, link config files, and run setup
 
 - curl
 
-The installer downloads `dotman` and the latest dotfiles bundle. From there, `dotman` handles the rest (Homebrew, fish, /etc/shells, etc.) interactively in the TUI.
+The installer downloads `dotman` and the latest dotfiles bundle. Full
+first-run automation (package manager, fish, login shell) is still planned;
+v0.2 alpha focuses on the TUI Plan → Confirm → Run flow.
 
 For first-time setup, install `dotman` and the published dotfiles bundle from
 the site:
@@ -22,14 +24,17 @@ the site:
 curl -fsSL https://dotfiles.tabsp.com/install | sh
 ```
 
-This runs the new-user wizard inside the TUI: detect platform → install missing
-package manager → clone your dotfiles → plan → confirm → run.
+This installs the binary and expands the bundle to
+`~/.local/share/tabsp-dotfiles`.
 
 For unattended setup (CI, scripted setup):
 
 ```sh
 curl -fsSL https://dotfiles.tabsp.com/install | sh -s -- --yes
 ```
+
+`--yes` verifies the installed bundle with `dotman --auto plan`; it does not
+run a full deploy yet.
 
 ## Usage
 
@@ -118,36 +123,38 @@ gaps that need real-world testing or follow-up work.
 
 ### Known bugs
 
-- `dotman --auto plan` fails to parse `dotman.yaml` in real terminal runs
-  (`cargo test config::` passes; needs real shell debugging).
-- E2E Docker test not actually run — `make e2e-linux` is configured but
-  not executed in this iteration.
+- No known blocking bug after local unit/lint checks and Docker E2E smoke.
 
 ### Not yet implemented
 
-- **BackupReview screen**: plan stage supports `backup: true` and creates
-  backup paths, but there's no pre-run TUI screen that lists which files
-  will be backed up and asks for confirmation.
 - **FirstRunScreen**: when no `dotman.yaml` is found, dotman errors out.
   A first-run wizard (auto-install package manager, clone repo) was
   planned but not implemented.
-- **TUI log streaming**: the RunView shows a placeholder log pane.
-  Live `stdout` from running shell commands is captured by `execute.rs`
-  but not piped into the TUI in real time.
+- **Subprocess live pipe**: RunView receives execution events and captured
+  command output, but long-running subprocess stdout/stderr is still delivered
+  after each action completes rather than line-by-line while the process runs.
 - **Visual mockups / screenshots**: no PNG mockups in `assets/screenshots/`.
 
 ### What works
 
-- 33 unit tests pass (`cargo test`)
+- 39 unit tests pass (`cargo test`)
 - `cargo build --release` produces a 3.7MB binary
 - `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` clean
-- All 6 TUI screens scaffolded (MainMenu / PlanView / RunView /
-  ResultView / HistoryView / RunReplay) with Catppuccin Mocha theme
+- TUI flow includes MainMenu / PlanView / ConfirmView / RunView /
+  ResultView / HistoryView / RunReplay with Catppuccin Mocha theme
   and Nerd Font icons
+- Explicit TUI subcommands open their target screens directly
+- Plan selections persist to `~/.local/share/dotman/state.toml`
+- RunView shows execution events, captured command output, and supports
+  cooperative abort between actions
 - Tool DB has 17 entries covering the user's actual tools
+- `dotman --auto plan` parses the real `dotman.yaml` and emits JSON
 - `dotman --auto deploy` runs end-to-end (loads config → builds plan →
   executes → saves run log)
 - Per-step retry for install actions (5s/10s/20s exponential backoff)
+- `dotman new-link <target> <source>` updates the `links:` map in
+  `dotman.yaml`
+- `make e2e-linux` passes the installer/bundle/plan Docker smoke test
 - `dotman history` and `dotman run <ulid>` browse and replay past runs
 - State persistence to `~/.local/share/dotman/state.toml`
 
