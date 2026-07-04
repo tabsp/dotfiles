@@ -28,3 +28,6 @@ config/ghostty/config.local
 # Superpowers working documents
 docs/superpowers/
 .superpowers/
+
+# AI / Claude Code local configuration
+.claude/
