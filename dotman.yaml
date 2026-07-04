@@ -9,6 +9,15 @@ package_managers:
   arch:    pacman
   fedora:  dnf
 
+# Auto-install pkg manager if missing (idempotent: skips if already present).
+auto_install_pkg_manager: true
+
+# Auto-clone dotfiles repo before linking (idempotent: skips if target exists).
+auto_clone_repo:
+  url: https://github.com/tabsp/dotfiles.git
+  target: ~/Workspace/dotfiles
+  branch: main
+
 # 1. Terminal / 2. Shell / 3. Multiplexer / 4. Software / 5. Enhancement
 install:
   # 1. Terminal

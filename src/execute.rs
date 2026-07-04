@@ -12,7 +12,7 @@ use crate::ops::link::{self, LinkSettings};
 use crate::ops::shell::{self};
 use anyhow::Result;
 use std::path::Path;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 /// Default retry config (used when item doesn't override).
 const DEFAULT_INSTALL_RETRIES: u32 = 2;
@@ -267,7 +267,8 @@ fn run_install_with_retry(
     let entry = install::find(&db, binary);
 
     let os = crate::package_managers::detect_os();
-    let pkg_mgr = pkg_mgr_for(pkg_mgrs, os);
+    let pkg_mgr = crate::package_managers::resolve_pkg_mgr_name(pkg_mgrs)
+        .unwrap_or_else(|| fallback_pkg_mgr_key(os));
 
     let entry = match entry {
         Some(e) => e,
@@ -317,6 +318,16 @@ fn run_install_with_retry(
     Ok((ActionStatus::WillFail, last_err, attempt, logs))
 }
 
+/// Fallback OS key used when no package manager is configured for the current platform.
+fn fallback_pkg_mgr_key(os: crate::package_managers::Os) -> String {
+    use crate::package_managers::Os;
+    match os {
+        Os::Mac => "macos".into(),
+        Os::Linux => "linux".into(),
+        Os::Unknown => "unknown".into(),
+    }
+}
+
 fn emit_install_output(logs: &mut Vec<String>, stdout: &str, stderr: &str) {
     for line in stdout.lines().chain(stderr.lines()) {
         if !line.trim().is_empty() {
@@ -325,56 +336,11 @@ fn emit_install_output(logs: &mut Vec<String>, stdout: &str, stderr: &str) {
     }
 }
 
-fn pkg_mgr_for(
-    cfg: &crate::config::PackageManagerConfig,
-    os: crate::package_managers::Os,
-) -> String {
-    use crate::package_managers::Os;
-    let key = match os {
-        Os::Mac => "macos",
-        Os::Linux => "linux",
-        Os::Unknown => "unknown",
-    };
-    // Try the OS key first, then fall back to a default.
-    // We do per-distro lookup inline here for simplicity.
-    if let Some(p) = detect_distro_pkg_mgr(cfg) {
-        return p;
-    }
-    key.to_string()
-}
-
-fn detect_distro_pkg_mgr(cfg: &crate::config::PackageManagerConfig) -> Option<String> {
-    // /etc/os-release has ID=ubuntu / ID=debian / ID=arch / ID=fedora.
-    let contents = std::fs::read_to_string("/etc/os-release").ok()?;
-    for line in contents.lines() {
-        if let Some(rest) = line.strip_prefix("ID=") {
-            let id = rest.trim().trim_matches('"');
-            let key = match id {
-                "ubuntu" => "ubuntu",
-                "debian" => "debian",
-                "arch" => "arch",
-                "fedora" => "fedora",
-                _ => return None,
-            };
-            return match key {
-                "macos" => cfg.macos.clone(),
-                "ubuntu" => cfg.ubuntu.clone(),
-                "debian" => cfg.debian.clone(),
-                "arch" => cfg.arch.clone(),
-                "fedora" => cfg.fedora.clone(),
-                _ => None,
-            };
-        }
-    }
-    None
-}
-
 fn now_iso() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("epoch:{now}")
+    time::OffsetDateTime::now_local()
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| String::new())
 }
 
 #[cfg(test)]

@@ -103,3 +103,34 @@ fn print_summary(run: &Run, saved: &std::path::Path) {
     );
     println!("log: {}", saved.display());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn print_summary_does_not_panic() {
+        let run = Run {
+            id: "test".into(),
+            plan_id: "test".into(),
+            mode: crate::model::Mode::Deploy,
+            started_at: "2026-01-01T00:00:00Z".into(),
+            finished_at: Some("2026-01-01T00:01:00Z".into()),
+            status: crate::model::RunStatus::Success,
+            config_hash: "abc".into(),
+            items: vec![crate::model::RunItem {
+                id: "1".into(),
+                name: "fish".into(),
+                status: crate::model::ActionStatus::NoChange,
+                started_at: None,
+                finished_at: None,
+                duration_ms: Some(100),
+                attempts: 1,
+                error: None,
+            }],
+        };
+        let saved = std::path::Path::new("/tmp/test-run.json");
+        // Should not panic — just prints to stdout
+        print_summary(&run, saved);
+    }
+}

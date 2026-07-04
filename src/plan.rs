@@ -5,10 +5,9 @@
 use crate::config::Config;
 use crate::model::{Action, ActionStatus, Plan, PlanItem};
 use crate::model::{HostInfo, Mode};
-use crate::package_managers::detect_os;
+use crate::package_managers::{detect_os, resolve_pkg_mgr_name};
 use anyhow::Result;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 use ulid::Ulid;
 
 /// Layer assignment + selection strategy.
@@ -70,6 +69,62 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     let mut items: Vec<PlanItem> = Vec::new();
     let mut used_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+    // Step 0a: auto-clone repo (runs first)
+    if let Some(repo) = &config.auto_clone_repo {
+        let id = unique_id("auto-clone-repo", &mut used_ids);
+        let name = repo
+            .url
+            .rsplit('/')
+            .next()
+            .unwrap_or(&repo.url)
+            .trim_end_matches(".git")
+            .to_string();
+        let mut cmd = format!("git clone {}", repo.url);
+        if let Some(branch) = &repo.branch {
+            cmd.push_str(&format!(" --branch {branch}"));
+        }
+        // Expand leading `~/` to $HOME so the shell command works on all POSIX shells.
+        let target_str = repo.target.to_string_lossy();
+        let expanded = if let Some(rest) = target_str.strip_prefix("~/") {
+            format!("$HOME/{rest}")
+        } else {
+            target_str.to_string()
+        };
+        cmd.push_str(&format!(" {expanded}"));
+        let guard = format!("! test -d {expanded}");
+        items.push(PlanItem {
+            id,
+            name: format!("clone {name}"),
+            layer: "misc".into(),
+            actions: vec![Action::Shell {
+                command: cmd,
+                description: Some("Auto-clone dotfiles repository".into()),
+                optional: false,
+                if_condition: Some(guard),
+            }],
+            selected: true,
+        });
+    }
+
+    // Step 0b: auto-install package manager
+    if config.auto_install_pkg_manager
+        && let Some(install_cmd) = auto_pkg_mgr_install_cmd(&config.package_managers)
+    {
+        let id = unique_id("auto-pkg-mgr", &mut used_ids);
+        items.push(PlanItem {
+            id,
+            name: "auto-install package manager".into(),
+            layer: "misc".into(),
+            actions: vec![Action::Shell {
+                command: install_cmd.cmd,
+                description: Some("Auto-install package manager".into()),
+                optional: false,
+                if_condition: Some(install_cmd.guard),
+            }],
+            selected: true,
+        });
+    }
+
     // Step 1: install items -> PlanItems, layer from tool_layer()
     for tool in &config.install {
         let layer = tool_layer(tool).unwrap_or("software").to_string();
@@ -90,17 +145,12 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     // Step 2: links -> auto-attach to install or standalone
     for link in &config.links {
         let owner = find_owner(&link.target, &mut items);
-        let status = check_link_status(&link.target, &link.source);
         let action = Action::Link {
             target: link.target.clone(),
             source: link.source.clone(),
         };
         if let Some(item) = owner {
             item.actions.push(action);
-            // Propagate worst status
-            if status > item.primary_status() {
-                item.set_primary_status(status);
-            }
         } else {
             let name = link.target.display().to_string();
             let id = unique_id(&name, &mut used_ids);
@@ -117,19 +167,11 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     // Step 3: create -> auto-attach
     for target in &config.create {
         let owner = find_owner(target, &mut items);
-        let status = if target.exists() && target.is_dir() {
-            ActionStatus::NoChange
-        } else {
-            ActionStatus::WillCreate
-        };
         let action = Action::Create {
             target: target.clone(),
         };
         if let Some(item) = owner {
             item.actions.push(action);
-            if status > item.primary_status() {
-                item.set_primary_status(status);
-            }
         } else {
             let name = target.display().to_string();
             let id = unique_id(&name, &mut used_ids);
@@ -344,6 +386,26 @@ fn hash_file(path: &Path) -> Result<String> {
     Ok(format!("{digest:x}"))
 }
 
+/// Map configured package manager name to an auto-install shell command and guard.
+/// Returns `None` when there is no known auto-install procedure for this platform.
+struct AutoInstallCmd {
+    cmd: String,
+    guard: String,
+}
+
+fn auto_pkg_mgr_install_cmd(
+    pkg_mgrs: &crate::config::PackageManagerConfig,
+) -> Option<AutoInstallCmd> {
+    let pkg_mgr = resolve_pkg_mgr_name(pkg_mgrs)?;
+    match pkg_mgr.as_str() {
+        "brew" => Some(AutoInstallCmd {
+            cmd: r#"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""#.into(),
+            guard: "! command -v brew".into(),
+        }),
+        _ => None,
+    }
+}
+
 fn hostname() -> String {
     std::env::var("HOSTNAME")
         .or_else(|_| std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()))
@@ -351,13 +413,10 @@ fn hostname() -> String {
 }
 
 fn now_iso() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Lightweight ISO 8601 from epoch seconds.
-    // Phase 5+ will use the `time` crate for proper formatting.
-    format!("epoch:{now}")
+    time::OffsetDateTime::now_local()
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| String::new())
 }
 
 // PartialOrd on ActionStatus so we can keep the "worst" status.
@@ -395,14 +454,6 @@ impl PlanItem {
             .map(status_for_action)
             .max()
             .unwrap_or(ActionStatus::WillRun)
-    }
-
-    pub fn set_primary_status(&mut self, s: ActionStatus) {
-        // Stash in the first action's logical position; TUI will compute on the fly.
-        // For now, replace the first action's status via a marker.
-        // We don't have per-action status; this is a no-op for the model.
-        // The primary_status() method computes the right value on each call.
-        let _ = s;
     }
 }
 
@@ -557,5 +608,83 @@ mod tests {
             })
             .unwrap();
         assert!(shell.selected); // misc default on
+    }
+
+    #[test]
+    fn auto_clone_repo_adds_shell_action() {
+        let mut cfg = sample_config();
+        cfg.auto_clone_repo = Some(crate::config::CloneRepo {
+            url: "https://github.com/user/dotfiles.git".into(),
+            target: PathBuf::from("/tmp/test-dotfiles"),
+            branch: None,
+        });
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let clone = plan
+            .items
+            .iter()
+            .find(|i| i.name.starts_with("clone "))
+            .unwrap();
+        assert!(clone.selected);
+        assert!(matches!(
+            clone.actions[0],
+            Action::Shell { ref command, .. } if command.contains("git clone")
+        ));
+        assert_eq!(clone.layer, "misc");
+    }
+
+    #[test]
+    fn auto_clone_repo_uses_branch_when_set() {
+        let mut cfg = sample_config();
+        cfg.auto_clone_repo = Some(crate::config::CloneRepo {
+            url: "https://github.com/user/dotfiles.git".into(),
+            target: PathBuf::from("/tmp/test-dotfiles"),
+            branch: Some("main".into()),
+        });
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let clone = plan
+            .items
+            .iter()
+            .find(|i| i.name.starts_with("clone "))
+            .unwrap();
+        let cmd = match &clone.actions[0] {
+            Action::Shell { command, .. } => command,
+            _ => panic!("expected Shell action"),
+        };
+        assert!(cmd.contains(" --branch main"));
+    }
+
+    #[test]
+    fn auto_install_pkg_manager_adds_shell_action_when_brew() {
+        let mut cfg = sample_config();
+        cfg.auto_install_pkg_manager = true;
+        cfg.package_managers.macos = Some("brew".into());
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let pkg = plan
+            .items
+            .iter()
+            .find(|i| i.name == "auto-install package manager");
+        // On macOS brew is recognized; on Linux with no distro match it's None.
+        if cfg!(target_os = "macos") {
+            let pkg = pkg.expect("auto-install item should exist on macOS with brew configured");
+            assert!(pkg.selected);
+            assert!(matches!(
+                pkg.actions[0],
+                Action::Shell { ref if_condition, .. } if if_condition.as_deref() == Some("! command -v brew")
+            ));
+        }
+    }
+
+    #[test]
+    fn auto_install_no_action_when_pkg_mgr_unknown() {
+        let mut cfg = sample_config();
+        cfg.auto_install_pkg_manager = true;
+        cfg.package_managers = PackageManagerConfig::default(); // no pkg mgr configured
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let pkg = plan
+            .items
+            .iter()
+            .find(|i| i.name == "auto-install package manager");
+        // No recognized pkg mgr → no plan item added
+        assert!(pkg.is_none());
     }
 }

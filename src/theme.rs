@@ -29,3 +29,34 @@ pub const CATPPUCCIN_MOCHA: Theme = Theme {
     running: Color::Rgb(250, 179, 135), // #fab387 peach
     skip: Color::Rgb(88, 91, 112),      // #585b70 gray
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catppuccin_mocha_bg_matches_expected() {
+        assert_eq!(CATPPUCCIN_MOCHA.bg, Color::Rgb(30, 30, 46));
+    }
+
+    #[test]
+    fn catppuccin_mocha_fg_matches_expected() {
+        assert_eq!(CATPPUCCIN_MOCHA.fg, Color::Rgb(205, 214, 244));
+    }
+
+    #[test]
+    fn catppuccin_mocha_primary_matches_expected() {
+        assert_eq!(CATPPUCCIN_MOCHA.primary, Color::Rgb(203, 166, 247));
+    }
+
+    #[test]
+    fn catppuccin_mocha_success_matches_expected() {
+        assert_eq!(CATPPUCCIN_MOCHA.success, Color::Rgb(166, 227, 161));
+    }
+
+    #[test]
+    fn all_theme_colors_are_non_default() {
+        assert_ne!(CATPPUCCIN_MOCHA.bg, Color::Reset);
+        assert_ne!(CATPPUCCIN_MOCHA.fg, Color::Reset);
+    }
+}
