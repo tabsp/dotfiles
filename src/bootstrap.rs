@@ -3,7 +3,9 @@
 //! dotman needs git to clone the dotfiles repo. This module handles detection
 //! and platform-appropriate installation.
 
-use anyhow::{Context, Result};
+#[cfg(target_os = "macos")]
+use anyhow::Context;
+use anyhow::Result;
 use std::process::Command;
 
 /// Check whether git is available on $PATH.
@@ -74,24 +76,20 @@ pub fn auto_install_git() -> Result<bool> {
     #[cfg(target_os = "linux")]
     {
         // Try apt (Debian/Ubuntu)
-        if which("apt-get") {
-            if run_bootstrap_cmd("sudo apt-get update -qq && sudo apt-get install -y -qq git") {
-                return Ok(true);
-            }
+        if which("apt-get")
+            && run_bootstrap_cmd("sudo apt-get update -qq && sudo apt-get install -y -qq git")
+        {
+            return Ok(true);
         }
         // Try dnf (Fedora)
-        if which("dnf") {
-            if run_bootstrap_cmd("sudo dnf install -y git") {
-                return Ok(true);
-            }
+        if which("dnf") && run_bootstrap_cmd("sudo dnf install -y git") {
+            return Ok(true);
         }
         // Try pacman (Arch)
-        if which("pacman") {
-            if run_bootstrap_cmd("sudo pacman -Sy --needed --noconfirm git") {
-                return Ok(true);
-            }
+        if which("pacman") && run_bootstrap_cmd("sudo pacman -Sy --needed --noconfirm git") {
+            return Ok(true);
         }
-        return Ok(false);
+        Ok(false)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
