@@ -30,7 +30,7 @@ pub const SPINNER_CIRCLE: &[&str] = &["◐", "◓", "◑", "◒"];
 // Misc
 pub const ICON_GEAR: &str = "⚙";
 pub const ICON_INFO: &str = "ⓘ";
-pub const ICON_LOCK: &str = "🔐";
+pub const ICON_LAPTOP: &str = "\u{f035b}";
 
 // Progress bar
 pub const PROGRESS_FULL: &str = "█";

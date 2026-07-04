@@ -161,7 +161,9 @@ pub fn run(mode: Mode) -> Result<(), String> {
 
 fn initialize_screen(app: &mut App) {
     match app.mode.clone() {
-        Mode::Menu => {}
+        Mode::Menu => {
+            app.runs = store::list().unwrap_or_default();
+        }
         Mode::Deploy | Mode::Bootstrap | Mode::Plan => {
             if let Err(e) = app.build_plan() {
                 app.status_message = e;
@@ -312,12 +314,81 @@ fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
             app.runs = store::list().unwrap_or_default();
             app.screen = Screen::HistoryView;
         }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let i = app.list_state.selected().unwrap_or(0);
+            if i + 1 < 5 {
+                app.list_state.select(Some(i + 1));
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let i = app.list_state.selected().unwrap_or(0);
+            if i > 0 {
+                app.list_state.select(Some(i - 1));
+            }
+        }
+        KeyCode::Enter => match app.list_state.selected() {
+            Some(0) => {
+                app.mode = Mode::Deploy;
+                app.build_plan().ok();
+                app.screen = Screen::PlanView;
+            }
+            Some(1) => {
+                app.mode = Mode::Bootstrap;
+                app.build_plan().ok();
+                app.screen = Screen::PlanView;
+            }
+            Some(2) => {
+                app.mode = Mode::Plan;
+                app.build_plan().ok();
+                app.screen = Screen::PlanView;
+            }
+            Some(3) => {
+                app.runs = store::list().unwrap_or_default();
+                app.screen = Screen::HistoryView;
+            }
+            Some(4) => app.should_quit = true,
+            _ => {}
+        },
         _ => {}
     }
     Ok(())
 }
 
-fn render_main_menu(f: &mut Frame, app: &App) {
+fn render_main_menu(f: &mut Frame, app: &mut App) {
+    fn fmt_epoch(s: &str) -> String {
+        let secs = s
+            .strip_prefix("epoch:")
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(0);
+        let days = secs / 86400;
+        let mut y = 1970i64;
+        let mut d = days;
+        loop {
+            let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+            let ny = if leap { 366 } else { 365 };
+            if d < ny {
+                break;
+            }
+            d -= ny;
+            y += 1;
+        }
+        let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+        let mdays: &[i64] = if leap {
+            &[31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        } else {
+            &[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        };
+        let mut m = 1usize;
+        for &md in mdays {
+            if d < md {
+                break;
+            }
+            d -= md;
+            m += 1;
+        }
+        format!("{}-{:02}-{:02}", y, m, d + 1)
+    }
+
     let area = f.area();
     let block = Block::default()
         .borders(Borders::ALL)
@@ -325,59 +396,199 @@ fn render_main_menu(f: &mut Frame, app: &App) {
         .border_style(Style::default().fg(CATPPUCCIN_MOCHA.fg_dim));
     f.render_widget(block, area);
 
+    let has_run = !app.runs.is_empty();
+    let summary_size: u16 = if has_run { 3 } else { 2 };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .margin(2)
+        .margin(1)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(8),
+            Constraint::Length(1),
+            Constraint::Length(15),
+            Constraint::Length(summary_size),
             Constraint::Length(1),
         ])
         .split(area);
 
+    let title_prefix = format!("{} dotman - Main Menu ", icons::ICON_GEAR);
+    let divider_width = usize::from(chunks[0].width).saturating_sub(title_prefix.chars().count());
     let title = Paragraph::new(Line::from(vec![
-        Span::styled("⚙ ", Style::default().fg(CATPPUCCIN_MOCHA.primary)),
         Span::styled(
-            "dotman",
+            format!("{} dotman - Main Menu", icons::ICON_GEAR),
             Style::default()
-                .fg(CATPPUCCIN_MOCHA.primary)
+                .fg(CATPPUCCIN_MOCHA.fg_dim)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            " — v2 dev env config assistant",
+            format!(" {}", "─".repeat(divider_width)),
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
         ),
     ]));
     f.render_widget(title, chunks[0]);
 
-    let options: Vec<ListItem> = [
-        "[d]  Deploy".to_string(),
-        "[b]  Bootstrap".to_string(),
-        "[p]  Plan only".to_string(),
-        "[h]  History".to_string(),
-        "[q]  Quit".to_string(),
-    ]
-    .into_iter()
-    .map(ListItem::new)
-    .collect();
-    let list = List::new(options)
-        .highlight_style(
-            Style::default()
-                .fg(CATPPUCCIN_MOCHA.accent)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
-    f.render_stateful_widget(list, chunks[1], &mut app.list_state.clone());
+    // Menu items with two-line layout (title + description)
+    let menu_items: [(&str, &str, &str); 5] = [
+        ("\u{f0425}", "Deploy", "Sync dotfiles to this machine"),
+        (
+            "\u{f01a7}",
+            "Bootstrap",
+            "Provision a new machine from scratch",
+        ),
+        (
+            "\u{f0349}",
+            "Plan only",
+            "Preview changes without executing",
+        ),
+        ("\u{f02da}", "History", "Browse past deployment records"),
+        ("\u{f015a}", "Quit", "Exit dotman"),
+    ];
+    let mut styled_items: Vec<ListItem> = Vec::new();
+    let area_width = usize::from(chunks[1].width);
+    for (i, &(icon, title, desc)) in menu_items.iter().enumerate() {
+        let is_sel = app.list_state.selected() == Some(i);
+        let title_text = format!("{} {}", icon, title);
+        if is_sel {
+            let bg = focus_bg();
+            let title_content_w = 2 + title_text.chars().count();
+            let desc_content_w = 4 + desc.chars().count();
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled(" ", Style::default().bg(bg)),
+                    Span::styled("▎", Style::default().fg(CATPPUCCIN_MOCHA.primary).bg(bg)),
+                    Span::styled(
+                        title_text.clone(),
+                        Style::default()
+                            .bg(bg)
+                            .fg(CATPPUCCIN_MOCHA.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " ".repeat(area_width.saturating_sub(title_content_w)),
+                        Style::default().bg(bg),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled(" ", Style::default().bg(bg)),
+                    Span::styled("▎", Style::default().fg(CATPPUCCIN_MOCHA.primary).bg(bg)),
+                    Span::styled("  ", Style::default().bg(bg)),
+                    Span::styled(desc, Style::default().bg(bg).fg(CATPPUCCIN_MOCHA.fg_dim)),
+                    Span::styled(
+                        " ".repeat(area_width.saturating_sub(desc_content_w)),
+                        Style::default().bg(bg),
+                    ),
+                ]),
+            ];
+            if i == 0 {
+                lines.insert(0, Line::from(" "));
+            }
+            if i < 4 {
+                lines.push(Line::from(" "));
+            }
+            styled_items.push(ListItem::new(lines));
+        } else {
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(title_text.clone(), Style::default().fg(CATPPUCCIN_MOCHA.fg)),
+                ]),
+                Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(desc, Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+                ]),
+            ];
+            if i == 0 {
+                lines.insert(0, Line::from(" "));
+            }
+            if i < 4 {
+                lines.push(Line::from(" "));
+            }
+            styled_items.push(ListItem::new(lines));
+        }
+    }
+    let list = List::new(styled_items)
+        .highlight_style(Style::default())
+        .highlight_symbol("");
+    f.render_stateful_widget(list, chunks[1], &mut app.list_state);
 
-    let status = if app.status_message.is_empty() {
-        "press d/b/p/h/q".to_string()
+    // Summary
+    let cfg = app.config.as_ref();
+    let pkg = cfg.map(|c| c.install.len()).unwrap_or(0);
+    let links = cfg.map(|c| c.links.len()).unwrap_or(0);
+    let dirs = cfg.map(|c| c.create.len()).unwrap_or(0);
+    let shells = cfg.map(|c| c.shell.len()).unwrap_or(0);
+
+    let os_part = if cfg!(target_os = "macos") {
+        "macOS"
     } else {
-        app.status_message.clone()
+        "Linux"
     };
-    f.render_widget(
-        Paragraph::new(status).style(Style::default().fg(CATPPUCCIN_MOCHA.warning)),
-        chunks[2],
+    let arch_part = std::env::consts::ARCH;
+    let summary_line_str = format!(
+        "  {} {os_part} {arch_part} · {pkg} packages · {links} links · {dirs} directories · {shells} shell steps",
+        icons::ICON_LAPTOP
     );
+
+    let summary_width = usize::from(chunks[2].width).saturating_sub(2);
+    let summary_divider = format!("  {}", "─".repeat(summary_width));
+
+    let mut summary_lines = vec![
+        Line::from(vec![Span::styled(
+            summary_divider,
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        )]),
+        Line::from(vec![Span::styled(
+            summary_line_str,
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        )]),
+    ];
+
+    if let Some(run) = app.runs.first() {
+        let status_icon = match run.status {
+            RunStatus::Success => icons::ICON_OK,
+            RunStatus::Failed => icons::ICON_FAIL,
+            RunStatus::Aborted | RunStatus::Running => icons::ICON_WARN,
+        };
+        let status_color = match run.status {
+            RunStatus::Success => CATPPUCCIN_MOCHA.success,
+            RunStatus::Failed => CATPPUCCIN_MOCHA.danger,
+            RunStatus::Aborted | RunStatus::Running => CATPPUCCIN_MOCHA.warning,
+        };
+        let mode_str = format!("{:?}", run.mode).to_lowercase();
+        let date_str = fmt_epoch(&run.started_at);
+        let total = run.items.len();
+        let failed = run.items.iter().filter(|i| i.error.is_some()).count();
+        summary_lines.push(Line::from(vec![
+            Span::styled(
+                format!("  last run: {date_str}  "),
+                Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+            ),
+            Span::styled(status_icon, Style::default().fg(status_color)),
+            Span::styled(
+                format!(" {mode_str} ({total} items, {failed} fail)"),
+                Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+            ),
+        ]));
+    }
+
+    f.render_widget(Paragraph::new(summary_lines), chunks[2]);
+
+    let help = Paragraph::new(Line::from(vec![
+        keycap("↑↓"),
+        hint(" move  "),
+        keycap("enter"),
+        hint(" select  "),
+        keycap("d"),
+        hint(" deploy  "),
+        keycap("b"),
+        hint(" bootstrap  "),
+        keycap("p"),
+        hint(" plan  "),
+        keycap("h"),
+        hint(" history  "),
+        keycap("q"),
+        hint(" quit"),
+    ]));
+    f.render_widget(help, chunks[3]);
 }
 
 // ---------------- PlanView ----------------
@@ -588,7 +799,9 @@ fn render_plan(f: &mut Frame, app: &mut App) {
                     items.push(selected_item_line(it, row_width));
                 } else {
                     let line = Line::from(vec![
-                        Span::styled("  │  ", guide_style()),
+                        Span::raw("  "),
+                        Span::styled("│", guide_style()),
+                        Span::raw("  "),
                         checkbox_span(it.selected, false),
                         Span::raw("  "),
                         Span::styled(item_label(it), Style::default().fg(CATPPUCCIN_MOCHA.fg)),
@@ -597,13 +810,19 @@ fn render_plan(f: &mut Frame, app: &mut App) {
                 }
             }
             PlanRow::InlineItems(item_indices) => {
-                let mut spans = vec![Span::styled("  │  ", guide_style())];
+                let mut spans = vec![
+                    Span::raw("  "),
+                    Span::styled("│", guide_style()),
+                    Span::raw("  "),
+                ];
                 for (i, item_idx) in item_indices.iter().enumerate() {
                     let it = &plan.items[*item_idx];
                     let selected_cell = selected_row && app.grid_col == i;
                     spans.extend(grid_cell_spans(it, cell_width, selected_cell));
                     if i + 1 < item_indices.len() {
-                        spans.push(Span::styled(" │ ", grid_rule_style()));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled("│", grid_rule_style()));
+                        spans.push(Span::raw(" "));
                     }
                 }
                 items.push(ListItem::new(Line::from(spans)));
@@ -831,7 +1050,6 @@ fn keep_selection_in_range(app: &mut App) {
 
 fn selected_header_line(content: &str) -> ListItem<'static> {
     ListItem::new(Line::from(vec![
-        Span::raw(" "),
         Span::styled("▎", Style::default().fg(CATPPUCCIN_MOCHA.primary)),
         Span::raw(" "),
         Span::styled(
@@ -846,12 +1064,12 @@ fn selected_header_line(content: &str) -> ListItem<'static> {
 fn selected_item_line(item: &PlanItem, width: usize) -> ListItem<'static> {
     let bg = focus_bg();
     let label = item_label(item);
-    let fixed_width = 6;
+    let fixed_width = 7;
     let label_width = width.saturating_sub(fixed_width);
     ListItem::new(Line::from(vec![
-        Span::raw(" "),
+        Span::styled("  ", Style::default().bg(bg)),
+        Span::styled("│", guide_style().bg(bg)),
         Span::styled("▎", Style::default().fg(CATPPUCCIN_MOCHA.primary).bg(bg)),
-        Span::styled(" ", Style::default().bg(bg)),
         checkbox_span(item.selected, true),
         Span::styled("  ", Style::default().bg(bg)),
         Span::styled(
@@ -881,17 +1099,12 @@ fn grid_cell_spans(item: &PlanItem, width: usize, focused: bool) -> Vec<Span<'st
     let fixed_width = prefix_width + 3;
     let label_width = width.saturating_sub(fixed_width);
     let prefix = if focused { "▎" } else { "  " };
+    let mut prefix_style = Style::default();
+    if focused {
+        prefix_style = prefix_style.fg(CATPPUCCIN_MOCHA.primary).bg(focus_bg());
+    }
     vec![
-        Span::styled(
-            prefix,
-            Style::default()
-                .fg(if focused {
-                    CATPPUCCIN_MOCHA.primary
-                } else {
-                    CATPPUCCIN_MOCHA.skip
-                })
-                .bg(bg.unwrap_or(CATPPUCCIN_MOCHA.bg)),
-        ),
+        Span::styled(prefix, prefix_style),
         checkbox_span(item.selected, focused),
         Span::styled("  ", span_bg_style(bg)),
         Span::styled(
