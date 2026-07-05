@@ -55,6 +55,10 @@ pub enum ExecuteEvent {
         name: String,
         status: ActionStatus,
     },
+    SudoPrompt {
+        item: String,
+        response: mpsc::Sender<bool>,
+    },
     Aborted,
 }
 
@@ -65,12 +69,29 @@ pub fn execute(plan: &Plan, config: &Config) -> Result<Run> {
 pub fn execute_with_events<F, C>(
     plan: &Plan,
     config: &Config,
-    mut emit: F,
+    emit: F,
     should_abort: C,
 ) -> Result<Run>
 where
     F: FnMut(ExecuteEvent),
     C: Fn() -> bool,
+{
+    execute_with_events_and_sudo(plan, config, emit, should_abort, |_| {
+        shell::pre_cache_sudo().unwrap_or(false)
+    })
+}
+
+pub fn execute_with_events_and_sudo<F, C, S>(
+    plan: &Plan,
+    config: &Config,
+    mut emit: F,
+    should_abort: C,
+    mut sudo_auth: S,
+) -> Result<Run>
+where
+    F: FnMut(ExecuteEvent),
+    C: Fn() -> bool,
+    S: FnMut(&str) -> bool,
 {
     let started_at = now_iso();
     let mut items: Vec<RunItem> = Vec::new();
@@ -134,6 +155,7 @@ where
                         &plan_item.name,
                         &mut emit,
                         &should_abort,
+                        &mut sudo_auth,
                     )?;
                     item_output.extend(output);
                     cap_output_len(&mut item_output);
@@ -218,12 +240,10 @@ where
                         push_output_line(&mut item_output, OutputStream::Action, &msg);
                         continue;
                     }
-                    // Refresh sudo timestamp before commands that use sudo.
-                    // The initial pre_cache_sudo() prompts interactively;
-                    // refresh_sudo() is non-interactive and just extends
-                    // the cached session so it doesn't expire mid-run.
+                    // Keep sudo fresh before commands that need it. This must
+                    // stay non-interactive so abort can still work in the TUI.
                     if shell::command_contains_sudo(command)
-                        && !shell::refresh_sudo().unwrap_or(false)
+                        && !ensure_sudo_session(&plan_item.name, &mut sudo_auth)
                     {
                         let msg = "sudo session expired — re-run to re-authenticate".to_string();
                         emit(ExecuteEvent::ActionMessage {
@@ -425,6 +445,7 @@ fn run_install_streaming<F, C>(
     item_name: &str,
     emit: &mut F,
     should_abort: &C,
+    sudo_auth: &mut impl FnMut(&str) -> bool,
 ) -> Result<(ActionStatus, Option<String>, u32, Vec<OutputLine>)>
 where
     F: FnMut(ExecuteEvent),
@@ -445,10 +466,16 @@ where
         }
     };
 
-    // Font install: build a shell command from the tool entry and run it
-    // through the streaming pipeline. Fonts are source-url installs, not
-    // package-manager installs, so they do not require a platform command.
-    if entry.kind == "font" {
+    let pkg_mgr = crate::package_managers::resolve_pkg_mgr_name(pkg_mgrs)
+        .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
+    let platform_cmd = install_command_for_platform(&entry, &pkg_mgr);
+
+    // Fonts can use package-manager installs on platforms where a package
+    // exists, with source_url as a fallback for platforms without one.
+    if entry.kind == "font"
+        && (platform_cmd.is_none()
+            || matches!(platform_cmd, Some(Err(InstallCommandError::UnsupportedOs))))
+    {
         if entry.source_url.is_empty() {
             let msg = format!("font {} missing source_url", entry.name);
             emit(ExecuteEvent::ActionMessage {
@@ -535,12 +562,9 @@ where
         }
     }
 
-    let pkg_mgr = crate::package_managers::resolve_pkg_mgr_name(pkg_mgrs)
-        .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
-
-    let cmd = match entry.platforms.get(&pkg_mgr) {
-        Some(c) if c.supports_os(crate::package_managers::os_name()) => c.command().to_string(),
-        Some(_) => {
+    let cmd = match platform_cmd {
+        Some(Ok(cmd)) => cmd,
+        Some(Err(InstallCommandError::UnsupportedOs)) => {
             let os = crate::package_managers::os_name();
             let msg = format!("{} is not supported for {pkg_mgr} on {os}", entry.name);
             emit(ExecuteEvent::ActionMessage {
@@ -549,7 +573,7 @@ where
             });
             return Ok((ActionStatus::WillFail, Some(msg), 0, vec![]));
         }
-        None => {
+        None | Some(Err(InstallCommandError::MissingPlatform)) => {
             let msg = format!("no install command for {pkg_mgr}");
             emit(ExecuteEvent::ActionMessage {
                 item: item_name.to_string(),
@@ -583,8 +607,9 @@ where
         });
         push_output_line(&mut all_output, OutputStream::Action, &status_line);
 
-        // Refresh sudo timestamp before install commands that use sudo.
-        if shell::command_contains_sudo(&cmd) && !shell::refresh_sudo().unwrap_or(false) {
+        // Keep sudo fresh before install commands that need it. This must stay
+        // non-interactive so abort can still work in the TUI.
+        if shell::command_contains_sudo(&cmd) && !ensure_sudo_session(item_name, sudo_auth) {
             let msg = "sudo session expired — re-run to re-authenticate".to_string();
             emit(ExecuteEvent::ActionMessage {
                 item: item_name.to_string(),
@@ -653,6 +678,58 @@ fn describe_link_action(action: &link::LinkAction) -> String {
         link::LinkAction::Relink => "relink: replace wrong symlink".into(),
         link::LinkAction::Fail(reason) => format!("fail: {reason}"),
     }
+}
+
+fn ensure_sudo_session(item: &str, sudo_auth: &mut impl FnMut(&str) -> bool) -> bool {
+    shell::refresh_sudo().unwrap_or(false) || sudo_auth(item)
+}
+
+enum InstallCommandError {
+    MissingPlatform,
+    UnsupportedOs,
+}
+
+fn install_command_for_platform(
+    entry: &install::ToolEntry,
+    pkg_mgr: &str,
+) -> Option<Result<String, InstallCommandError>> {
+    let distro = crate::package_managers::distro_id();
+    let mut candidates = vec![pkg_mgr.to_string()];
+    if let Some(distro) = &distro
+        && !candidates.iter().any(|candidate| candidate == distro)
+    {
+        candidates.push(distro.clone());
+    }
+    let os = crate::package_managers::os_name().to_string();
+    if !candidates.iter().any(|candidate| candidate == &os) {
+        candidates.push(os);
+    }
+
+    let mut saw_unsupported = false;
+    for candidate in candidates {
+        if let Some(c) = entry.platforms.get(&candidate) {
+            if command_supports_current_platform(c, distro.as_deref()) {
+                return Some(Ok(c.command().into()));
+            }
+            saw_unsupported = true;
+        }
+    }
+
+    if saw_unsupported {
+        Some(Err(InstallCommandError::UnsupportedOs))
+    } else if entry.kind == "font" {
+        None
+    } else {
+        Some(Err(InstallCommandError::MissingPlatform))
+    }
+}
+
+fn command_supports_current_platform(
+    command: &install::InstallCommand,
+    distro: Option<&str>,
+) -> bool {
+    command.supports_os(crate::package_managers::os_name())
+        || distro.is_some_and(|distro| command.supports_os(distro))
 }
 
 fn describe_clean_action(action: &clean::CleanAction) -> String {

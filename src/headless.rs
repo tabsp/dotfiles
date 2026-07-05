@@ -106,6 +106,10 @@ fn run_full(cfg: &config::Config) -> Result<(), String> {
             ExecuteEvent::Aborted => {
                 println!("[dotman] run aborted");
             }
+            ExecuteEvent::SudoPrompt { response, .. } => {
+                let ok = shell::pre_cache_sudo().unwrap_or(false);
+                let _ = response.send(ok);
+            }
             ExecuteEvent::ActionStarted { .. } => {
                 // Headless: action starts are implicit from the output that follows.
             }

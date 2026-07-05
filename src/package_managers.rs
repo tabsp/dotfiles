@@ -74,6 +74,10 @@ fn detect_distro_id() -> Option<String> {
     None
 }
 
+pub fn distro_id() -> Option<String> {
+    detect_distro_id()
+}
+
 pub fn dotman_data_dir() -> Result<PathBuf> {
     let dir = dirs::data_local_dir()
         .ok_or_else(|| anyhow::anyhow!("could not determine data local dir"))?

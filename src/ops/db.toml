@@ -1,227 +1,126 @@
-# Tool database. ~20 entries covering the user's actual tools.
-# Each tool has: name, binary (for command -v), layer, per-package-manager
-# install commands.
+# Tool install database.
 #
-# Adding a tool: append a [[tools]] block. Platform selection happens in
-# dotman.yaml; this database maps package-manager keys to install commands.
+# dotman.yaml is the software list. This file only defines command templates
+# and per-tool exceptions that cannot be inferred from the tool name.
 
-[[tools]]
-name = "ghostty"
-binary = "ghostty"
-layer = "terminal"
+default_platforms = ["brew", "apt", "pacman", "dnf"]
 
-[tools.platforms.brew]
-command = "brew install --cask ghostty"
+[templates.brew]
+command = "brew install {package}"
+
+[templates.brew_cask]
+command = "brew install --cask {package}"
+platform = "brew"
 os = ["macos"]
 
-[[tools]]
-name = "kitty"
-binary = "kitty"
+[templates.apt]
+command = "sudo apt install -y {package}"
+
+[templates.pacman]
+command = "sudo pacman -S --needed --noconfirm {package}"
+
+[templates.dnf]
+command = "sudo dnf install -y {package}"
+
+[templates.ubuntu_ghostty]
+command = 'sudo -n apt-get update -qq && sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mkasberg/ghostty-ubuntu/HEAD/install.sh)"'
+platform = "ubuntu"
+os = ["ubuntu"]
+
+[templates.fedora_ghostty]
+command = "sudo dnf copr enable -y scottames/ghostty && sudo dnf install -y ghostty"
+platform = "fedora"
+os = ["fedora"]
+
+[tools.ghostty]
 layer = "terminal"
+platforms = ["brew_cask", "ubuntu_ghostty", "pacman", "fedora_ghostty"]
 
-[tools.platforms.brew]
-command = "brew install --cask kitty"
-os = ["macos"]
+[tools.kitty]
+layer = "terminal"
+platforms = ["brew_cask"]
 
-[[tools]]
-name = "fish"
-binary = "fish"
+[tools.fish]
 layer = "shell"
 
-[tools.platforms.brew]
-command = "brew install fish"
-[tools.platforms.apt]
-command = "sudo apt install -y fish"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm fish"
-[tools.platforms.dnf]
-command = "sudo dnf install -y fish"
-
-[[tools]]
-name = "tmux"
-binary = "tmux"
+[tools.tmux]
 layer = "multiplexer"
 
-[tools.platforms.brew]
-command = "brew install tmux"
-[tools.platforms.apt]
-command = "sudo apt install -y tmux"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm tmux"
-[tools.platforms.dnf]
-command = "sudo dnf install -y tmux"
-
-[[tools]]
-name = "neovim"
+[tools.neovim]
 binary = "nvim"
 layer = "software"
 
-[tools.platforms.brew]
-command = "brew install neovim"
-[tools.platforms.apt]
-command = "sudo apt install -y neovim"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm neovim"
-[tools.platforms.dnf]
-command = "sudo dnf install -y neovim"
+[tools.lazygit]
+layer = "software"
+platforms = ["brew", "pacman", "dnf"]
 
-[[tools]]
-name = "lazygit"
-binary = "lazygit"
+[tools.btop]
 layer = "software"
 
-[tools.platforms.brew]
-command = "brew install lazygit"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm lazygit"
-[tools.platforms.dnf]
-command = "sudo dnf install -y lazygit"
-
-[[tools]]
-name = "btop"
-binary = "btop"
+[tools.fastfetch]
 layer = "software"
 
-[tools.platforms.brew]
-command = "brew install btop"
-[tools.platforms.apt]
-command = "sudo apt install -y btop"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm btop"
-[tools.platforms.dnf]
-command = "sudo dnf install -y btop"
+[tools.yazi]
+layer = "software"
+platforms = ["brew", "pacman"]
 
-[[tools]]
-name = "fastfetch"
-binary = "fastfetch"
+[tools.mise]
 layer = "software"
 
-[tools.platforms.brew]
-command = "brew install fastfetch"
-[tools.platforms.apt]
-command = "sudo apt install -y fastfetch"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm fastfetch"
-[tools.platforms.dnf]
-command = "sudo dnf install -y fastfetch"
-
-[[tools]]
-name = "yazi"
-binary = "yazi"
-layer = "software"
-
-[tools.platforms.brew]
-command = "brew install yazi"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm yazi"
-
-[[tools]]
-name = "ripgrep"
+[tools.ripgrep]
 binary = "rg"
 layer = "enhancement"
 
-[tools.platforms.brew]
-command = "brew install ripgrep"
-[tools.platforms.apt]
-command = "sudo apt install -y ripgrep"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm ripgrep"
-[tools.platforms.dnf]
-command = "sudo dnf install -y ripgrep"
-
-[[tools]]
-name = "fd"
-binary = "fd"
+[tools.fd]
 layer = "enhancement"
 
-[tools.platforms.brew]
-command = "brew install fd"
-[tools.platforms.apt]
-command = "sudo apt install -y fd-find"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm fd"
-[tools.platforms.dnf]
-command = "sudo dnf install -y fd-find"
+[tools.fd.packages]
+apt = "fd-find"
+dnf = "fd-find"
 
-[[tools]]
-name = "bat"
-binary = "bat"
+[tools.bat]
 layer = "enhancement"
 
-[tools.platforms.brew]
-command = "brew install bat"
-[tools.platforms.apt]
-command = "sudo apt install -y bat"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm bat"
-[tools.platforms.dnf]
-command = "sudo dnf install -y bat"
+[tools.eza]
+layer = "enhancement"
+platforms = ["brew", "pacman"]
 
-[[tools]]
-name = "eza"
-binary = "eza"
+[tools.jq]
 layer = "enhancement"
 
-[tools.platforms.brew]
-command = "brew install eza"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm eza"
-
-[[tools]]
-name = "jq"
-binary = "jq"
+[tools.yq]
 layer = "enhancement"
+platforms = ["brew", "apt", "pacman"]
 
-[tools.platforms.brew]
-command = "brew install jq"
-[tools.platforms.apt]
-command = "sudo apt install -y jq"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm jq"
-[tools.platforms.dnf]
-command = "sudo dnf install -y jq"
-
-[[tools]]
-name = "yq"
-binary = "yq"
+[tools.starship]
 layer = "enhancement"
+platforms = ["brew", "pacman", "dnf"]
 
-[tools.platforms.brew]
-command = "brew install yq"
-[tools.platforms.apt]
-command = "sudo apt install -y yq"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm yq"
-
-[[tools]]
-name = "starship"
-binary = "starship"
-layer = "enhancement"
-
-[tools.platforms.brew]
-command = "brew install starship"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm starship"
-[tools.platforms.dnf]
-command = "sudo dnf install -y starship"
-
-[[tools]]
-name = "tealdeer"
+[tools.tealdeer]
 binary = "tldr"
 layer = "enhancement"
 
-[tools.platforms.brew]
-command = "brew install tealdeer"
-[tools.platforms.apt]
-command = "sudo apt install -y tealdeer"
-[tools.platforms.pacman]
-command = "sudo pacman -S --needed --noconfirm tealdeer"
-[tools.platforms.dnf]
-command = "sudo dnf install -y tealdeer"
+[tools.direnv]
+layer = "enhancement"
 
-[[tools]]
-name = "font-maple-mono-nf-cn"
-binary = "font-maple-mono-nf-cn"
+[tools.dua-cli]
+binary = "dua"
+layer = "enhancement"
+
+[tools.fzf]
+layer = "enhancement"
+
+[tools.gum]
+layer = "enhancement"
+
+[tools.ruby]
+layer = "enhancement"
+
+[tools.zoxide]
+layer = "enhancement"
+
+[tools.font-maple-mono-nf-cn]
 layer = "enhancement"
 kind = "font"
 source_url = "https://github.com/subframe7536/Maple-font/releases/latest/download/MapleMono-NF-CN-unhinted.zip"
+platforms = ["brew_cask"]

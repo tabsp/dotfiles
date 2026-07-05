@@ -1448,16 +1448,25 @@ fn start_run(app: &mut App) {
     app.screen = Screen::RunView;
 
     let (tx, rx) = mpsc::channel();
+    let sudo_tx = tx.clone();
     let abort_flag = Arc::new(AtomicBool::new(false));
     let thread_abort_flag = Arc::clone(&abort_flag);
     let handle = std::thread::spawn(move || -> anyhow::Result<Run> {
-        let result = crate::execute::execute_with_events(
+        let result = crate::execute::execute_with_events_and_sudo(
             &plan,
             &cfg,
             |event| {
                 let _ = tx.send(event);
             },
             || thread_abort_flag.load(Ordering::SeqCst),
+            |item| {
+                let (response_tx, response_rx) = mpsc::channel();
+                let _ = sudo_tx.send(crate::execute::ExecuteEvent::SudoPrompt {
+                    item: item.to_string(),
+                    response: response_tx,
+                });
+                response_rx.recv().unwrap_or(false)
+            },
         )?;
         let _ = crate::store::save(&result)?;
         Ok(result)
@@ -1619,6 +1628,30 @@ fn drain_run_events(app: &mut App) {
             }
             crate::execute::ExecuteEvent::Aborted => {
                 push_log(app, "run aborted", Some(CATPPUCCIN_MOCHA.warning));
+            }
+            crate::execute::ExecuteEvent::SudoPrompt { item, response } => {
+                push_log(
+                    app,
+                    &format!("{item}: sudo session expired; re-authenticating"),
+                    Some(CATPPUCCIN_MOCHA.warning),
+                );
+                let ok = match restore_terminal() {
+                    Ok(()) => {
+                        let ok = shell::pre_cache_sudo().unwrap_or(false);
+                        let _ = setup_terminal();
+                        app.needs_terminal_reset = true;
+                        ok
+                    }
+                    Err(_) => false,
+                };
+                let _ = response.send(ok);
+                if !ok {
+                    push_log(
+                        app,
+                        &format!("{item}: sudo authentication failed"),
+                        Some(CATPPUCCIN_MOCHA.danger),
+                    );
+                }
             }
         }
     }

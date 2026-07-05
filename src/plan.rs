@@ -19,28 +19,6 @@ pub enum LayerStrategy {
     All,
 }
 
-/// Returns the layer name for a given tool name.
-pub fn tool_layer(tool: &str) -> Option<&'static str> {
-    match tool {
-        "ghostty" | "kitty" | "alacritty" | "wezterm" => Some("terminal"),
-        "fish" | "zsh" | "nushell" | "bash" => Some("shell"),
-        "tmux" | "zellij" | "herdr" => Some("multiplexer"),
-        "neovim" | "nvim" | "lazygit" | "btop" | "fastfetch" | "yazi" | "dua" | "jq" | "yq" => {
-            Some("software")
-        }
-        "ripgrep"
-        | "fd"
-        | "bat"
-        | "eza"
-        | "fzf"
-        | "starship"
-        | "tealdeer"
-        | "tldr"
-        | "font-maple-mono-nf-cn" => Some("enhancement"),
-        _ => None,
-    }
-}
-
 /// Strategy for each layer.
 pub fn layer_strategy(layer: &str) -> LayerStrategy {
     match layer {
@@ -54,6 +32,7 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     let config_path = config.path.clone();
     let config_hash = hash_file(&config_path).unwrap_or_default();
     let id = Ulid::new().to_string();
+    let tool_db = crate::ops::install::load_db()?;
 
     let mut items: Vec<PlanItem> = Vec::new();
     let mut used_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -77,9 +56,10 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
         });
     }
 
-    // Step 1: install items -> PlanItems, layer from tool_layer()
+    // Step 1: install items -> PlanItems, layer from tool db metadata.
     for tool in &config.install {
-        let layer = tool_layer(tool).unwrap_or("software").to_string();
+        let layer =
+            crate::ops::install::tool_layer(&tool_db, tool).unwrap_or_else(|| "software".into());
         let id = unique_id(tool, &mut used_ids);
         items.push(PlanItem {
             id,

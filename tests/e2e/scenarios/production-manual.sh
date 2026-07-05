@@ -147,42 +147,65 @@ fi
 
 pass "Plan verification complete"
 
-# ---- Step 4: TUI Deploy (MANUAL) ----
+# ---- Step 4: Deploy ----
 
-echo ""
-echo "========================================="
-echo -e "${YELLOW}>>> MANUAL TUI DEPLOY <<<${NC}"
-echo "========================================="
-echo ""
-echo -e "You are about to enter the TUI deploy interface."
-echo -e "The plan is generated from your REAL production dotman.yaml."
-echo ""
-echo -e "${YELLOW}Instructions:${NC}"
-echo -e "  1. Review the production plan in the TUI."
-echo -e "  2. ${YELLOW}Cancel items unsuitable for Docker/Linux${NC}"
-echo -e "     (e.g. ghostty, font-maple-mono-nf-cn)."
-echo -e "  3. Press 'r' or Enter to confirm and run."
-echo -e "  4. When sudo/brew prompts for password, ${YELLOW}type: dotman${NC}"
-echo -e "  5. After results, press 'q' to return and exit."
-echo ""
-echo -e "${YELLOW}Known caveats:${NC}"
-echo -e "  - ghostty: no Linux support → cancel it"
-echo -e "  - font-maple-mono-nf-cn: font install may fail → cancel it"
-echo -e "  - Linuxbrew bootstrap: needs network, takes time"
-echo -e "  - fisher update / tldr --update: optional, may fail"
-echo ""
-read -rp "Press Enter to start TUI deploy..."
+if [[ "${PRODUCTION_E2E_SMOKE:-0}" == "1" ]]; then
+    echo ""
+    info "Step 4: Running non-interactive smoke deploy..."
+    info "Real production init/plan already passed; smoke deploy uses cheap link/create actions only."
 
-set +e
-(cd "$CHECKOUT_PATH" && HOME="$HOME" "$DOTMAN" deploy)
-TUI_EXIT=$?
-set -e
+    cat > "$CHECKOUT_PATH/dotman.yaml" <<'YAML'
+package_managers: {}
+auto_install_pkg_manager: false
+install: []
+links:
+  ~/.config/fish: config/fish
+create:
+  - ~/.config/fish/local.d
+shell: []
+YAML
 
-echo ""
-if [[ $TUI_EXIT -eq 0 ]]; then
-    pass "TUI deploy exited 0"
+    SMOKE_OUT=$(cd "$CHECKOUT_PATH" && HOME="$HOME" "$DOTMAN" --headless deploy 2>&1) || true
+    echo "$SMOKE_OUT"
+    assert_contains "$SMOKE_OUT" "finished" "smoke deploy produced a run"
 else
-    fail "TUI deploy exited $TUI_EXIT"
+    # ---- Step 4: TUI Deploy (MANUAL) ----
+
+    echo ""
+    echo "========================================="
+    echo -e "${YELLOW}>>> MANUAL TUI DEPLOY <<<${NC}"
+    echo "========================================="
+    echo ""
+    echo -e "You are about to enter the TUI deploy interface."
+    echo -e "The plan is generated from your REAL production dotman.yaml."
+    echo ""
+    echo -e "${YELLOW}Instructions:${NC}"
+    echo -e "  1. Review the production plan in the TUI."
+    echo -e "  2. ${YELLOW}Cancel items unsuitable for this Docker run${NC}"
+    echo -e "     (e.g. GUI apps/fonts if you only want a fast smoke test)."
+    echo -e "  3. Press 'r' or Enter to confirm and run."
+    echo -e "  4. When sudo/brew prompts for password, ${YELLOW}type: dotman${NC}"
+    echo -e "  5. After results, press 'q' to return and exit."
+    echo ""
+    echo -e "${YELLOW}Known caveats:${NC}"
+    echo -e "  - ghostty: supported on Linux, but installing GUI dependencies can take time; cancel it for smoke tests"
+    echo -e "  - font-maple-mono-nf-cn: font install may fail in Docker → cancel it"
+    echo -e "  - Linuxbrew bootstrap: needs network, takes time"
+    echo -e "  - fisher update / tldr --update: optional, may fail"
+    echo ""
+    read -rp "Press Enter to start TUI deploy..."
+
+    set +e
+    (cd "$CHECKOUT_PATH" && HOME="$HOME" "$DOTMAN" deploy)
+    TUI_EXIT=$?
+    set -e
+
+    echo ""
+    if [[ $TUI_EXIT -eq 0 ]]; then
+        pass "TUI deploy exited 0"
+    else
+        fail "TUI deploy exited $TUI_EXIT"
+    fi
 fi
 
 # ---- Step 5: Post-deploy Verification ----
