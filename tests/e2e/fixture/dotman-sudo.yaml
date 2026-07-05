@@ -1,0 +1,19 @@
+# dotman e2e sudo fixture — tests sudo password prompt handling.
+# apt update is added automatically by plan.rs when pkg mgr is "apt".
+package_managers:
+  ubuntu: apt
+auto_install_pkg_manager: false
+
+install:
+  - ripgrep
+
+links:
+  ~/.config/fish: config/fish
+
+create:
+  - ~/.config/fish/local.d
+
+shell:
+  - command: echo "sudo-deploy-verified"
+    description: Sudo deploy verification
+    optional: false

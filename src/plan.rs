@@ -6,6 +6,7 @@
 use crate::config::Config;
 use crate::model::{Action, ActionStatus, Plan, PlanItem};
 use crate::model::{HostInfo, Mode};
+use crate::ops::shell;
 use crate::package_managers::{detect_os, resolve_pkg_mgr_name};
 use anyhow::Result;
 use std::path::Path;
@@ -176,6 +177,45 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     // Step 6: apply first-run smart defaults (selection)
     apply_smart_defaults(&mut items);
 
+    // Step 6a: auto apt-get update when the resolved pkg mgr is apt AND
+    // there are selected install items (not just shell/links).
+    //
+    // Docker images and stale machines often have out-of-date cache;
+    // without this, `apt install` fails with "Unable to locate package".
+    //
+    // Uses the same resolution as the execution path (resolve + default
+    // fallback) so we don't miss "apt" when no explicit pkg mgr is configured
+    // but the distro defaults to apt.
+    let pkg_mgr = resolve_pkg_mgr_name(&config.package_managers)
+        .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
+    if pkg_mgr == "apt" {
+        let has_selected_install = items.iter().any(|item| {
+            item.selected
+                && item
+                    .actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Install { .. }))
+        });
+        if has_selected_install {
+            let id = unique_id("auto-apt-update", &mut used_ids);
+            items.insert(
+                0,
+                PlanItem {
+                    id,
+                    name: "auto apt update".into(),
+                    layer: "misc".into(),
+                    actions: vec![Action::Shell {
+                        command: "sudo apt-get update -qq".into(),
+                        description: Some("Update apt package cache".into()),
+                        optional: false,
+                        if_condition: None,
+                    }],
+                    selected: true,
+                },
+            );
+        }
+    }
+
     // Step 7: compute host info
     let host = HostInfo {
         hostname: hostname(),
@@ -193,6 +233,7 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
         config_hash,
         host,
         items,
+        auto_install_pkg_manager: config.auto_install_pkg_manager,
     })
 }
 
@@ -341,6 +382,49 @@ impl PlanItem {
             .map(status_for_action)
             .max()
             .unwrap_or(ActionStatus::WillRun)
+    }
+}
+
+impl Plan {
+    /// Returns `true` if any selected action in this plan may require sudo.
+    ///
+    /// Used to decide whether to pre-cache sudo credentials before execution.
+    /// This is a static check — it does NOT evaluate shell if_condition guards.
+    /// Covers:
+    /// 1. Shell commands containing the word "sudo" (Linux installs, bootstrap).
+    /// 2. Any selected Install action on Linux (db.toml commands all use sudo).
+    pub fn needs_sudo(&self) -> bool {
+        self.items.iter().filter(|item| item.selected).any(|item| {
+            item.actions.iter().any(|action| match action {
+                Action::Shell { command, .. } => shell::command_contains_sudo(command),
+                Action::Install { .. } => {
+                    crate::package_managers::detect_os() == crate::package_managers::Os::Linux
+                }
+                _ => false,
+            })
+        })
+    }
+
+    /// Sync auto-generated steps so they stay in lockstep with user selections.
+    ///
+    /// "auto apt update" only makes sense when there is at least one selected
+    /// Install action. This is called after user selections are applied so that
+    /// a saved selection that turned off all install items doesn't leave an
+    /// orphaned apt update step that unexpectedly asks for sudo.
+    pub fn sync_auto_steps(&mut self) {
+        let has_selected_install = self.items.iter().any(|item| {
+            item.selected
+                && item
+                    .actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Install { .. }))
+        });
+
+        for item in &mut self.items {
+            if item.name == "auto apt update" {
+                item.selected = has_selected_install;
+            }
+        }
     }
 }
 
@@ -522,5 +606,49 @@ mod tests {
             .iter()
             .find(|i| i.name == "auto-install package manager");
         assert!(pkg.is_none());
+    }
+
+    #[test]
+    fn needs_sudo_false_when_brew_auto_install_no_sudo_in_cmd() {
+        // auto_install_pkg_manager with brew does NOT force needs_sudo()
+        // because the brew install script doesn't contain "sudo" and Install
+        // actions on macOS don't require sudo.
+        let mut cfg = sample_config();
+        cfg.auto_install_pkg_manager = true;
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        if crate::package_managers::detect_os() == crate::package_managers::Os::Mac {
+            // On macOS: brew script has no sudo, install actions don't need sudo
+            assert!(!plan.needs_sudo());
+        } else {
+            // On Linux: Install actions imply sudo
+            assert!(plan.needs_sudo());
+        }
+    }
+
+    #[test]
+    fn needs_sudo_true_for_shell_cmd_with_sudo() {
+        let cfg = Config {
+            shell: vec![ShellEntry {
+                command: "sudo systemctl restart foo".into(),
+                description: None,
+                optional: false,
+                if_condition: None,
+            }],
+            ..sample_config()
+        };
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        assert!(plan.needs_sudo());
+    }
+
+    #[test]
+    fn needs_sudo_false_when_no_sudo_anywhere() {
+        let cfg = sample_config();
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        // No shell with sudo, no install actions on macOS.
+        if crate::package_managers::detect_os() == crate::package_managers::Os::Mac {
+            assert!(!plan.needs_sudo());
+        } else {
+            assert!(plan.needs_sudo()); // Linux install actions imply sudo
+        }
     }
 }

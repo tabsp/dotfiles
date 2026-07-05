@@ -14,6 +14,7 @@
 #   FIXTURE_TYPE=runtime   dotman.yaml (happy path, no network, no fail scripts)
 #   FIXTURE_TYPE=install   dotman-install.yaml (brew bootstrap + font)
 #   FIXTURE_TYPE=failure   dotman-failure.yaml (has required/optional fail scripts)
+#   FIXTURE_TYPE=sudo      dotman-sudo.yaml (apt installs requiring sudo)
 
 set -euo pipefail
 
@@ -42,6 +43,7 @@ info_msg() {
 case "${FIXTURE_TYPE:-runtime}" in
     install) CONFIG_FILE="dotman-install.yaml" ;;
     failure) CONFIG_FILE="dotman-failure.yaml" ;;
+    sudo)    CONFIG_FILE="dotman-sudo.yaml" ;;
     *)       CONFIG_FILE="dotman.yaml" ;;
 esac
 

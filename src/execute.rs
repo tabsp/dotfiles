@@ -76,7 +76,11 @@ where
     let mut items: Vec<RunItem> = Vec::new();
     let mut any_failed = false;
     let mut aborted = false;
-    let config_dir = config.path.parent().unwrap_or(Path::new("."));
+    let config_dir = config
+        .path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
 
     for (index, plan_item) in plan.items.iter().enumerate() {
         if should_abort() {
@@ -213,6 +217,23 @@ where
                         });
                         push_output_line(&mut item_output, OutputStream::Action, &msg);
                         continue;
+                    }
+                    // Refresh sudo timestamp before commands that use sudo.
+                    // The initial pre_cache_sudo() prompts interactively;
+                    // refresh_sudo() is non-interactive and just extends
+                    // the cached session so it doesn't expire mid-run.
+                    if shell::command_contains_sudo(command)
+                        && !shell::refresh_sudo().unwrap_or(false)
+                    {
+                        let msg = "sudo session expired — re-run to re-authenticate".to_string();
+                        emit(ExecuteEvent::ActionMessage {
+                            item: plan_item.name.clone(),
+                            message: msg.clone(),
+                        });
+                        push_output_line(&mut item_output, OutputStream::Action, &msg);
+                        error = Some("sudo session expired".into());
+                        last_status = ActionStatus::WillFail;
+                        break;
                     }
                     let (exit_code, output) = run_command_streaming_with_events(
                         command,
@@ -558,6 +579,22 @@ where
         });
         push_output_line(&mut all_output, OutputStream::Action, &status_line);
 
+        // Refresh sudo timestamp before install commands that use sudo.
+        if shell::command_contains_sudo(&cmd) && !shell::refresh_sudo().unwrap_or(false) {
+            let msg = "sudo session expired — re-run to re-authenticate".to_string();
+            emit(ExecuteEvent::ActionMessage {
+                item: item_name.to_string(),
+                message: msg.clone(),
+            });
+            push_output_line(&mut all_output, OutputStream::Action, &msg);
+            return Ok((
+                ActionStatus::WillFail,
+                Some("sudo session expired".into()),
+                attempt,
+                all_output,
+            ));
+        }
+
         let (exit_code, output) =
             run_command_streaming_with_events(&cmd, &config_dir, item_name, emit, should_abort)?;
         all_output.extend(output);
@@ -741,6 +778,39 @@ mod tests {
 
         assert_eq!(run.status, RunStatus::Success);
         assert!(outputs.iter().any(|l| l.contains("hello")));
+    }
+
+    #[test]
+    fn shell_command_runs_when_config_path_has_no_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let cfg = Config {
+            path: PathBuf::from("dotman.yaml"),
+            package_managers: crate::config::PackageManagerConfig::default(),
+            install: vec![],
+            links: vec![],
+            create: vec![],
+            shell: vec![crate::config::ShellEntry {
+                command: "echo relative-config-path".into(),
+                description: Some("relative config path shell".into()),
+                optional: false,
+                if_condition: None,
+            }],
+            clean: vec![],
+            auto_install_pkg_manager: false,
+        };
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let run = execute(&plan, &cfg).unwrap();
+
+        std::env::set_current_dir(original_cwd).unwrap();
+        assert_eq!(run.status, RunStatus::Success);
+        assert!(run.items.iter().any(|item| {
+            item.output
+                .iter()
+                .any(|line| line.line.contains("relative-config-path"))
+        }));
     }
 
     #[test]

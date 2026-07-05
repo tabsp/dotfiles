@@ -8,6 +8,7 @@ use crate::config;
 use crate::execute;
 use crate::execute::ExecuteEvent;
 use crate::model::{Mode as PlanMode, OutputStream, Run};
+use crate::ops::shell;
 use crate::plan;
 use crate::store;
 use std::path::PathBuf;
@@ -70,7 +71,17 @@ fn print_run_detail(run: &crate::model::Run) {
 }
 
 fn run_full(cfg: &config::Config) -> Result<(), String> {
-    let plan = plan::build(cfg, PlanMode::Deploy).map_err(|e| e.to_string())?;
+    let mut plan = plan::build(cfg, PlanMode::Deploy).map_err(|e| e.to_string())?;
+    plan.sync_auto_steps();
+
+    // Pre-cache sudo credentials if any action needs them.
+    if plan.needs_sudo() {
+        eprintln!("[dotman] sudo required — enter password to continue:");
+        if !shell::pre_cache_sudo().unwrap_or(false) {
+            return Err("sudo authentication failed".into());
+        }
+    }
+
     let run = execute::execute_with_events(
         &plan,
         cfg,

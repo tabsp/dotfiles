@@ -11,6 +11,7 @@ use crate::model::{
 };
 use crate::ops::clean;
 use crate::ops::link::{self, LinkAction, LinkSettings};
+use crate::ops::shell;
 use crate::plan;
 use crate::store;
 use crate::theme::CATPPUCCIN_MOCHA;
@@ -82,6 +83,9 @@ pub struct App {
     pub current_log: Vec<LogLine>,
     pub current_item: Option<usize>,
     pub run_started: Option<Instant>,
+    /// Set to true after `sudo -v` restores the terminal; signals the event
+    /// loop to recreate the Terminal backend on the next tick.
+    pub needs_terminal_reset: bool,
 }
 
 /// A single log line with optional color.
@@ -116,6 +120,7 @@ impl App {
             current_log: Vec::new(),
             current_item: None,
             run_started: None,
+            needs_terminal_reset: false,
         }
     }
 
@@ -147,6 +152,7 @@ impl App {
         };
         let mut plan = plan::build(cfg, plan_mode).map_err(|e| e.to_string())?;
         apply_saved_selection(&mut plan)?;
+        plan.sync_auto_steps();
         self.plan = Some(plan);
         select_first_plan_row(
             &mut self.list_state,
@@ -266,15 +272,20 @@ fn restore_terminal() -> Result<(), io::Error> {
     Ok(())
 }
 
-fn run_event_loop<B: ratatui::backend::Backend>(
-    app: &mut App,
-    terminal: &mut ratatui::Terminal<B>,
-) -> Result<()> {
+fn run_event_loop(app: &mut App, terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let mut last_tick = Instant::now();
     loop {
         if app.should_quit {
             return Ok(());
         }
+
+        // Recreate the terminal backend if sudo -v tore it down.
+        if app.needs_terminal_reset {
+            let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
+            *terminal = ratatui::Terminal::new(backend)?;
+            app.needs_terminal_reset = false;
+        }
+
         terminal.draw(|f| render(app, f))?;
 
         // Tick animation 100ms.
@@ -1184,7 +1195,24 @@ fn capitalize(s: &str) -> String {
 
 fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
     match key {
-        KeyCode::Enter | KeyCode::Char('r') => start_run(app),
+        KeyCode::Enter | KeyCode::Char('r') => {
+            // Pre-cache sudo credentials before executing if the plan needs them.
+            if let Some(plan) = &app.plan
+                && plan.needs_sudo()
+            {
+                restore_terminal()?;
+                let ok = shell::pre_cache_sudo().unwrap_or(false);
+                // Re-enter raw mode; the event loop will recreate the Terminal
+                // backend on the next tick.
+                setup_terminal()?;
+                app.needs_terminal_reset = true;
+                if !ok {
+                    app.status_message = "sudo authentication failed".into();
+                    return Ok(());
+                }
+            }
+            start_run(app);
+        }
         KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('e') => {
             app.screen = Screen::PlanView;
         }

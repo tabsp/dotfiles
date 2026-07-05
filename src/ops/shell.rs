@@ -181,6 +181,72 @@ fn kill_process_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
+/// Returns true if any whitespace-separated word in the command equals "sudo".
+///
+/// Used to detect commands that may need a TTY for password input.
+pub fn command_contains_sudo(cmd: &str) -> bool {
+    cmd.split_whitespace().any(|w| w == "sudo")
+}
+
+/// Run `sudo -v` to cache credentials for subsequent sudo commands.
+///
+/// Call this before executing a plan that needs sudo. Once cached, sudo
+/// credentials are valid for ~5 minutes, so subsequent sudo commands pass
+/// without prompts even when stdin is `/dev/null`.
+///
+/// Inherits stdin/stdout/stderr so the user can enter their password.
+/// Returns `true` if sudo authentication succeeded.
+pub fn pre_cache_sudo() -> Result<bool> {
+    match Command::new("sudo")
+        .arg("-v")
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+    {
+        Ok(status) => Ok(status.success()),
+        Err(_) => Ok(false),
+    }
+}
+
+/// Refresh the sudo timestamp only if previously cached and still valid.
+///
+/// Unlike `pre_cache_sudo`, this is non-interactive: it first probes with
+/// `sudo -n true` to check whether there is an active cached session.  If the
+/// session is still valid a `sudo -v` silently extends it; if it has expired we
+/// do NOT prompt the user again — the command stays on `/dev/null` and instead
+/// fails with a clear message.
+///
+/// Call before each `Action::Shell` that contains sudo, to prevent cache expiry
+/// during long runs.
+pub fn refresh_sudo() -> Result<bool> {
+    // Non-interactive probe: is the timestamp still fresh?
+    let ok = Command::new("sudo")
+        .arg("-n")
+        .arg("true")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if !ok {
+        return Ok(false);
+    }
+
+    // Extend the timestamp without prompting.
+    Command::new("sudo")
+        .arg("-n")
+        .arg("-v")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +327,26 @@ mod tests {
         let abort = Arc::new(AtomicBool::new(true)); // abort immediately
         let exit = run_command_streaming("sleep 10", dir.path(), &tx, Arc::clone(&abort)).unwrap();
         assert_eq!(exit, None); // killed
+    }
+
+    #[test]
+    fn command_contains_sudo_detects_sudo() {
+        assert!(command_contains_sudo("sudo apt install -y fish"));
+        assert!(command_contains_sudo("sudo dnf install -y git"));
+        assert!(command_contains_sudo("sudo pacman -S neovim"));
+    }
+
+    #[test]
+    fn command_contains_sudo_rejects_non_sudo() {
+        assert!(!command_contains_sudo("brew install fish"));
+        assert!(!command_contains_sudo("echo hello"));
+        assert!(!command_contains_sudo("make install"));
+    }
+
+    #[test]
+    fn command_contains_sudo_exact_word_match() {
+        // "sudo" must be a whole word, not a substring.
+        assert!(!command_contains_sudo("pseudocode_here"));
+        assert!(command_contains_sudo("echo sudo echo")); // word match
     }
 }

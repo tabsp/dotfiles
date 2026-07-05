@@ -23,6 +23,10 @@ pub struct Plan {
     pub config_hash: String,
     pub host: HostInfo,
     pub items: Vec<PlanItem>,
+    /// Whether the plan includes an auto-install-package-manager step.
+    /// Stored here so `needs_sudo()` can check it without accessing Config.
+    #[serde(default)]
+    pub auto_install_pkg_manager: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

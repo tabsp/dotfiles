@@ -151,6 +151,7 @@ fn plan_serialization_roundtrip() {
         created_at: "2026-01-01T00:00:00Z".into(),
         config_path: PathBuf::from("/tmp/dotman.yaml"),
         config_hash: "abc123".into(),
+        auto_install_pkg_manager: false,
         host: HostInfo {
             hostname: "testhost".into(),
             os: "Mac".into(),

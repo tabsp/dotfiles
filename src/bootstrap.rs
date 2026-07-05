@@ -8,6 +8,8 @@ use anyhow::Context;
 use anyhow::Result;
 use std::process::Command;
 
+use crate::ops::shell;
+
 /// Check whether git is available on $PATH.
 pub fn git_installed() -> bool {
     Command::new("git")
@@ -119,10 +121,16 @@ pub fn print_git_help() {
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn run_bootstrap_cmd(cmd: &str) -> bool {
+    // Inherit stdin when the command contains sudo so password prompts work.
+    let stdin = if shell::command_contains_sudo(cmd) {
+        std::process::Stdio::inherit()
+    } else {
+        std::process::Stdio::null()
+    };
     Command::new("sh")
         .arg("-c")
         .arg(cmd)
-        .stdin(std::process::Stdio::null())
+        .stdin(stdin)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
