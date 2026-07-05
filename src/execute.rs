@@ -294,6 +294,10 @@ where
                     }
                 }
             }
+
+            if error.is_some() {
+                break;
+            }
         }
 
         if error.is_some() {
@@ -692,7 +696,7 @@ fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Mode;
+    use crate::model::{Action, HostInfo, Mode, Plan, PlanItem};
     use crate::plan::build;
     use std::path::PathBuf;
 
@@ -852,6 +856,59 @@ mod tests {
 
         assert_eq!(run.status, RunStatus::Success);
         assert!(messages.iter().any(|m| m.contains("linked")));
+    }
+
+    #[test]
+    fn failed_action_stops_remaining_actions_in_item() {
+        let dir = tempfile::tempdir().unwrap();
+        let create_target = dir.path().join("should-not-exist");
+        let cfg = Config {
+            path: dir.path().join("dotman.yaml"),
+            package_managers: crate::config::PackageManagerConfig::default(),
+            install: vec![],
+            links: vec![],
+            create: vec![],
+            shell: vec![],
+            clean: vec![],
+            auto_install_pkg_manager: false,
+        };
+        let plan = Plan {
+            id: "test-run".into(),
+            mode: Mode::Deploy,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            config_path: cfg.path.clone(),
+            config_hash: "hash".into(),
+            host: HostInfo {
+                hostname: "test".into(),
+                os: "Linux".into(),
+                arch: "x86_64".into(),
+                user: "test".into(),
+                home: dir.path().to_path_buf(),
+            },
+            items: vec![PlanItem {
+                id: "failing-item".into(),
+                name: "failing item".into(),
+                layer: "misc".into(),
+                selected: true,
+                actions: vec![
+                    Action::Shell {
+                        command: "false".into(),
+                        description: None,
+                        optional: false,
+                        if_condition: None,
+                    },
+                    Action::Create {
+                        target: create_target.clone(),
+                    },
+                ],
+            }],
+            auto_install_pkg_manager: false,
+        };
+
+        let run = execute(&plan, &cfg).unwrap();
+
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(!create_target.exists());
     }
 
     #[test]

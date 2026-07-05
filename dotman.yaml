@@ -29,6 +29,7 @@ install:
   - btop
   - fastfetch
   - yazi
+  - mise
   # 5. Enhancement
   - ripgrep
   - fd
@@ -38,6 +39,12 @@ install:
   - yq
   - starship
   - tealdeer
+  - direnv
+  - dua-cli
+  - fzf
+  - gum
+  - ruby
+  - zoxide
   - font-maple-mono-nf-cn
 
 # All link targets in one block; layer indicated by comment.
@@ -64,9 +71,10 @@ create:
 
 # Misc shell sync (idempotent / optional).
 shell:
-  - command: fish -lc 'fisher update'
+  - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
     description: Sync fish plugins
     optional: true
+    if: command -v fish >/dev/null 2>&1
   - command: TEALDEER_CONFIG_DIR="$HOME/.config/tealdeer" tldr --update
     description: Update tealdeer pages
     optional: true

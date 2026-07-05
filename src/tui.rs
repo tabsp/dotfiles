@@ -82,6 +82,7 @@ pub struct App {
     pub progress: (usize, usize), // (done, total)
     pub current_log: Vec<LogLine>,
     pub current_item: Option<usize>,
+    pub run_item_statuses: Vec<Option<ActionStatus>>,
     pub run_started: Option<Instant>,
     /// Set to true after `sudo -v` restores the terminal; signals the event
     /// loop to recreate the Terminal backend on the next tick.
@@ -119,6 +120,7 @@ impl App {
             progress: (0, 0),
             current_log: Vec::new(),
             current_item: None,
+            run_item_statuses: Vec::new(),
             run_started: None,
             needs_terminal_reset: false,
         }
@@ -1442,6 +1444,7 @@ fn start_run(app: &mut App) {
     app.current_item = None;
     app.run_started = Some(Instant::now());
     app.current_log.clear();
+    app.run_item_statuses = vec![None; plan.items.len()];
     app.screen = Screen::RunView;
 
     let (tx, rx) = mpsc::channel();
@@ -1523,27 +1526,7 @@ fn render_run(f: &mut Frame, app: &mut App) {
     let step_lines: Vec<Line> = if let Some(plan) = &app.plan {
         let mut lines = Vec::new();
         for (i, item) in plan.items.iter().enumerate() {
-            let icon = if !item.selected {
-                Span::styled(
-                    icons::ICON_SKIP,
-                    Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-                )
-            } else if i < app.progress.0 {
-                Span::styled(
-                    icons::ICON_OK,
-                    Style::default().fg(CATPPUCCIN_MOCHA.success),
-                )
-            } else if Some(i) == app.current_item {
-                Span::styled(
-                    icons::SPINNER_BRAILLE[app.spinner_frame % icons::SPINNER_BRAILLE.len()],
-                    Style::default().fg(CATPPUCCIN_MOCHA.running),
-                )
-            } else {
-                Span::styled(
-                    icons::ICON_PENDING,
-                    Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-                )
-            };
+            let icon = run_step_icon(app, i, item);
             let name = if item.selected {
                 item.name.clone()
             } else {
@@ -1569,6 +1552,12 @@ fn render_run(f: &mut Frame, app: &mut App) {
             Line::styled(entry.text.clone(), style)
         })
         .collect();
+    let log_height = chunks[1].height.saturating_sub(2) as usize;
+    let log_scroll = app
+        .current_log
+        .len()
+        .saturating_sub(log_height)
+        .min(u16::MAX as usize) as u16;
     f.render_widget(
         Paragraph::new(log_lines)
             .block(
@@ -1577,7 +1566,7 @@ fn render_run(f: &mut Frame, app: &mut App) {
                     .borders(Borders::ALL)
                     .border_type(ratatui::widgets::BorderType::Rounded),
             )
-            .wrap(Wrap { trim: false }),
+            .scroll((log_scroll, 0)),
         chunks[1],
     );
 
@@ -1623,6 +1612,9 @@ fn drain_run_events(app: &mut App) {
             } => {
                 app.progress.0 = app.progress.0.max(index.saturating_add(1));
                 app.current_item = None;
+                if let Some(slot) = app.run_item_statuses.get_mut(index) {
+                    *slot = Some(status);
+                }
                 push_log(app, &format!("finished {name}: {status:?}"), None);
             }
             crate::execute::ExecuteEvent::Aborted => {
@@ -1642,6 +1634,41 @@ fn push_log(app: &mut App, line: &str, fg: Option<Color>) {
     if app.current_log.len() > MAX_TUI_OUTPUT_LINES {
         let drop_count = app.current_log.len() - MAX_TUI_OUTPUT_LINES;
         app.current_log.drain(0..drop_count);
+    }
+}
+
+fn run_step_icon(app: &App, index: usize, item: &PlanItem) -> Span<'static> {
+    if !item.selected {
+        return Span::styled(
+            icons::ICON_SKIP,
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        );
+    }
+
+    if Some(index) == app.current_item {
+        return Span::styled(
+            icons::SPINNER_BRAILLE[app.spinner_frame % icons::SPINNER_BRAILLE.len()],
+            Style::default().fg(CATPPUCCIN_MOCHA.running),
+        );
+    }
+
+    match app.run_item_statuses.get(index).and_then(|status| *status) {
+        Some(ActionStatus::WillFail) => Span::styled(
+            icons::ICON_FAIL,
+            Style::default().fg(CATPPUCCIN_MOCHA.danger),
+        ),
+        Some(ActionStatus::WillSkip) => Span::styled(
+            icons::ICON_SKIP,
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        ),
+        Some(_) => Span::styled(
+            icons::ICON_OK,
+            Style::default().fg(CATPPUCCIN_MOCHA.success),
+        ),
+        None => Span::styled(
+            icons::ICON_PENDING,
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        ),
     }
 }
 
@@ -1673,11 +1700,7 @@ fn render_result(f: &mut Frame, app: &mut App) {
         }
     };
 
-    let ok = run
-        .items
-        .iter()
-        .filter(|i| matches!(i.status, ActionStatus::NoChange))
-        .count();
+    let ok = run.items.iter().filter(|i| run_item_succeeded(i)).count();
     let failed = run.items.iter().filter(|i| i.error.is_some()).count();
     let total = run.items.len();
     let title = format!(
@@ -1717,15 +1740,15 @@ fn render_result(f: &mut Frame, app: &mut App) {
                 icons::ICON_FAIL,
                 Style::default().fg(CATPPUCCIN_MOCHA.danger),
             )
-        } else if matches!(item.status, ActionStatus::NoChange) {
-            Span::styled(
-                icons::ICON_OK,
-                Style::default().fg(CATPPUCCIN_MOCHA.success),
-            )
-        } else {
+        } else if matches!(item.status, ActionStatus::WillSkip) {
             Span::styled(
                 icons::ICON_SKIP,
                 Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+            )
+        } else {
+            Span::styled(
+                icons::ICON_OK,
+                Style::default().fg(CATPPUCCIN_MOCHA.success),
             )
         };
         let name = &item.name;
@@ -1901,10 +1924,10 @@ fn render_replay(f: &mut Frame, app: &mut App) {
     for item in &run.items {
         let icon = if item.error.is_some() {
             icons::ICON_FAIL
-        } else if matches!(item.status, ActionStatus::NoChange) {
-            icons::ICON_OK
-        } else {
+        } else if matches!(item.status, ActionStatus::WillSkip) {
             icons::ICON_SKIP
+        } else {
+            icons::ICON_OK
         };
         let name = &item.name;
         let dur = item
@@ -1935,6 +1958,10 @@ fn render_replay(f: &mut Frame, app: &mut App) {
 }
 
 // ---------------- render dispatch ----------------
+
+fn run_item_succeeded(item: &crate::model::RunItem) -> bool {
+    item.error.is_none() && !matches!(item.status, ActionStatus::WillSkip)
+}
 
 fn render(app: &mut App, f: &mut Frame) {
     let area = f.area();

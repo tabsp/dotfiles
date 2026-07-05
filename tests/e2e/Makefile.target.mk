@@ -1,4 +1,4 @@
-.PHONY: docker-e2e docker-e2e-build docker-e2e-no-network docker-e2e-sudo docker-e2e-sudo-build
+.PHONY: docker-e2e docker-e2e-build docker-e2e-no-network docker-e2e-sudo docker-e2e-sudo-build docker-e2e-production docker-e2e-production-build
 
 docker-e2e:
 	docker build -t dotman-e2e -f tests/e2e/Dockerfile .
@@ -19,3 +19,12 @@ docker-e2e-sudo-build:
 
 docker-e2e-sudo: docker-e2e-sudo-build
 	docker run --rm -it dotman-e2e-sudo tests/e2e/scenarios/sudo-prompt-tui.sh
+
+# Production manual E2E — real dotman.yaml, interactive TUI deploy.
+# NOT for CI. Requires TTY for sudo password and manual item cancellation.
+#   make docker-e2e-production
+docker-e2e-production-build:
+	docker build -t dotman-e2e-production -f tests/e2e/Dockerfile.production .
+
+docker-e2e-production: docker-e2e-production-build
+	docker run --rm -it dotman-e2e-production tests/e2e/scenarios/production-manual.sh

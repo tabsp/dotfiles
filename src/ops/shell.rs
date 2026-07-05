@@ -28,7 +28,8 @@ pub struct StreamLine {
 
 /// Run a shell command and collect all output at once (non-streaming, for conditions).
 pub fn run_shell(command: &str, config_dir: &Path) -> Result<ShellOutput> {
-    let output = Command::new("sh")
+    let mut cmd = command_with_dotman_env();
+    let output = cmd
         .arg("-c")
         .arg(command)
         .current_dir(config_dir)
@@ -45,7 +46,8 @@ pub fn run_shell(command: &str, config_dir: &Path) -> Result<ShellOutput> {
 }
 
 pub fn condition_matches(cond: &str) -> Result<bool> {
-    let status = Command::new("sh")
+    let mut cmd = command_with_dotman_env();
+    let status = cmd
         .arg("-c")
         .arg(cond)
         .stdin(Stdio::null())
@@ -73,7 +75,7 @@ pub fn run_command_streaming(
     tx: &mpsc::Sender<StreamLine>,
     abort: Arc<AtomicBool>,
 ) -> Result<Option<i32>> {
-    let mut cmd = Command::new("sh");
+    let mut cmd = command_with_dotman_env();
     cmd.arg("-c")
         .arg(command)
         .current_dir(config_dir)
@@ -156,6 +158,31 @@ pub fn run_command_streaming(
     let _ = stderr_thread.join();
 
     Ok(exit_code)
+}
+
+fn command_with_dotman_env() -> Command {
+    let mut cmd = Command::new("sh");
+    let path = path_with_homebrew();
+    cmd.env("PATH", path);
+    cmd
+}
+
+fn path_with_homebrew() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let mut paths: Vec<String> = Vec::new();
+    for candidate in [
+        "/home/linuxbrew/.linuxbrew/bin",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+    ] {
+        if std::path::Path::new(candidate).is_dir() {
+            paths.push(candidate.to_string());
+        }
+    }
+    if !current.is_empty() {
+        paths.push(current);
+    }
+    paths.join(":")
 }
 
 /// Kill the child process and all its descendants.
@@ -348,5 +375,15 @@ mod tests {
         // "sudo" must be a whole word, not a substring.
         assert!(!command_contains_sudo("pseudocode_here"));
         assert!(command_contains_sudo("echo sudo echo")); // word match
+    }
+
+    #[test]
+    fn path_with_homebrew_preserves_existing_path() {
+        let current = std::env::var("PATH").unwrap_or_default();
+        let path = path_with_homebrew();
+
+        if !current.is_empty() {
+            assert!(path.ends_with(&current));
+        }
     }
 }
