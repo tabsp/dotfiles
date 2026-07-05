@@ -1,0 +1,27 @@
+# dotman e2e failure fixture — for testing required/optional shell failure.
+# No real installs — this fixture focuses exclusively on shell step failure semantics.
+package_managers:
+  ubuntu: brew
+auto_install_pkg_manager: false
+
+install: []
+
+links:
+  ~/.config/fish:        config/fish
+  ~/.config/nvim:        config/nvim
+  ~/.tmux.conf:          config/tmux.conf
+  ~/.local/bin/hello:    bin/hello
+
+create:
+  - ~/.config/fish/local.d
+
+shell:
+  - command: echo "deployment-verified"
+    description: Deploy verification marker
+    optional: false
+  - command: scripts/required-fail.sh
+    description: Required failure test
+    optional: false
+  - command: scripts/optional-fail.sh
+    description: Optional failure test
+    optional: true

@@ -173,7 +173,10 @@ where
                         }
                     }
                 }
-                Action::Create { target } => match create_dir(target) {
+                Action::Create { target } => match create_dir(
+                    &crate::path::expand_home(&target.to_string_lossy())
+                        .unwrap_or_else(|_| target.clone()),
+                ) {
                     Ok(()) => {
                         let msg = format!("created {}", target.display());
                         emit(ExecuteEvent::ActionMessage {
@@ -196,6 +199,7 @@ where
                 Action::Shell {
                     command,
                     if_condition,
+                    optional,
                     ..
                 } => {
                     if let Some(cond) = if_condition
@@ -221,6 +225,15 @@ where
                     cap_output_len(&mut item_output);
                     match exit_code {
                         Some(0) => {}
+                        Some(code) if *optional => {
+                            let msg = format!("optional command failed (exit {code})");
+                            emit(ExecuteEvent::ActionMessage {
+                                item: plan_item.name.clone(),
+                                message: msg.clone(),
+                            });
+                            push_output_line(&mut item_output, OutputStream::Action, &msg);
+                            last_status = ActionStatus::NoChange;
+                        }
                         Some(code) => {
                             error = Some(format!("exit code {code}"));
                             last_status = ActionStatus::WillFail;
@@ -233,11 +246,14 @@ where
                     }
                 }
                 Action::Clean { target, force } => {
-                    let clean_action = clean::plan_clean(target, *force)?;
+                    let expanded_target = crate::path::expand_home(&target.to_string_lossy())
+                        .unwrap_or_else(|_| target.clone());
+                    let clean_action = clean::plan_clean(&expanded_target, *force)?;
                     let action_desc = describe_clean_action(&clean_action);
-                    match clean::apply_clean(clean_action, target) {
+                    match clean::apply_clean(clean_action, &expanded_target) {
                         Ok(()) => {
-                            let msg = format!("cleaned {} ({action_desc})", target.display());
+                            let msg =
+                                format!("cleaned {} ({action_desc})", expanded_target.display());
                             emit(ExecuteEvent::ActionMessage {
                                 item: plan_item.name.clone(),
                                 message: msg.clone(),
@@ -392,10 +408,6 @@ where
     let db = install::load_db()?;
     let entry = install::find(&db, binary);
 
-    let os = crate::package_managers::detect_os();
-    let pkg_mgr = crate::package_managers::resolve_pkg_mgr_name(pkg_mgrs)
-        .unwrap_or_else(|| fallback_pkg_mgr_key(os));
-
     let entry = match entry {
         Some(e) => e,
         None => {
@@ -408,20 +420,9 @@ where
         }
     };
 
-    let cmd = match entry.platforms.get(&pkg_mgr) {
-        Some(c) => c.clone(),
-        None => {
-            let msg = format!("no install command for {pkg_mgr}");
-            emit(ExecuteEvent::ActionMessage {
-                item: item_name.to_string(),
-                message: msg.clone(),
-            });
-            return Ok((ActionStatus::WillFail, Some(msg), 0, vec![]));
-        }
-    };
-
     // Font install: build a shell command from the tool entry and run it
-    // through the streaming pipeline like any other install.
+    // through the streaming pipeline. Fonts are source-url installs, not
+    // package-manager installs, so they do not require a platform command.
     if entry.kind == "font" {
         if entry.source_url.is_empty() {
             let msg = format!("font {} missing source_url", entry.name);
@@ -509,6 +510,30 @@ where
         }
     }
 
+    let pkg_mgr = crate::package_managers::resolve_pkg_mgr_name(pkg_mgrs)
+        .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
+
+    let cmd = match entry.platforms.get(&pkg_mgr) {
+        Some(c) if c.supports_os(crate::package_managers::os_name()) => c.command().to_string(),
+        Some(_) => {
+            let os = crate::package_managers::os_name();
+            let msg = format!("{} is not supported for {pkg_mgr} on {os}", entry.name);
+            emit(ExecuteEvent::ActionMessage {
+                item: item_name.to_string(),
+                message: msg.clone(),
+            });
+            return Ok((ActionStatus::WillFail, Some(msg), 0, vec![]));
+        }
+        None => {
+            let msg = format!("no install command for {pkg_mgr}");
+            emit(ExecuteEvent::ActionMessage {
+                item: item_name.to_string(),
+                message: msg.clone(),
+            });
+            return Ok((ActionStatus::WillFail, Some(msg), 0, vec![]));
+        }
+    };
+
     let config_dir = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
     let mut last_err: Option<String> = None;
     let mut all_output: Vec<OutputLine> = Vec::new();
@@ -579,14 +604,6 @@ where
 }
 
 /// Fallback OS key used when no package manager is configured for the current platform.
-fn fallback_pkg_mgr_key(os: crate::package_managers::Os) -> String {
-    use crate::package_managers::Os;
-    match os {
-        Os::Mac => "macos".into(),
-        Os::Linux => "linux".into(),
-    }
-}
-
 fn describe_link_action(action: &link::LinkAction) -> String {
     match action {
         link::LinkAction::Skip => "skip: already linked".into(),

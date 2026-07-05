@@ -18,11 +18,32 @@ pub fn detect_os() -> Os {
     }
 }
 
+pub fn os_name() -> &'static str {
+    match detect_os() {
+        Os::Mac => "macos",
+        Os::Linux => "linux",
+    }
+}
+
 /// Resolve the configured package manager name for the current OS.
 pub fn resolve_pkg_mgr_name(cfg: &PackageManagerConfig) -> Option<String> {
     match detect_os() {
         Os::Mac => cfg.macos.clone(),
         Os::Linux => detect_distro_pkg_mgr(cfg),
+    }
+}
+
+/// Return the default package-manager key for the current platform when no
+/// explicit package manager is configured.
+pub fn default_pkg_mgr_name() -> String {
+    match detect_os() {
+        Os::Mac => "brew".into(),
+        Os::Linux => match detect_distro_id().as_deref() {
+            Some("ubuntu") | Some("debian") => "apt".into(),
+            Some("arch") => "pacman".into(),
+            Some("fedora") => "dnf".into(),
+            _ => "linux".into(),
+        },
     }
 }
 
@@ -38,6 +59,16 @@ fn detect_distro_pkg_mgr(cfg: &PackageManagerConfig) -> Option<String> {
                 "fedora" => cfg.fedora.clone(),
                 _ => None,
             };
+        }
+    }
+    None
+}
+
+fn detect_distro_id() -> Option<String> {
+    let contents = std::fs::read_to_string("/etc/os-release").ok()?;
+    for line in contents.lines() {
+        if let Some(rest) = line.strip_prefix("ID=") {
+            return Some(rest.trim().trim_matches('"').to_string());
         }
     }
     None
@@ -59,6 +90,16 @@ mod tests {
     fn detect_os_is_mac_or_linux() {
         let os = detect_os();
         assert!(os == Os::Mac || os == Os::Linux);
+    }
+
+    #[test]
+    fn os_name_is_supported_value() {
+        assert!(matches!(os_name(), "macos" | "linux"));
+    }
+
+    #[test]
+    fn default_pkg_mgr_name_is_non_empty() {
+        assert!(!default_pkg_mgr_name().is_empty());
     }
 
     #[test]

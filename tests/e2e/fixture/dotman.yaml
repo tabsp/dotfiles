@@ -1,0 +1,26 @@
+# dotman e2e fixture — happy path config for deploy-runtime, sync, history, new-link.
+# No real installs, no network, no failure scripts.
+# All scenarios that don't test install/failure paths should use this.
+
+package_managers:
+  ubuntu: brew
+auto_install_pkg_manager: false
+
+install: []
+# Empty — plan will still produce install/link/create/shell actions
+# from the links/create/shell sections below. Real installs are tested
+# in dotman-install.yaml (FIXTURE_TYPE=install) only.
+
+links:
+  ~/.config/fish:        config/fish
+  ~/.config/nvim:        config/nvim
+  ~/.tmux.conf:          config/tmux.conf
+  ~/.local/bin/hello:    bin/hello
+
+create:
+  - ~/.config/fish/local.d
+
+shell:
+  - command: echo "deployment-verified"
+    description: Deploy verification marker
+    optional: false

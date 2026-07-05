@@ -1,0 +1,24 @@
+# dotman e2e install fixture — network-required install tests.
+# Tests brew bootstrap and font download. The lazygit real install is tested
+# separately (second deploy) because brew bootstrap doesn't set PATH in the
+# current process, so a single deploy can't both bootstrap brew and use it.
+package_managers:
+  ubuntu: brew
+auto_install_pkg_manager: true
+
+install:
+  - font-maple-mono-nf-cn
+
+links:
+  ~/.config/fish:        config/fish
+  ~/.config/nvim:        config/nvim
+  ~/.tmux.conf:          config/tmux.conf
+  ~/.local/bin/hello:    bin/hello
+
+create:
+  - ~/.config/fish/local.d
+
+shell:
+  - command: echo "install-deploy-verified"
+    description: Install deploy verification
+    optional: false

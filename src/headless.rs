@@ -33,11 +33,39 @@ pub fn run_with_mode(config_path: PathBuf, mode: Mode) -> Result<(), String> {
     }
 }
 
-/// Run without a config (for history commands that don't need config).
+/// Run without a config (for history/run commands that don't need config).
 pub fn run_no_config(mode: Mode) -> Result<(), String> {
     match mode {
         Mode::History => run_history(),
+        Mode::Run(id) => run_run(&id),
         _ => Err(format!("mode {mode:?} requires config")),
+    }
+}
+
+fn run_run(id: &str) -> Result<(), String> {
+    let run = store::load(&id.to_string()).map_err(|e| format!("failed to load run {id}: {e}"))?;
+    print_run_detail(&run);
+    Ok(())
+}
+
+fn print_run_detail(run: &crate::model::Run) {
+    println!("Run: {}", run.id);
+    println!("  mode: {:?}", run.mode);
+    println!("  started: {}", run.started_at);
+    println!("  status: {:?}", run.status);
+    if let Some(finished) = &run.finished_at {
+        println!("  finished: {finished}");
+    }
+    println!("  items: {}", run.items.len());
+    println!();
+    for item in &run.items {
+        let status = format!("{:?}", item.status).to_lowercase();
+        let error = item
+            .error
+            .as_deref()
+            .map(|e| format!(" ({e})"))
+            .unwrap_or_default();
+        println!("  {:<24} {:<14}{}", item.name, status, error);
     }
 }
 

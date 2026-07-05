@@ -6,6 +6,23 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct InstallCommand {
+    pub command: String,
+    #[serde(default)]
+    pub os: Vec<String>,
+}
+
+impl InstallCommand {
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    pub fn supports_os(&self, os_name: &str) -> bool {
+        self.os.is_empty() || self.os.iter().any(|allowed| allowed == os_name)
+    }
+}
+
 /// One entry in the tool database.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolEntry {
@@ -17,7 +34,7 @@ pub struct ToolEntry {
     #[serde(default)]
     pub source_url: String,
     #[serde(default)]
-    pub platforms: BTreeMap<String, String>,
+    pub platforms: BTreeMap<String, InstallCommand>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -60,5 +77,27 @@ mod tests {
     fn find_returns_none_for_unknown() {
         let db = load_db().unwrap();
         assert!(find(&db, "totally-bogus").is_none());
+    }
+
+    #[test]
+    fn install_command_without_os_supports_all_os() {
+        let cmd = InstallCommand {
+            command: "brew install fish".into(),
+            os: vec![],
+        };
+        assert_eq!(cmd.command(), "brew install fish");
+        assert!(cmd.supports_os("macos"));
+        assert!(cmd.supports_os("linux"));
+    }
+
+    #[test]
+    fn install_command_respects_os() {
+        let cmd = InstallCommand {
+            command: "brew install --cask ghostty".into(),
+            os: vec!["macos".into()],
+        };
+        assert_eq!(cmd.command(), "brew install --cask ghostty");
+        assert!(cmd.supports_os("macos"));
+        assert!(!cmd.supports_os("linux"));
     }
 }
