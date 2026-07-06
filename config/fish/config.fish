@@ -19,9 +19,6 @@ set -gx GUM_CONFIRM_SELECTED_BACKGROUND 2
 set -gx GUM_CONFIRM_UNSELECTED_FOREGROUND 7
 set -gx GUM_CONFIRM_UNSELECTED_BACKGROUND 0
 
-set -gx LANG en_US.UTF-8
-set -gx LC_ALL en_US.UTF-8
-
 function __gum_info --argument-names message
     if status is-interactive; and type -q gum
         gum style --foreground "#89b4fa" --bold -- "$message"
