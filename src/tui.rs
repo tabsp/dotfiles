@@ -70,8 +70,10 @@ pub struct App {
     pub runs: Vec<Run>,
     pub list_state: ListState,
     pub grid_col: usize,
+    pub plan_columns: usize,
     pub collapsed_layers: BTreeSet<String>,
     pub status_message: String,
+    pub status_is_focus_info: bool,
     pub should_quit: bool,
     pub dirty: bool,
     // For RunView
@@ -109,8 +111,10 @@ impl App {
             runs: Vec::new(),
             list_state,
             grid_col: 0,
+            plan_columns: GRID_COLUMNS,
             collapsed_layers: BTreeSet::new(),
             status_message: String::new(),
+            status_is_focus_info: false,
             should_quit: false,
             dirty: false,
             spinner_frame: 0,
@@ -160,6 +164,7 @@ impl App {
             &mut self.list_state,
             self.plan.as_ref(),
             &self.collapsed_layers,
+            self.plan_columns,
         );
         self.dirty = false;
         Ok(())
@@ -257,6 +262,7 @@ fn save_current_selection(app: &mut App) -> Result<(), String> {
     let path = store::save_selection(&selection).map_err(|e| e.to_string())?;
     app.dirty = false;
     app.status_message = format!("saved selection to {}", path.display());
+    app.status_is_focus_info = false;
     Ok(())
 }
 
@@ -385,6 +391,7 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
         s.split('T').next().unwrap_or(s).to_string()
     }
 
+    let icon_set = icons::current();
     let area = f.area();
     let block = Block::default()
         .borders(Borders::ALL)
@@ -406,11 +413,11 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
         ])
         .split(area);
 
-    let title_prefix = format!("{}  dotman - Main Menu ", icons::ICON_GEAR);
+    let title_prefix = format!("{}  dotman - Main Menu ", icon_set.app);
     let divider_width = usize::from(chunks[0].width).saturating_sub(title_prefix.chars().count());
     let title = Paragraph::new(Line::from(vec![
         Span::styled(
-            format!("{}  dotman - Main Menu", icons::ICON_GEAR),
+            format!("{}  dotman - Main Menu", icon_set.app),
             Style::default()
                 .fg(CATPPUCCIN_MOCHA.fg_dim)
                 .add_modifier(Modifier::BOLD),
@@ -424,14 +431,22 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
 
     // Menu items with two-line layout (title + description)
     let menu_items: [(&str, &str, &str); 4] = [
-        ("\u{f0425}", "Deploy", "Sync dotfiles to this machine"),
         (
-            "\u{f0349}",
+            icon_set.menu_deploy,
+            "Deploy",
+            "Sync dotfiles to this machine",
+        ),
+        (
+            icon_set.menu_plan,
             "Plan only",
             "Preview changes without executing",
         ),
-        ("\u{f02da}", "History", "Browse past deployment records"),
-        ("\u{f015a}", "Quit", "Exit dotman"),
+        (
+            icon_set.menu_history,
+            "History",
+            "Browse past deployment records",
+        ),
+        (icon_set.menu_quit, "Quit", "Exit dotman"),
     ];
     let mut styled_items: Vec<ListItem> = Vec::new();
     let area_width = usize::from(chunks[1].width);
@@ -516,7 +531,7 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
     let arch_part = std::env::consts::ARCH;
     let summary_line_str = format!(
         "  {} {os_part} {arch_part} · {pkg} packages · {links} links · {dirs} directories · {shells} shell steps",
-        icons::ICON_LAPTOP
+        icon_set.host
     );
 
     let summary_width = usize::from(chunks[2].width).saturating_sub(2);
@@ -535,9 +550,10 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
 
     if let Some(run) = app.runs.first() {
         let status_icon = match run.status {
-            RunStatus::Success => icons::ICON_OK,
-            RunStatus::Failed => icons::ICON_FAIL,
-            RunStatus::Aborted | RunStatus::Running => icons::ICON_WARN,
+            RunStatus::Success => icon_set.success,
+            RunStatus::Failed => icon_set.failed,
+            RunStatus::Aborted => icon_set.warning,
+            RunStatus::Running => icon_set.running,
         };
         let status_color = match run.status {
             RunStatus::Success => CATPPUCCIN_MOCHA.success,
@@ -586,7 +602,7 @@ fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
     let rows = app
         .plan
         .as_ref()
-        .map(|plan| build_plan_rows(plan, &app.collapsed_layers))
+        .map(|plan| build_plan_rows(plan, &app.collapsed_layers, app.plan_columns))
         .unwrap_or_default();
     match key {
         KeyCode::Char('q') | KeyCode::Esc => {
@@ -595,19 +611,24 @@ fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
         KeyCode::Char('s') => {
             if let Err(e) = save_current_selection(app) {
                 app.status_message = e;
+                app.status_is_focus_info = false;
             }
         }
         KeyCode::Char('j') | KeyCode::Down => {
             select_next_plan_row(app, &rows);
+            update_plan_focus_info(app);
         }
         KeyCode::Char('k') | KeyCode::Up => {
             select_prev_plan_row(app, &rows);
+            update_plan_focus_info(app);
         }
         KeyCode::Char('h') | KeyCode::Left => {
             move_grid_col(app, &rows, -1);
+            update_plan_focus_info(app);
         }
         KeyCode::Char('l') | KeyCode::Right => {
             move_grid_col(app, &rows, 1);
+            update_plan_focus_info(app);
         }
         KeyCode::Enter | KeyCode::Char(' ') => {
             if let Some(plan) = &mut app.plan
@@ -636,13 +657,32 @@ fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
                     _ => {}
                 }
             }
+            update_plan_focus_info(app);
         }
-        KeyCode::Char('1') => toggle_layer_by_number(app, 1),
-        KeyCode::Char('2') => toggle_layer_by_number(app, 2),
-        KeyCode::Char('3') => toggle_layer_by_number(app, 3),
-        KeyCode::Char('4') => toggle_layer_by_number(app, 4),
-        KeyCode::Char('5') => toggle_layer_by_number(app, 5),
-        KeyCode::Char('6') => toggle_layer_by_number(app, 6),
+        KeyCode::Char('1') => {
+            toggle_layer_by_number(app, 1);
+            update_plan_focus_info(app);
+        }
+        KeyCode::Char('2') => {
+            toggle_layer_by_number(app, 2);
+            update_plan_focus_info(app);
+        }
+        KeyCode::Char('3') => {
+            toggle_layer_by_number(app, 3);
+            update_plan_focus_info(app);
+        }
+        KeyCode::Char('4') => {
+            toggle_layer_by_number(app, 4);
+            update_plan_focus_info(app);
+        }
+        KeyCode::Char('5') => {
+            toggle_layer_by_number(app, 5);
+            update_plan_focus_info(app);
+        }
+        KeyCode::Char('6') => {
+            toggle_layer_by_number(app, 6);
+            update_plan_focus_info(app);
+        }
         KeyCode::Char('a') => {
             if let Some(plan) = &mut app.plan {
                 for item in plan.items.iter_mut() {
@@ -659,11 +699,14 @@ fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
                 app.dirty = true;
             }
         }
+        KeyCode::Char('i') => show_plan_info(app, &rows),
         KeyCode::Char('r') => {
             if matches!(app.mode, Mode::Plan) {
                 app.status_message = "plan mode is read-only; choose deploy to run".into();
+                app.status_is_focus_info = false;
             } else if selected_item_count(app.plan.as_ref()) == 0 {
                 app.status_message = "nothing selected".into();
+                app.status_is_focus_info = false;
             } else {
                 app.screen = Screen::ConfirmView;
             }
@@ -674,13 +717,8 @@ fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
 }
 
 fn render_plan(f: &mut Frame, app: &mut App) {
+    let icon_set = icons::current();
     let area = f.area();
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(CATPPUCCIN_MOCHA.fg_dim));
-    f.render_widget(block, area);
-
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
@@ -690,6 +728,9 @@ fn render_plan(f: &mut Frame, app: &mut App) {
             Constraint::Length(3),
         ])
         .split(area);
+
+    app.plan_columns = plan_grid_columns(usize::from(chunks[1].width));
+    app.grid_col = clamped_grid_col_for_selection(app);
 
     let plan = match &app.plan {
         Some(p) => p,
@@ -705,12 +746,12 @@ fn render_plan(f: &mut Frame, app: &mut App) {
     let state = if app.dirty { "unsaved" } else { "saved" };
     let status_prefix = format!(
         "{}  dotman - Plan (○ {state})  {selected} selected · {actions} actions ",
-        icons::ICON_GEAR
+        icon_set.app
     );
     let divider_width = usize::from(chunks[0].width).saturating_sub(status_prefix.chars().count());
     let status = Paragraph::new(Line::from(vec![
         Span::styled(
-            format!("{}  dotman - Plan (", icons::ICON_GEAR),
+            format!("{}  dotman - Plan (", icon_set.app),
             Style::default()
                 .fg(CATPPUCCIN_MOCHA.fg_dim)
                 .add_modifier(Modifier::BOLD),
@@ -724,7 +765,7 @@ fn render_plan(f: &mut Frame, app: &mut App) {
             Style::default().fg(if app.dirty {
                 CATPPUCCIN_MOCHA.warning
             } else {
-                CATPPUCCIN_MOCHA.primary
+                CATPPUCCIN_MOCHA.text_muted
             }),
         ),
         Span::styled(")  ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
@@ -734,15 +775,15 @@ fn render_plan(f: &mut Frame, app: &mut App) {
         ),
         Span::styled(
             format!(" {}", "─".repeat(divider_width)),
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+            Style::default().fg(CATPPUCCIN_MOCHA.border_subtle),
         ),
     ]));
     f.render_widget(status, chunks[0]);
 
-    let rows = build_plan_rows(plan, &app.collapsed_layers);
+    let rows = build_plan_rows(plan, &app.collapsed_layers, app.plan_columns);
     let mut items: Vec<ListItem> = Vec::new();
-    let row_width = usize::from(chunks[1].width).saturating_sub(4);
-    let cell_width = grid_cell_width(row_width);
+    let row_width = usize::from(chunks[1].width);
+    let cell_width = grid_cell_width(row_width, app.plan_columns);
     for (row_index, row) in rows.iter().enumerate() {
         let selected_row = app
             .list_state
@@ -755,62 +796,32 @@ fn render_plan(f: &mut Frame, app: &mut App) {
                 enabled,
                 total,
             } => {
-                let header = format!(
-                    "{}  {}. {} ({}/{})",
-                    if app.collapsed_layers.contains(layer) {
-                        icons::ICON_COLLAPSED
-                    } else {
-                        icons::ICON_EXPANDED
-                    },
-                    ordinal,
-                    capitalize(layer),
-                    enabled,
-                    total
-                );
-                if selected_row {
-                    items.push(selected_header_line(&header));
-                } else {
-                    items.push(ListItem::new(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(
-                            header,
-                            Style::default()
-                                .fg(CATPPUCCIN_MOCHA.primary)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ])));
-                }
+                items.push(plan_header_line(
+                    layer,
+                    *ordinal,
+                    *enabled,
+                    *total,
+                    app.collapsed_layers.contains(layer),
+                    selected_row,
+                    row_width,
+                ));
             }
             PlanRow::Item(item_idx) => {
                 let it = &plan.items[*item_idx];
                 if selected_row {
                     items.push(selected_item_line(it, row_width));
                 } else {
-                    let line = Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled("│", guide_style()),
-                        Span::raw("  "),
-                        checkbox_span(it.selected, false),
-                        Span::raw("  "),
-                        Span::styled(item_label(it), Style::default().fg(CATPPUCCIN_MOCHA.fg)),
-                    ]);
-                    items.push(ListItem::new(line));
+                    items.push(plan_item_line(it, row_width));
                 }
             }
             PlanRow::InlineItems(item_indices) => {
-                let mut spans = vec![
-                    Span::raw("  "),
-                    Span::styled("│", guide_style()),
-                    Span::raw("  "),
-                ];
+                let mut spans = vec![Span::raw("  ")];
                 for (i, item_idx) in item_indices.iter().enumerate() {
                     let it = &plan.items[*item_idx];
                     let selected_cell = selected_row && app.grid_col == i;
                     spans.extend(grid_cell_spans(it, cell_width, selected_cell));
                     if i + 1 < item_indices.len() {
-                        spans.push(Span::raw(" "));
-                        spans.push(Span::styled("│", grid_rule_style()));
-                        spans.push(Span::raw(" "));
+                        spans.push(Span::raw("    "));
                     }
                 }
                 items.push(ListItem::new(Line::from(spans)));
@@ -825,40 +836,50 @@ fn render_plan(f: &mut Frame, app: &mut App) {
     }
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded)
-                .border_style(Style::default().fg(CATPPUCCIN_MOCHA.skip)),
-        )
         .highlight_style(Style::default())
         .highlight_symbol("");
     f.render_stateful_widget(list, chunks[1], &mut app.list_state);
 
-    let help = Paragraph::new(Line::from(vec![
-        keycap("↑↓"),
-        hint(" move  "),
-        keycap("←→"),
-        hint(" column  "),
-        keycap("space"),
-        hint(" toggle  "),
-        keycap("a"),
-        hint(" all  "),
-        keycap("n"),
-        hint(" none  "),
-        keycap("1-6"),
-        hint(" fold  "),
-        keycap("s"),
-        hint(" save  "),
-        keycap("r"),
-        hint(" review  "),
-        keycap("q"),
-        hint(" back"),
-    ]));
+    let status_line = if app.status_message.is_empty() {
+        Line::from("")
+    } else {
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                &app.status_message,
+                Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+            ),
+        ])
+    };
+    let help = Paragraph::new(vec![
+        status_line,
+        Line::from(vec![
+            keycap("↑↓"),
+            hint(" Navigate  "),
+            keycap("Space"),
+            hint(" Toggle  "),
+            keycap("Enter"),
+            hint(" Expand  "),
+            keycap("1-6"),
+            hint(" Jump  "),
+            keycap("I"),
+            hint(" Info  "),
+            keycap("S"),
+            hint(" Save  "),
+            keycap("R"),
+            hint(" Review  "),
+            keycap("Q"),
+            hint(" Back"),
+        ]),
+    ]);
     f.render_widget(help, chunks[2]);
 }
 
-fn build_plan_rows(plan: &Plan, collapsed_layers: &BTreeSet<String>) -> Vec<PlanRow> {
+fn build_plan_rows(
+    plan: &Plan,
+    collapsed_layers: &BTreeSet<String>,
+    grid_columns: usize,
+) -> Vec<PlanRow> {
     let layers = [
         "terminal",
         "shell",
@@ -889,10 +910,10 @@ fn build_plan_rows(plan: &Plan, collapsed_layers: &BTreeSet<String>) -> Vec<Plan
             total: layer_items.len(),
         });
         if !collapsed_layers.contains(*layer) {
-            if i < 3 {
+            if i < 3 || grid_columns == 1 {
                 rows.extend(layer_items.into_iter().map(PlanRow::Item));
             } else {
-                for chunk in layer_items.chunks(GRID_COLUMNS) {
+                for chunk in layer_items.chunks(grid_columns) {
                     rows.push(PlanRow::InlineItems(chunk.to_vec()));
                 }
             }
@@ -904,16 +925,89 @@ fn build_plan_rows(plan: &Plan, collapsed_layers: &BTreeSet<String>) -> Vec<Plan
     rows
 }
 
+fn plan_header_line(
+    layer: &str,
+    ordinal: usize,
+    enabled: usize,
+    total: usize,
+    collapsed: bool,
+    focused: bool,
+    width: usize,
+) -> ListItem<'static> {
+    let icon_set = icons::current();
+    let icon = if collapsed {
+        icon_set.collapsed
+    } else {
+        icon_set.expanded
+    };
+    let left = format!("{} {:02}  {}", icon, ordinal, capitalize(layer));
+    let right = format!("{enabled} / {total}");
+    let content_width = width.saturating_sub(2);
+    let right_width = right.chars().count();
+    let left_width = content_width.saturating_sub(right_width + 1);
+    let gap = content_width
+        .saturating_sub(left_width + right_width)
+        .max(1);
+
+    if focused {
+        let bg = focus_bg();
+        ListItem::new(Line::from(vec![
+            Span::styled(
+                "▎",
+                Style::default().fg(CATPPUCCIN_MOCHA.focus_marker).bg(bg),
+            ),
+            Span::styled(" ", Style::default().bg(bg)),
+            Span::styled(
+                fit_to_width(&left, left_width),
+                Style::default().bg(bg).fg(CATPPUCCIN_MOCHA.text_muted),
+            ),
+            Span::styled(" ".repeat(gap), Style::default().bg(bg)),
+            Span::styled(
+                right,
+                Style::default().bg(bg).fg(CATPPUCCIN_MOCHA.text_muted),
+            ),
+        ]))
+    } else {
+        ListItem::new(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                fit_to_width(&left, left_width),
+                Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+            ),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(right, Style::default().fg(CATPPUCCIN_MOCHA.text_muted)),
+        ]))
+    }
+}
+
+fn plan_item_line(item: &PlanItem, width: usize) -> ListItem<'static> {
+    let label = item_label(item);
+    let prefix_width = 6;
+    let available = width.saturating_sub(prefix_width);
+
+    ListItem::new(Line::from(vec![
+        Span::raw("  "),
+        Span::raw("  "),
+        checkbox_span(item.selected, false),
+        Span::raw("  "),
+        Span::styled(
+            fit_to_width(&label, available),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg),
+        ),
+    ]))
+}
+
 fn select_first_plan_row(
     list_state: &mut ListState,
     plan: Option<&Plan>,
     collapsed_layers: &BTreeSet<String>,
+    grid_columns: usize,
 ) {
     let Some(plan) = plan else {
         select_plan_row(list_state, 0, true);
         return;
     };
-    let rows = build_plan_rows(plan, collapsed_layers);
+    let rows = build_plan_rows(plan, collapsed_layers, grid_columns);
     let first = rows.iter().position(is_selectable_plan_row).unwrap_or(0);
     select_plan_row(list_state, first, true);
 }
@@ -995,6 +1089,22 @@ fn clamp_grid_col(app: &mut App, row: Option<&PlanRow>) {
     }
 }
 
+fn clamped_grid_col_for_selection(app: &App) -> usize {
+    let Some(plan) = &app.plan else {
+        return 0;
+    };
+    let rows = build_plan_rows(plan, &app.collapsed_layers, app.plan_columns);
+    let Some(row_idx) = app.list_state.selected() else {
+        return 0;
+    };
+    match rows.get(row_idx) {
+        Some(PlanRow::InlineItems(item_indices)) => {
+            app.grid_col.min(item_indices.len().saturating_sub(1))
+        }
+        _ => 0,
+    }
+}
+
 fn toggle_layer(collapsed_layers: &mut BTreeSet<String>, layer: &str) {
     if !collapsed_layers.remove(layer) {
         collapsed_layers.insert(layer.to_string());
@@ -1024,7 +1134,7 @@ fn keep_selection_in_range(app: &mut App) {
     let rows = app
         .plan
         .as_ref()
-        .map(|plan| build_plan_rows(plan, &app.collapsed_layers))
+        .map(|plan| build_plan_rows(plan, &app.collapsed_layers, app.plan_columns))
         .unwrap_or_default();
     let selected = app.list_state.selected().unwrap_or(0);
     if selected >= rows.len() || !rows.get(selected).is_some_and(is_selectable_plan_row) {
@@ -1036,17 +1146,100 @@ fn keep_selection_in_range(app: &mut App) {
     }
 }
 
-fn selected_header_line(content: &str) -> ListItem<'static> {
-    ListItem::new(Line::from(vec![
-        Span::styled("▎", Style::default().fg(CATPPUCCIN_MOCHA.primary)),
-        Span::raw(" "),
-        Span::styled(
-            content.to_string(),
-            Style::default()
-                .fg(CATPPUCCIN_MOCHA.primary)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]))
+fn show_plan_info(app: &mut App, rows: &[PlanRow]) {
+    let Some(plan) = &app.plan else {
+        app.status_message = "no plan loaded".into();
+        app.status_is_focus_info = false;
+        return;
+    };
+    let Some(row_idx) = app.list_state.selected() else {
+        app.status_message = "nothing focused".into();
+        app.status_is_focus_info = false;
+        return;
+    };
+
+    match rows.get(row_idx) {
+        Some(PlanRow::Header {
+            layer,
+            enabled,
+            total,
+            ..
+        }) => {
+            let state = if app.collapsed_layers.contains(layer) {
+                "collapsed"
+            } else {
+                "expanded"
+            };
+            app.status_message =
+                format!("{}: {enabled}/{total} selected, {state}", capitalize(layer));
+            app.status_is_focus_info = true;
+        }
+        Some(PlanRow::Item(item_idx)) => {
+            if let Some(item) = plan.items.get(*item_idx) {
+                app.status_message = plan_item_info(item);
+                app.status_is_focus_info = true;
+            }
+        }
+        Some(PlanRow::InlineItems(item_indices)) => {
+            let col = app.grid_col.min(item_indices.len().saturating_sub(1));
+            if let Some(item_idx) = item_indices.get(col)
+                && let Some(item) = plan.items.get(*item_idx)
+            {
+                app.status_message = plan_item_info(item);
+                app.status_is_focus_info = true;
+            }
+        }
+        Some(PlanRow::Divider) | None => {
+            clear_focus_info(app);
+        }
+    }
+}
+
+fn update_plan_focus_info(app: &mut App) {
+    if let Some(info) = focused_plan_item_info(app) {
+        app.status_message = info;
+        app.status_is_focus_info = true;
+    } else {
+        clear_focus_info(app);
+    }
+}
+
+fn focused_plan_item_info(app: &App) -> Option<String> {
+    let plan = app.plan.as_ref()?;
+    let row_idx = app.list_state.selected()?;
+    let rows = build_plan_rows(plan, &app.collapsed_layers, app.plan_columns);
+    match rows.get(row_idx)? {
+        PlanRow::Item(item_idx) => plan.items.get(*item_idx).map(plan_item_info),
+        PlanRow::InlineItems(item_indices) => {
+            let col = app.grid_col.min(item_indices.len().saturating_sub(1));
+            item_indices
+                .get(col)
+                .and_then(|item_idx| plan.items.get(*item_idx))
+                .map(plan_item_info)
+        }
+        PlanRow::Header { .. } | PlanRow::Divider => None,
+    }
+}
+
+fn clear_focus_info(app: &mut App) {
+    if app.status_is_focus_info {
+        app.status_message.clear();
+        app.status_is_focus_info = false;
+    }
+}
+
+fn plan_item_info(item: &PlanItem) -> String {
+    let actions = item
+        .actions
+        .iter()
+        .map(Action::describe)
+        .collect::<Vec<_>>()
+        .join(" · ");
+    if actions.is_empty() {
+        item.name.clone()
+    } else {
+        format!("{}: {actions}", item.name)
+    }
 }
 
 fn selected_item_line(item: &PlanItem, width: usize) -> ListItem<'static> {
@@ -1056,26 +1249,36 @@ fn selected_item_line(item: &PlanItem, width: usize) -> ListItem<'static> {
     let label_width = width.saturating_sub(fixed_width);
     ListItem::new(Line::from(vec![
         Span::styled("  ", Style::default().bg(bg)),
-        Span::styled("│", guide_style().bg(bg)),
-        Span::styled("▎", Style::default().fg(CATPPUCCIN_MOCHA.primary).bg(bg)),
+        Span::styled(
+            "▎",
+            Style::default().fg(CATPPUCCIN_MOCHA.focus_marker).bg(bg),
+        ),
+        Span::styled(" ", Style::default().bg(bg)),
         checkbox_span(item.selected, true),
         Span::styled("  ", Style::default().bg(bg)),
         Span::styled(
             fit_to_width(&label, label_width),
-            Style::default()
-                .bg(bg)
-                .fg(CATPPUCCIN_MOCHA.fg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().bg(bg).fg(CATPPUCCIN_MOCHA.fg),
         ),
     ]))
 }
 
-fn grid_cell_width(row_width: usize) -> usize {
-    let indent = 5;
-    let separators = (GRID_COLUMNS - 1) * 3;
+fn plan_grid_columns(width: usize) -> usize {
+    if width < 90 {
+        1
+    } else if width < 120 {
+        2
+    } else {
+        GRID_COLUMNS
+    }
+}
+
+fn grid_cell_width(row_width: usize, columns: usize) -> usize {
+    let indent = 4;
+    let gaps = columns.saturating_sub(1) * 4;
     row_width
-        .saturating_sub(indent + separators)
-        .checked_div(GRID_COLUMNS)
+        .saturating_sub(indent + gaps)
+        .checked_div(columns)
         .unwrap_or(18)
         .max(18)
 }
@@ -1083,13 +1286,15 @@ fn grid_cell_width(row_width: usize) -> usize {
 fn grid_cell_spans(item: &PlanItem, width: usize, focused: bool) -> Vec<Span<'static>> {
     let bg = focused.then(focus_bg);
     let label = item_label(item);
-    let prefix_width = if focused { 1 } else { 2 };
+    let prefix_width = 2;
     let fixed_width = prefix_width + 3;
     let label_width = width.saturating_sub(fixed_width);
-    let prefix = if focused { "▎" } else { "  " };
+    let prefix = if focused { "▎ " } else { "  " };
     let mut prefix_style = Style::default();
     if focused {
-        prefix_style = prefix_style.fg(CATPPUCCIN_MOCHA.primary).bg(focus_bg());
+        prefix_style = prefix_style
+            .fg(CATPPUCCIN_MOCHA.focus_marker)
+            .bg(focus_bg());
     }
     vec![
         Span::styled(prefix, prefix_style),
@@ -1099,21 +1304,18 @@ fn grid_cell_spans(item: &PlanItem, width: usize, focused: bool) -> Vec<Span<'st
             fit_to_width(&label, label_width),
             span_bg_style(bg)
                 .fg(CATPPUCCIN_MOCHA.fg)
-                .add_modifier(if focused {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
+                .add_modifier(Modifier::empty()),
         ),
     ]
 }
 
 fn checkbox_span(selected: bool, highlighted: bool) -> Span<'static> {
+    let icon_set = icons::current();
     Span::styled(
         if selected {
-            icons::ICON_CHECKED
+            icon_set.selected
         } else {
-            icons::ICON_UNCHECKED
+            icon_set.unselected
         },
         span_bg_style(highlighted.then(focus_bg)).fg(if selected {
             CATPPUCCIN_MOCHA.success
@@ -1140,43 +1342,36 @@ fn span_bg_style(bg: Option<Color>) -> Style {
 }
 
 fn focus_bg() -> Color {
-    Color::Rgb(39, 36, 52)
-}
-
-fn guide_style() -> Style {
-    Style::default().fg(Color::Rgb(46, 48, 62))
-}
-
-fn grid_rule_style() -> Style {
-    Style::default().fg(Color::Rgb(42, 44, 58))
+    CATPPUCCIN_MOCHA.surface_active
 }
 
 fn divider_style() -> Style {
-    Style::default().fg(Color::Rgb(55, 57, 73))
+    Style::default().fg(CATPPUCCIN_MOCHA.divider)
 }
 
 fn fit_to_width(value: &str, width: usize) -> String {
-    let mut out = String::new();
-    for (i, ch) in value.chars().enumerate() {
-        if i + 3 >= width {
-            out.push_str("...");
-            return out;
-        }
-        out.push(ch);
-    }
-    let len = out.chars().count();
-    if len < width {
+    let len = value.chars().count();
+    if len <= width {
+        let mut out = value.to_string();
         out.push_str(&" ".repeat(width - len));
+        return out;
     }
+    if width == 0 {
+        return String::new();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+    let mut out = value.chars().take(width - 3).collect::<String>();
+    out.push_str("...");
     out
 }
 
 fn keycap(label: &'static str) -> Span<'static> {
     Span::styled(
-        format!(" {label} "),
+        format!("[{label}]"),
         Style::default()
-            .fg(CATPPUCCIN_MOCHA.fg)
-            .bg(CATPPUCCIN_MOCHA.bg)
+            .fg(CATPPUCCIN_MOCHA.text_muted)
             .add_modifier(Modifier::BOLD),
     )
 }
@@ -1224,12 +1419,12 @@ fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
 }
 
 fn render_confirm(f: &mut Frame, app: &App) {
+    let icon_set = icons::current();
     let area = f.area();
     let block = Block::default()
         .title(format!(
             " {} Review changes — {:?} ",
-            icons::ICON_WARN,
-            app.mode
+            icon_set.warning, app.mode
         ))
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
@@ -1344,6 +1539,7 @@ fn selected_action_count(plan: Option<&Plan>) -> usize {
 }
 
 fn review_lines(plan: &Plan) -> Vec<Line<'static>> {
+    let icon_set = icons::current();
     let config_dir = plan
         .config_path
         .parent()
@@ -1365,7 +1561,7 @@ fn review_lines(plan: &Plan) -> Vec<Line<'static>> {
                     };
                     lines.push(review_line(
                         &item.name,
-                        icons::ICON_WARN,
+                        icon_set.warning,
                         &status,
                         &format!("{} -> {}", target.display(), source.display()),
                     ));
@@ -1377,7 +1573,7 @@ fn review_lines(plan: &Plan) -> Vec<Line<'static>> {
                     };
                     lines.push(review_line(
                         &item.name,
-                        icons::ICON_WARN,
+                        icon_set.warning,
                         &status,
                         &target.display().to_string(),
                     ));
@@ -1477,6 +1673,7 @@ fn start_run(app: &mut App) {
 }
 
 fn render_run(f: &mut Frame, app: &mut App) {
+    let icon_set = icons::current();
     let area = f.area();
     drain_run_events(app);
 
@@ -1511,10 +1708,7 @@ fn render_run(f: &mut Frame, app: &mut App) {
     let block = Block::default()
         .title(format!(
             " {} Running: {:?} — {}/{} ",
-            icons::ICON_RUNNING,
-            app.mode,
-            app.progress.0,
-            app.progress.1
+            icon_set.running, app.mode, app.progress.0, app.progress.1
         ))
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
@@ -1671,9 +1865,10 @@ fn push_log(app: &mut App, line: &str, fg: Option<Color>) {
 }
 
 fn run_step_icon(app: &App, index: usize, item: &PlanItem) -> Span<'static> {
+    let icon_set = icons::current();
     if !item.selected {
         return Span::styled(
-            icons::ICON_SKIP,
+            icon_set.skipped,
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
         );
     }
@@ -1687,19 +1882,19 @@ fn run_step_icon(app: &App, index: usize, item: &PlanItem) -> Span<'static> {
 
     match app.run_item_statuses.get(index).and_then(|status| *status) {
         Some(ActionStatus::WillFail) => Span::styled(
-            icons::ICON_FAIL,
+            icon_set.failed,
             Style::default().fg(CATPPUCCIN_MOCHA.danger),
         ),
         Some(ActionStatus::WillSkip) => Span::styled(
-            icons::ICON_SKIP,
+            icon_set.skipped,
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
         ),
         Some(_) => Span::styled(
-            icons::ICON_OK,
+            icon_set.success,
             Style::default().fg(CATPPUCCIN_MOCHA.success),
         ),
         None => Span::styled(
-            icons::ICON_PENDING,
+            icon_set.pending,
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
         ),
     }
@@ -1721,6 +1916,7 @@ fn handle_result(app: &mut App, key: KeyCode) -> Result<()> {
 }
 
 fn render_result(f: &mut Frame, app: &mut App) {
+    let icon_set = icons::current();
     let area = f.area();
     let run = match &app.run {
         Some(r) => r,
@@ -1738,11 +1934,11 @@ fn render_result(f: &mut Frame, app: &mut App) {
     let total = run.items.len();
     let title = format!(
         " {} Run {} — {} ok, {} failed, {} total ",
-        icons::ICON_GEAR,
+        icon_set.app,
         if matches!(run.status, RunStatus::Success) {
-            icons::ICON_OK
+            icon_set.success
         } else {
-            icons::ICON_FAIL
+            icon_set.failed
         },
         ok,
         failed,
@@ -1770,17 +1966,17 @@ fn render_result(f: &mut Frame, app: &mut App) {
     for item in &run.items {
         let icon = if item.error.is_some() {
             Span::styled(
-                icons::ICON_FAIL,
+                icon_set.failed,
                 Style::default().fg(CATPPUCCIN_MOCHA.danger),
             )
         } else if matches!(item.status, ActionStatus::WillSkip) {
             Span::styled(
-                icons::ICON_SKIP,
+                icon_set.skipped,
                 Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
             )
         } else {
             Span::styled(
-                icons::ICON_OK,
+                icon_set.success,
                 Style::default().fg(CATPPUCCIN_MOCHA.success),
             )
         };
@@ -1855,11 +2051,12 @@ fn handle_history(app: &mut App, key: KeyCode) -> Result<()> {
 }
 
 fn render_history(f: &mut Frame, app: &mut App) {
+    let icon_set = icons::current();
     let area = f.area();
     let block = Block::default()
         .title(format!(
             " {} History ({} runs) ",
-            icons::ICON_GEAR,
+            icon_set.app,
             app.runs.len()
         ))
         .borders(Borders::ALL)
@@ -1923,6 +2120,7 @@ fn handle_replay(app: &mut App, key: KeyCode) -> Result<()> {
 }
 
 fn render_replay(f: &mut Frame, app: &mut App) {
+    let icon_set = icons::current();
     let area = f.area();
     let run = match &app.run {
         Some(r) => r,
@@ -1938,9 +2136,7 @@ fn render_replay(f: &mut Frame, app: &mut App) {
     let block = Block::default()
         .title(format!(
             " {} Replay: {} — {:?} ",
-            icons::ICON_GEAR,
-            run.id,
-            run.mode
+            icon_set.app, run.id, run.mode
         ))
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
@@ -1956,11 +2152,11 @@ fn render_replay(f: &mut Frame, app: &mut App) {
     let mut lines: Vec<Line> = Vec::new();
     for item in &run.items {
         let icon = if item.error.is_some() {
-            icons::ICON_FAIL
+            icon_set.failed
         } else if matches!(item.status, ActionStatus::WillSkip) {
-            icons::ICON_SKIP
+            icon_set.skipped
         } else {
-            icons::ICON_OK
+            icon_set.success
         };
         let name = &item.name;
         let dur = item
