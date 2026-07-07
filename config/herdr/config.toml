@@ -1,0 +1,125 @@
+# Herdr config migrated from config/tmux.conf.
+#
+# Intent:
+# - keep the same prefix muscle memory: C-x
+# - map tmux windows to Herdr tabs
+# - map tmux sessions/projects to Herdr workspaces
+# - keep pane movement on h/j/k/l
+#
+# Not 1:1 in Herdr:
+# - tmux buffer commands b/p/P have no direct Herdr equivalent
+# - tmux display-popup + fzf is replaced by Herdr workspace/goto pickers
+# - tmux if-shell Vim-aware resize has no Herdr equivalent
+
+onboarding = false
+
+[terminal]
+# Match tmux split/new-window behavior: new panes inherit the current pane cwd.
+new_cwd = "follow"
+
+# tmux starts login shells via your outer shell setup; keep Herdr's macOS login
+# shell behavior so Homebrew and path_helper initialization still run.
+shell_mode = "auto"
+
+[theme]
+# Closest built-in match to the tmux Catppuccin status colors.
+name = "catppuccin"
+auto_switch = false
+
+[ui]
+mouse_capture = true
+pane_borders = true
+pane_gaps = true
+confirm_close = true
+show_agent_labels_on_pane_borders = true
+prompt_new_tab_name = false
+hide_tab_bar_when_single_tab = false
+sidebar_collapsed_mode = "compact"
+agent_panel_sort = "spaces"
+accent = "blue"
+
+[ui.toast]
+delivery = "off"
+
+[ui.sound]
+enabled = false
+
+[advanced]
+# tmux history-limit is line based; Herdr scrollback is byte based. 64 MiB keeps
+# a similarly generous buffer without being too eager.
+scrollback_limit_bytes = 67108864
+
+[session]
+resume_agents_on_restore = true
+
+[experimental]
+allow_nested = false
+pane_history = false
+switch_ascii_input_source_in_prefix = true
+
+[keys]
+prefix = "ctrl+x"
+
+# Workspaces: nearest Herdr equivalent to tmux sessions.
+new_workspace = "prefix+ctrl+c"
+workspace_picker = ["prefix+ctrl+f", "prefix+w"]
+goto = "prefix+g"
+rename_workspace = "prefix+shift+w"
+close_workspace = "prefix+shift+d"
+switch_workspace = "prefix+shift+1..9"
+
+# Tabs: nearest Herdr equivalent to tmux windows.
+new_tab = "prefix+c"
+previous_tab = "prefix+ctrl+h"
+next_tab = "prefix+ctrl+l"
+switch_tab = "prefix+1..9"
+last_pane = "prefix+tab"
+rename_tab = "prefix+shift+t"
+close_tab = "prefix+shift+x"
+
+# Panes: keep your tmux split and navigation muscle memory.
+split_horizontal = "prefix+minus"
+split_vertical = "prefix+shift+minus"
+focus_pane_left = "prefix+h"
+focus_pane_down = "prefix+j"
+focus_pane_up = "prefix+k"
+focus_pane_right = "prefix+l"
+
+# Herdr swaps panes by direction. Your tmux >/< next/previous swap has no exact
+# directional equivalent, so keep Herdr's h/j/k/l variant.
+swap_pane_left = "prefix+shift+h"
+swap_pane_down = "prefix+shift+j"
+swap_pane_up = "prefix+shift+k"
+swap_pane_right = "prefix+shift+l"
+
+# Herdr exposes resize as a mode, not direct H/J/K/L resize bindings. Keep
+# prefix+r for reload below, and put resize on prefix+R.
+resize_mode = "prefix+shift+r"
+
+cycle_pane_previous = "prefix+shift+tab"
+zoom = "prefix+z"
+close_pane = "prefix+x"
+
+# Copy mode: your tmux binding plus Herdr's default.
+copy_mode = ["prefix+enter", "prefix+["]
+edit_scrollback = "prefix+shift+e"
+
+# Session/client basics.
+detach = "prefix+q"
+toggle_sidebar = "prefix+b"
+
+# Navigate-mode keys mirror vim/tmux pane movement.
+navigate_pane_left = "h"
+navigate_pane_down = "j"
+navigate_pane_up = "k"
+navigate_pane_right = "l"
+
+# Remote image paste stays direct because it is only active in herdr --remote.
+remote_image_paste = "ctrl+v"
+
+[[keys.command]]
+key = "prefix+r"
+type = "shell"
+command = "herdr server reload-config"
+description = "reload Herdr config"
+

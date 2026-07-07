@@ -1,5 +1,5 @@
 #!/bin/bash
-# production-manual.sh — Full production E2E with REAL dotman.yaml, config/, bin/, packages/.
+# production-manual.sh — Full production E2E with REAL dotman.yaml, config/, bin/.
 #
 # This is a MANUAL test entrypoint — run inside the Docker container:
 #   docker run --rm -it dotman-e2e-production tests/e2e/scenarios/production-manual.sh
@@ -78,7 +78,6 @@ info "Verifying fixture content..."
 assert_file_exists "$FIXTURE_WORK/dotman.yaml"
 assert_dir_exists "$FIXTURE_WORK/config"
 assert_dir_exists "$FIXTURE_WORK/bin"
-assert_dir_exists "$FIXTURE_WORK/packages"
 
 # 1d. Show what we're working with.
 info "Production config includes:"

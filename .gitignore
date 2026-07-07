@@ -26,6 +26,11 @@ config/fish/themes/
 # Machine/platform-specific Ghostty overrides.
 config/ghostty/config.local
 
+# Herdr runtime files (sockets, logs, session state). Keep config.toml tracked.
+config/herdr/*.sock
+config/herdr/*.log
+config/herdr/session.json
+
 # Superpowers working documents
 docs/superpowers/
 .superpowers/

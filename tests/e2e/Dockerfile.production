@@ -1,5 +1,5 @@
 # Dockerfile for dotman production manual E2E test.
-# Uses REAL production config (dotman.yaml, config/, bin/, packages/)
+# Uses REAL production config (dotman.yaml, config/, bin/)
 # from the repo root — no fixture duplication.
 #
 # Unlike the CI Dockerfile, this creates a user WITH password-required sudo,

@@ -32,6 +32,16 @@ command = "sudo dnf copr enable -y scottames/ghostty && sudo dnf install -y ghos
 platform = "fedora"
 os = ["fedora"]
 
+[templates.herdr_direct_macos]
+command = "curl -fsSL https://herdr.dev/install.sh | sh"
+platform = "macos"
+os = ["macos"]
+
+[templates.herdr_direct_linux]
+command = "curl -fsSL https://herdr.dev/install.sh | sh"
+platform = "linux"
+os = ["linux"]
+
 [tools.ghostty]
 layer = "terminal"
 platforms = ["brew_cask", "ubuntu_ghostty", "pacman", "fedora_ghostty"]
@@ -45,6 +55,10 @@ layer = "shell"
 
 [tools.tmux]
 layer = "multiplexer"
+
+[tools.herdr]
+layer = "multiplexer"
+platforms = ["brew", "herdr_direct_macos", "herdr_direct_linux"]
 
 [tools.neovim]
 binary = "nvim"
@@ -123,4 +137,5 @@ layer = "enhancement"
 layer = "enhancement"
 kind = "font"
 source_url = "https://github.com/subframe7536/Maple-font/releases/latest/download/MapleMono-NF-CN-unhinted.zip"
+font_family = "Maple Mono"
 platforms = ["brew_cask"]

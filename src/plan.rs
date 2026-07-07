@@ -22,8 +22,8 @@ pub enum LayerStrategy {
 /// Strategy for each layer.
 pub fn layer_strategy(layer: &str) -> LayerStrategy {
     match layer {
-        "terminal" | "shell" | "multiplexer" => LayerStrategy::PickOne,
-        "software" | "enhancement" => LayerStrategy::All,
+        "terminal" | "shell" => LayerStrategy::PickOne,
+        "multiplexer" | "software" | "enhancement" => LayerStrategy::All,
         _ => LayerStrategy::All,
     }
 }

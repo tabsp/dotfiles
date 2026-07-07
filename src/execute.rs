@@ -496,32 +496,37 @@ where
         }
         let fonts_dir = format!("{home}/.local/share/fonts");
 
-        // Check already installed.
-        if std::path::Path::new(&fonts_dir)
-            .join(&entry.binary)
-            .exists()
-        {
-            let msg = format!("font {} already installed", entry.name);
-            emit(ExecuteEvent::ActionMessage {
-                item: item_name.to_string(),
-                message: msg.clone(),
-            });
-            let mut output = Vec::new();
-            push_output_line(&mut output, OutputStream::Action, &msg);
-            return Ok((ActionStatus::NoChange, None, 1, output));
-        }
-
         // Download + unzip as a single streaming shell command so curl
         // progress appears in real time.
-        let zip = format!("{fonts_dir}/{}.zip", entry.name);
+        let installed_check = if entry.font_family.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "if command -v fc-list >/dev/null 2>&1 && fc-list | grep -qi {}; then echo {}; exit 0; fi && ",
+                shell_quote(&entry.font_family),
+                shell_quote(&format!("font already installed: {}", entry.font_family)),
+            )
+        };
+        let verify_fontconfig = if entry.font_family.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " && if command -v fc-list >/dev/null 2>&1; then fc-list | grep -qi {} || {{ echo {}; exit 1; }}; fi",
+                shell_quote(&entry.font_family),
+                shell_quote(&format!(
+                    "installed font files, but fontconfig did not report: {}",
+                    entry.font_family
+                )),
+            )
+        };
         let font_cmd = format!(
-            "mkdir -p {} && curl -fsSL {} -o {} && unzip -o -q {} -d {} && rm -f {}",
+            "{}tmpdir=$(mktemp -d) && trap 'rm -rf \"$tmpdir\"' EXIT HUP INT TERM && mkdir -p {} && curl -fsSL {} -o \"$tmpdir/font.zip\" && unzip -o -q \"$tmpdir/font.zip\" -d \"$tmpdir/font\" && find \"$tmpdir/font\" -type f \\( -name '*.ttf' -o -name '*.otf' \\) -exec cp {{}} {}/ \\; && if command -v fc-cache >/dev/null 2>&1; then fc-cache -f {}; fi{}",
+            installed_check,
             shell_quote(&fonts_dir),
             shell_quote(&entry.source_url),
-            shell_quote(&zip),
-            shell_quote(&zip),
             shell_quote(&fonts_dir),
-            shell_quote(&zip),
+            shell_quote(&fonts_dir),
+            verify_fontconfig,
         );
 
         let config_dir = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());

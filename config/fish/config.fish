@@ -63,6 +63,10 @@ if test -d $cargo_bin
 end
 
 set -gx GEM_HOME "$HOME/.local/share/gem"
+set -l gem_bin "$GEM_HOME/bin"
+if test -d $gem_bin
+    fish_add_path $gem_bin
+end
 
 set -l dotfiles_dir (__dotfiles_dir)
 if test -n "$dotfiles_dir"

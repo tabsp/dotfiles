@@ -27,6 +27,7 @@ install:
   - fish
   # 3. Multiplexer
   - tmux
+  - herdr
   # 4. Software
   - neovim
   - lazygit
@@ -60,6 +61,7 @@ links:
   # 3. Multiplexer
   ~/.tmux.conf:             config/tmux.conf
   ~/.local/bin/tmux-status: bin/tmux-status
+  ~/.config/herdr:          config/herdr
   # 4. Software
   ~/.config/nvim:           config/nvim
   ~/.config/btop:           config/btop
@@ -83,3 +85,7 @@ shell:
     description: Update tealdeer pages
     optional: true
     if: command -v tldr >/dev/null 2>&1
+  - command: GEM_HOME="$HOME/.local/share/gem" gem install try-cli --no-document
+    description: Install try CLI
+    optional: true
+    if: command -v gem >/dev/null 2>&1 && ! command -v try >/dev/null 2>&1 && ! test -x "$HOME/.local/share/gem/bin/try"

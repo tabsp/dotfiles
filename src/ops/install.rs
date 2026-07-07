@@ -34,6 +34,8 @@ pub struct ToolEntry {
     #[serde(default)]
     pub source_url: String,
     #[serde(default)]
+    pub font_family: String,
+    #[serde(default)]
     pub platforms: BTreeMap<String, InstallCommand>,
 }
 
@@ -76,6 +78,8 @@ pub struct ToolRule {
     #[serde(default)]
     pub source_url: String,
     #[serde(default)]
+    pub font_family: String,
+    #[serde(default)]
     pub package: Option<String>,
     #[serde(default)]
     pub packages: BTreeMap<String, String>,
@@ -105,6 +109,7 @@ pub fn find(db: &ToolDb, name: &str) -> Option<ToolEntry> {
         .unwrap_or_else(|| "software".to_string());
     let kind = rule.map(|r| r.kind.clone()).unwrap_or_default();
     let source_url = rule.map(|r| r.source_url.clone()).unwrap_or_default();
+    let font_family = rule.map(|r| r.font_family.clone()).unwrap_or_default();
     let platforms = expand_platforms(db, name, rule)?;
 
     Some(ToolEntry {
@@ -113,6 +118,7 @@ pub fn find(db: &ToolDb, name: &str) -> Option<ToolEntry> {
         layer,
         kind,
         source_url,
+        font_family,
         platforms,
     })
 }
