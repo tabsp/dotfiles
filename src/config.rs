@@ -31,6 +31,9 @@ pub struct RawConfig {
     pub shell: Vec<RawShell>,
 
     #[serde(default)]
+    pub default_shell: Option<String>,
+
+    #[serde(default)]
     pub clean: Vec<RawClean>,
 
     #[serde(default)]
@@ -118,6 +121,7 @@ pub struct Config {
     pub links: Vec<LinkEntry>,
     pub create: Vec<PathBuf>,
     pub shell: Vec<ShellEntry>,
+    pub default_shell: Option<String>,
     pub clean: Vec<CleanEntry>,
     pub auto_install_pkg_manager: bool,
 }
@@ -207,6 +211,7 @@ fn normalize(raw: RawConfig, path: &Path) -> Config {
                 if_condition: s.if_condition,
             })
             .collect(),
+        default_shell: raw.default_shell,
         clean: raw
             .clean
             .into_iter()
@@ -292,6 +297,15 @@ shell:
     }
 
     #[test]
+    fn parses_default_shell() {
+        let yaml = r#"
+default_shell: fish
+"#;
+        let raw: RawConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(raw.default_shell.as_deref(), Some("fish"));
+    }
+
+    #[test]
     fn parses_clean_with_force() {
         let yaml = r#"
 clean:
@@ -313,6 +327,7 @@ clean:
         };
         let cfg = normalize(raw, Path::new("/tmp/dotman.yaml"));
         assert_eq!(cfg.install, vec!["fish"]);
+        assert_eq!(cfg.default_shell, None);
         assert!(!cfg.auto_install_pkg_manager);
     }
 
@@ -329,6 +344,7 @@ install: [fish, tmux]
 links:
   - target: ~/.config/fish
     source: config/fish
+default_shell: fish
 shell:
   - command: fisher update
     optional: true
@@ -338,6 +354,7 @@ shell:
         let cfg = load(&path).expect("load");
         assert_eq!(cfg.install, vec!["fish", "tmux"]);
         assert_eq!(cfg.links.len(), 1);
+        assert_eq!(cfg.default_shell.as_deref(), Some("fish"));
         assert_eq!(cfg.shell.len(), 1);
         assert!(cfg.shell[0].optional);
         assert_eq!(cfg.package_managers.macos.as_deref(), Some("brew"));

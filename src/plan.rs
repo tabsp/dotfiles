@@ -118,6 +118,29 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     }
 
     // Step 4: shell -> misc
+    if let Some(default_shell) = &config.default_shell {
+        let name = format!("Set default shell to {default_shell}");
+        let action = Action::Shell {
+            command: default_shell_command(default_shell),
+            description: Some(name.clone()),
+            optional: false,
+            if_condition: Some(default_shell_condition(default_shell)),
+        };
+        if let Some(item) = items.iter_mut().find(|item| item.name == *default_shell) {
+            item.actions.push(action);
+        } else {
+            let id = unique_id(&name, &mut used_ids);
+            items.push(PlanItem {
+                id,
+                name,
+                layer: "misc".into(),
+                actions: vec![action],
+                selected: false,
+            });
+        }
+    }
+
+    // Step 5: shell -> misc
     for shell in &config.shell {
         let name = shell
             .description
@@ -138,7 +161,7 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
         });
     }
 
-    // Step 5: clean -> misc
+    // Step 6: clean -> misc
     for clean in &config.clean {
         let name = clean.target.display().to_string();
         let id = unique_id(&name, &mut used_ids);
@@ -154,10 +177,10 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
         });
     }
 
-    // Step 6: apply first-run smart defaults (selection)
+    // Step 7: apply first-run smart defaults (selection)
     apply_smart_defaults(&mut items);
 
-    // Step 6a: auto apt-get update when the resolved pkg mgr is apt AND
+    // Step 7a: auto apt-get update when the resolved pkg mgr is apt AND
     // there are selected install items (not just shell/links).
     //
     // Docker images and stale machines often have out-of-date cache;
@@ -196,7 +219,7 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
         }
     }
 
-    // Step 7: compute host info
+    // Step 8: compute host info
     let host = HostInfo {
         hostname: hostname(),
         os: format!("{:?}", detect_os()),
@@ -256,6 +279,24 @@ fn owner_names(tool: &str) -> Vec<&str> {
         "font-maple-mono-nf-cn" => vec!["font-maple-mono-nf-cn", "maple-mono"],
         _ => vec![tool],
     }
+}
+
+fn default_shell_condition(shell: &str) -> String {
+    let shell = sh_single_quote(shell);
+    format!(
+        "shell_path=$(command -v {shell}) || exit 1; current_shell=$(getent passwd \"$USER\" 2>/dev/null | awk -F: '{{print $7}}'); if [ -z \"$current_shell\" ] && command -v dscl >/dev/null 2>&1; then current_shell=$(dscl . -read \"/Users/$USER\" UserShell 2>/dev/null | awk '{{print $2}}'); fi; [ \"$current_shell\" != \"$shell_path\" ]"
+    )
+}
+
+fn default_shell_command(shell: &str) -> String {
+    let shell = sh_single_quote(shell);
+    format!(
+        "shell_path=$(command -v {shell}) || exit 1; current_shell=$(getent passwd \"$USER\" 2>/dev/null | awk -F: '{{print $7}}'); if [ -z \"$current_shell\" ] && command -v dscl >/dev/null 2>&1; then current_shell=$(dscl . -read \"/Users/$USER\" UserShell 2>/dev/null | awk '{{print $2}}'); fi; if [ \"$current_shell\" = \"$shell_path\" ]; then echo \"default shell already $shell_path\"; exit 0; fi; if ! grep -Fxq \"$shell_path\" /etc/shells; then echo \"$shell_path\" | sudo tee -a /etc/shells >/dev/null; fi; sudo chsh -s \"$shell_path\" \"$USER\""
+    )
+}
+
+fn sh_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn hash_file(path: &Path) -> Result<String> {
@@ -471,6 +512,7 @@ mod tests {
                 optional: true,
                 if_condition: None,
             }],
+            default_shell: None,
             clean: vec![],
             auto_install_pkg_manager: false,
         }
@@ -494,6 +536,33 @@ mod tests {
         assert_eq!(fish.actions.len(), 2);
         assert!(matches!(fish.actions[0], Action::Install { .. }));
         assert!(matches!(fish.actions[1], Action::Link { .. }));
+    }
+
+    #[test]
+    fn plan_attaches_default_shell_to_matching_install() {
+        let cfg = Config {
+            default_shell: Some("fish".into()),
+            ..sample_config()
+        };
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let fish = plan.items.iter().find(|i| i.name == "fish").unwrap();
+        assert!(fish.actions.iter().any(|a| matches!(
+            a,
+            Action::Shell {
+                description,
+                if_condition,
+                ..
+            } if description.as_deref() == Some("Set default shell to fish")
+                && if_condition.is_some()
+        )));
+    }
+
+    #[test]
+    fn default_shell_command_resolves_shell_from_path() {
+        let command = default_shell_command("fish");
+        assert!(command.contains("command -v 'fish'"));
+        assert!(command.contains("/etc/shells"));
+        assert!(command.contains("sudo chsh -s \"$shell_path\" \"$USER\""));
     }
 
     #[test]

@@ -1719,16 +1719,19 @@ fn render_run(f: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(40),
+            Constraint::Min(3),
+            Constraint::Length(run_log_panel_height(area.height)),
             Constraint::Length(1),
         ])
         .split(area);
 
     // Steps list.
-    let step_lines: Vec<Line> = if let Some(plan) = &app.plan {
+    let step_lines = if let Some(plan) = &app.plan {
+        let total = plan.items.len();
+        let visible_height = chunks[0].height as usize;
+        let (start, end) = visible_run_step_range(app, total, visible_height);
         let mut lines = Vec::new();
-        for (i, item) in plan.items.iter().enumerate() {
+        for (i, item) in plan.items.iter().enumerate().skip(start).take(end - start) {
             let icon = run_step_icon(app, i, item);
             let name = if item.selected {
                 item.name.clone()
@@ -1778,6 +1781,33 @@ fn render_run(f: &mut Frame, app: &mut App) {
         Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
     )]));
     f.render_widget(help, chunks[2]);
+}
+
+fn run_log_panel_height(total_height: u16) -> u16 {
+    let available = total_height.saturating_sub(2);
+    let max_log = available.saturating_sub(4);
+    let desired = if available >= 24 { 10 } else { 7 };
+    desired.min(max_log)
+}
+
+fn visible_run_step_range(app: &App, total: usize, visible_height: usize) -> (usize, usize) {
+    if total == 0 || visible_height == 0 {
+        return (0, 0);
+    }
+    if total <= visible_height {
+        return (0, total);
+    }
+
+    let current = app
+        .current_item
+        .or_else(|| app.progress.0.checked_sub(1))
+        .unwrap_or(0)
+        .min(total - 1);
+    let mut start = current.saturating_sub(visible_height / 2);
+    if start + visible_height > total {
+        start = total - visible_height;
+    }
+    (start, start + visible_height)
 }
 
 fn drain_run_events(app: &mut App) {
@@ -1854,7 +1884,7 @@ fn drain_run_events(app: &mut App) {
 
 fn push_log(app: &mut App, line: &str, fg: Option<Color>) {
     app.current_log.push(LogLine {
-        text: line.to_string(),
+        text: sanitize_tui_log_line(line),
         fg,
     });
     // Cap per-step TUI log at MAX_TUI_OUTPUT_LINES (1000).
@@ -1862,6 +1892,36 @@ fn push_log(app: &mut App, line: &str, fg: Option<Color>) {
         let drop_count = app.current_log.len() - MAX_TUI_OUTPUT_LINES;
         app.current_log.drain(0..drop_count);
     }
+}
+
+fn sanitize_tui_log_line(line: &str) -> String {
+    let mut sanitized = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            if matches!(chars.peek(), Some('[')) {
+                chars.next();
+                for next in chars.by_ref() {
+                    if ('@'..='~').contains(&next) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+
+        if ch.is_control() {
+            if ch == '\t' {
+                sanitized.push(' ');
+            }
+            continue;
+        }
+
+        sanitized.push(ch);
+    }
+
+    sanitized
 }
 
 fn run_step_icon(app: &App, index: usize, item: &PlanItem) -> Span<'static> {
@@ -2203,5 +2263,16 @@ fn render(app: &mut App, f: &mut Frame) {
         Screen::ResultView => render_result(f, app),
         Screen::HistoryView => render_history(f, app),
         Screen::RunReplay => render_replay(f, app),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tui_log_sanitizer_strips_terminal_control_sequences() {
+        let line = "fetch \x1b[31mred\x1b[0m\rprogress\tok\x07";
+        assert_eq!(sanitize_tui_log_line(line), "fetch redprogress ok");
     }
 }

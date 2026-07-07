@@ -15,6 +15,10 @@ package_managers:
 # Auto-install pkg manager if missing (idempotent: skips if already present).
 auto_install_pkg_manager: true
 
+# Set login shell after fish is installed. dotman resolves the actual path with
+# `command -v fish` during deploy, so this stays portable across Homebrew/Linux.
+default_shell: fish
+
 # 1. Terminal / 2. Shell / 3. Multiplexer / 4. Software / 5. Enhancement
 install:
   # 1. Terminal

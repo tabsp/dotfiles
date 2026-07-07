@@ -81,6 +81,8 @@ package_managers:
 
 auto_install_pkg_manager: true
 
+default_shell: fish
+
 install: [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship]
 
 links:
@@ -104,6 +106,8 @@ YAML field reference:
 - `package_managers` — per-platform package manager.
 - `auto_install_pkg_manager` — if true, attempts to install the package
   manager itself (e.g. Homebrew) before any install steps.
+- `default_shell` — login shell to switch to automatically. dotman resolves
+  the real path with `command -v` and ensures it is listed in `/etc/shells`.
 - `install: [name]` — list of tool names to install. dotman picks the right
   install command for your platform from its internal tool database.
 - `links:` — map of target → source. dotman handles relative/absolute,

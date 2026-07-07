@@ -81,6 +81,8 @@ package_managers:
 
 auto_install_pkg_manager: true
 
+default_shell: fish
+
 install: [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship]
 
 links:
@@ -103,6 +105,7 @@ shell:
 
 - `package_managers` — 按平台指定包管理器。
 - `auto_install_pkg_manager` — 如果为 true，在安装任何工具前先尝试安装包管理器（如 Homebrew）。
+- `default_shell` — 自动切换登录 shell。dotman 会用 `command -v` 解析实际路径，并确保路径在 `/etc/shells` 中。
 - `install: [name]` — 要安装的工具名列表。dotman 从内置工具数据库中选择对应平台的安装命令。
 - `links:` — target → source 映射。dotman 处理相对/绝对路径、备份和重链接。
 - `create:` — 需要确保存在的目录。

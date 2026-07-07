@@ -786,6 +786,7 @@ mod tests {
             links: vec![],
             create: vec![],
             shell: vec![],
+            default_shell: None,
             clean: vec![],
             auto_install_pkg_manager: false,
         };
@@ -804,6 +805,7 @@ mod tests {
             links: vec![],
             create: vec![],
             shell: vec![],
+            default_shell: None,
             clean: vec![],
             auto_install_pkg_manager: false,
         };
@@ -840,6 +842,7 @@ mod tests {
                 optional: false,
                 if_condition: None,
             }],
+            default_shell: None,
             clean: vec![],
             auto_install_pkg_manager: false,
         };
@@ -879,6 +882,7 @@ mod tests {
                 optional: false,
                 if_condition: None,
             }],
+            default_shell: None,
             clean: vec![],
             auto_install_pkg_manager: false,
         };
@@ -914,6 +918,7 @@ mod tests {
             }],
             create: vec![],
             shell: vec![],
+            default_shell: None,
             clean: vec![],
             auto_install_pkg_manager: false,
         };
@@ -946,6 +951,7 @@ mod tests {
             links: vec![],
             create: vec![],
             shell: vec![],
+            default_shell: None,
             clean: vec![],
             auto_install_pkg_manager: false,
         };
@@ -1004,6 +1010,7 @@ mod tests {
                 optional: false,
                 if_condition: None,
             }],
+            default_shell: None,
             clean: vec![],
             auto_install_pkg_manager: false,
         };

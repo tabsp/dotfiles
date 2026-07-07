@@ -1,7 +1,7 @@
 //! Icon sets for TUI rendering.
 //!
 //! `DOTMAN_ICONS=nerd` forces Nerd Font glyphs, `DOTMAN_ICONS=plain` uses
-//! portable Unicode symbols. Without an override, fish shells default to Nerd
+//! portable Unicode symbols. Without an override, fish sessions default to Nerd
 //! Font and other shells default to plain symbols.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub const NERD: IconSet = IconSet {
     unselected: "\u{f0131}",  // nf-md-checkbox_blank_outline
     success: "\u{f058}",      // nf-fa-check_circle
     failed: "\u{f057}",       // nf-fa-times_circle
-    skipped: "\u{f529}",      // nf-oct-skip
+    skipped: "\u{eb9f}",      // Nerd Font glyph U+EB9F
     running: "\u{f04b}",      // nf-fa-play
     warning: "\u{f071}",      // nf-fa-warning
     pending: "\u{f04c}",      // nf-fa-pause
@@ -59,7 +59,7 @@ pub const PLAIN: IconSet = IconSet {
     unselected: "□",
     success: "✓",
     failed: "✗",
-    skipped: "⊘",
+    skipped: "○",
     running: "▶",
     warning: "⚠",
     pending: "‖",
@@ -67,9 +67,9 @@ pub const PLAIN: IconSet = IconSet {
     app: "⚙",
     info: "i",
     host: "⌂",
-    menu_deploy: ">",
-    menu_plan: "?",
-    menu_history: "↺",
+    menu_deploy: "↑",
+    menu_plan: "☷",
+    menu_history: "◷",
     menu_quit: "×",
 };
 
@@ -113,14 +113,48 @@ fn parse_mode(value: &str) -> Option<IconMode> {
 }
 
 fn is_fish_shell() -> bool {
+    env_shell_is_fish() || parent_process_is_fish()
+}
+
+fn env_shell_is_fish() -> bool {
     std::env::var("SHELL")
         .ok()
-        .and_then(|shell| {
-            std::path::Path::new(&shell)
-                .file_name()
-                .map(|name| name.to_string_lossy().to_ascii_lowercase())
-        })
-        .is_some_and(|shell| shell == "fish")
+        .is_some_and(|shell| shell_name_is_fish(&shell))
+}
+
+fn shell_name_is_fish(shell: &str) -> bool {
+    std::path::Path::new(shell)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|name| name == "fish")
+}
+
+#[cfg(unix)]
+fn parent_process_is_fish() -> bool {
+    let ppid = unsafe { libc::getppid() };
+
+    #[cfg(target_os = "linux")]
+    {
+        let comm = format!("/proc/{ppid}/comm");
+        if std::fs::read_to_string(comm)
+            .ok()
+            .is_some_and(|name| shell_name_is_fish(name.trim()))
+        {
+            return true;
+        }
+    }
+
+    std::process::Command::new("ps")
+        .args(["-p", &ppid.to_string(), "-o", "comm="])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .is_some_and(|name| shell_name_is_fish(name.trim()))
+}
+
+#[cfg(not(unix))]
+fn parent_process_is_fish() -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -158,6 +192,13 @@ mod tests {
         assert_eq!(parse_mode("plain"), Some(IconMode::Plain));
         assert_eq!(parse_mode("unicode"), Some(IconMode::Plain));
         assert_eq!(parse_mode("unknown"), None);
+    }
+
+    #[test]
+    fn detects_fish_from_shell_path() {
+        assert!(shell_name_is_fish("/usr/bin/fish"));
+        assert!(shell_name_is_fish("fish"));
+        assert!(!shell_name_is_fish("/bin/bash"));
     }
 
     #[test]
