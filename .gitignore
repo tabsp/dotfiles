@@ -18,7 +18,8 @@ lazy-lock.json
 config/fish/fish_variables
 config/fish/completions/
 config/fish/conf.d/
-config/fish/functions/
+config/fish/functions/*
+!config/fish/functions/fish_title.fish
 config/fish/local.d/
 config/fish/themes/
 

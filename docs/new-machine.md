@@ -1,7 +1,7 @@
 # New Machine Setup
 
-这份清单用于新机器初始化。核心思路是先安装 `dotman`，然后让 dotman 自己完成仓库
-clone、配置加载和部署。
+这份清单用于新机器初始化。核心思路是先安装 `dotman`，然后让 dotman 自己完成 profile
+初始化、仓库 clone、配置加载和部署。
 
 账号登录、SSH/GPG、系统权限和私有配置仍然需要人工处理。
 
@@ -16,6 +16,7 @@ clone、配置加载和部署。
 
 - `curl`
 - CA certificates
+- `git`（如果缺失，可以在 headless 部署时用 `--bootstrap-git` 让 dotman 先安装）
 
 macOS 先安装 Xcode Command Line Tools：
 
@@ -25,13 +26,28 @@ xcode-select --install
 
 ## 3. 安装 dotman
 
-通过 Homebrew：
+通过 latest release 二进制安装：
 
 ```sh
-brew install tabsp/tap/dotman
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) target="aarch64-apple-darwin" ;;
+  Darwin-x86_64) target="x86_64-apple-darwin" ;;
+  Linux-aarch64) target="aarch64-unknown-linux-gnu" ;;
+  Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
+  *) echo "unsupported platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
+
+mkdir -p ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
+curl -fsSL "https://github.com/tabsp/dotfiles/releases/latest/download/dotman-${target}.tar.gz" |
+  tar -xz -C ~/.local/bin dotman
 ```
 
-或从 GitHub Release 下载二进制放到 `~/.local/bin/`。
+确认安装结果：
+
+```sh
+dotman --version
+```
 
 ## 4. 首次部署
 
@@ -42,8 +58,8 @@ dotman
 ```
 
 这会使用默认 dotfiles 仓库 (`https://github.com/tabsp/dotfiles.git`)，
-clone 到 `~/.local/share/dotman/repos/main`，加载其中的 `dotman.yaml`，
-生成 plan 并进入 TUI 确认界面。
+clone 到 `~/.local/share/dotman/repos/main`，写入
+`~/.config/dotman/config.toml`，加载其中的 `dotman.yaml`，然后进入 TUI 主菜单。
 
 ### 无交互部署
 
@@ -59,15 +75,35 @@ dotman deploy --headless
 dotman deploy --headless --bootstrap-git
 ```
 
-### 自定义仓库
+如果你希望找不到 profile 时直接失败，而不是自动初始化：
 
 ```sh
-dotman init https://github.com/you/dotfiles.git
+dotman deploy --headless --no-init
+```
+
+如果只想验证某个本地配置文件，不走 profile：
+
+```sh
+dotman plan --headless --config ./dotman.yaml
+```
+
+### 显式初始化本仓库
+
+```sh
+dotman init https://github.com/tabsp/dotfiles.git --branch main --profile main
 dotman deploy
 ```
 
 init 会 clone 仓库、写入 profile 配置，然后展示 plan 预览。确认后用 `dotman deploy`
-执行部署。
+执行部署。之后可以用：
+
+```sh
+dotman profile list
+dotman status
+dotman sync
+```
+
+检查当前 profile 和仓库状态。
 
 ## 5. Fish 生效
 
@@ -103,9 +139,12 @@ echo "$SHELL"
 
 - 登录 1Password、浏览器、GitHub、云同步等账号。
 - 配置系统权限，例如终端、编辑器和窗口管理工具的 Accessibility 权限。
-- Linux 上按发行版或 [Ghostty 官方安装说明](https://ghostty.org/docs/install/binary)
-  手动安装 Ghostty；`deploy` 只负责链接 Ghostty 配置。机器相关的 Ghostty 设置
-  （窗口大小、透明度等）可以创建 `~/.config/ghostty/config.local`。
+- Ghostty 安装由内置工具数据库按平台处理：macOS 使用 Homebrew cask，Arch 使用
+  pacman，Fedora 使用 COPR，Ubuntu 使用社区安装脚本。其他 Linux 发行版按
+  [Ghostty 官方安装说明](https://ghostty.org/docs/install/binary) 手动安装；
+  `deploy` 仍会负责链接 Ghostty 配置。
+- 机器相关的 Ghostty 设置（窗口大小、透明度等）可以创建
+  `~/.config/ghostty/config.local`。
 - 检查字体、输入法、浏览器扩展和 GUI 应用设置。
 - 首次打开 Neovim，让插件和工具完成安装。
 
@@ -114,6 +153,7 @@ echo "$SHELL"
 ```sh
 dotman status
 dotman doctor
+dotman history
 ```
 
 检查 Maple Mono 字体：

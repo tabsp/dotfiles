@@ -3,28 +3,42 @@
 [English](README.md)
 
 dotman 是一个轻量的 Rust TUI dotfiles 部署工具，用于我的 macOS/Linux 开发环境。
-使用 YAML 配置安装软件、链接配置文件、运行设置命令——全部走 Plan → Confirm → Run 流程，支持每台机器独立的状态和持久化运行历史。
+使用 YAML 配置安装软件、链接配置文件、创建目录、清理旧路径、运行设置命令——全部走
+Plan -> Confirm -> Run 流程，支持每台机器独立的状态和持久化运行历史。
 
 ## 预览
 
-![Terminal setup preview](assets/screenshots/terminal-preview.png)
+![dotman main menu](assets/screenshots/dotman-main-menu.png)
+
+![dotfiles workspace](assets/screenshots/dotfiles-workspace.png)
 
 ## 快速开始
 
-通过 Homebrew（或其他任意方式）安装 `dotman`：
+下载 latest release 二进制安装 `dotman`：
 
 ```sh
-brew install tabsp/tap/dotman
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) target="aarch64-apple-darwin" ;;
+  Darwin-x86_64) target="x86_64-apple-darwin" ;;
+  Linux-aarch64) target="aarch64-unknown-linux-gnu" ;;
+  Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
+  *) echo "unsupported platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
+
+mkdir -p ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
+curl -fsSL "https://github.com/tabsp/dotfiles/releases/latest/download/dotman-${target}.tar.gz" |
+  tar -xz -C ~/.local/bin dotman
 ```
 
-然后直接运行。首次运行 dotman 会自动用默认 dotfiles 仓库初始化：
+然后直接运行。首次启动时，dotman 会自动初始化默认 dotfiles profile：
 
 ```sh
 dotman
 ```
 
-这会 clone `https://github.com/tabsp/dotfiles.git` 到 `~/.local/share/dotman/repos/main`，
-加载其中的 `dotman.yaml`，并打开 TUI plan 视图。
+这会 clone `https://github.com/tabsp/dotfiles.git` 到
+`~/.local/share/dotman/repos/main`，加载其中的 `dotman.yaml`，并打开 TUI。
 
 无人值守模式（CI、脚本部署）：
 
@@ -32,10 +46,10 @@ dotman
 dotman deploy --headless
 ```
 
-使用自己的 dotfiles 仓库：
+显式初始化本仓库：
 
 ```sh
-dotman init https://github.com/you/dotfiles.git
+dotman init https://github.com/tabsp/dotfiles.git --branch main --profile main
 dotman deploy
 ```
 
@@ -45,15 +59,27 @@ dotman deploy
 dotman                       # TUI 主菜单（首次运行自动 init）
 dotman deploy                # TUI: sync → plan → 确认 → 执行
 dotman plan                  # TUI: 仅展示 plan，不执行
-dotman init [repo]           # 初始化 dotfiles profile
+dotman init [repo]           # 初始化一个 dotfiles profile
 dotman sync                  # git pull 当前 profile
 dotman status                # 查看 profile 和仓库状态
 dotman doctor                # 检查系统前置依赖
 dotman profile list          # 列出已配置的 profile
+dotman profile add <name> <repo>
+dotman profile remove <name>
 dotman history               # TUI: 浏览历史运行记录
 dotman run <ulid>            # TUI: 重放历史运行
+dotman new-link <target> <source>
 dotman deploy --headless     # headless: 无交互部署
 dotman plan --headless       # headless: 输出 JSON plan
+```
+
+全局选项：
+
+```sh
+--headless         无交互模式；使用安全默认值，遇到歧义直接失败
+--bootstrap-git    允许 dotman 在 profile/bootstrap 前先安装 git
+--config <path>    直接使用某个 dotman.yaml，跳过 profile 解析
+--no-init          找不到配置时直接失败，而不是自动初始化
 ```
 
 ## TUI 快捷键
@@ -99,6 +125,11 @@ shell:
   - command: fish -lc 'fisher update'
     description: Sync fish plugins
     optional: true
+    if: command -v fish >/dev/null 2>&1
+
+clean:
+  - target: ~/.config/old-tool
+    force: true
 ```
 
 字段说明：
@@ -107,9 +138,11 @@ shell:
 - `auto_install_pkg_manager` — 如果为 true，在安装任何工具前先尝试安装包管理器（如 Homebrew）。
 - `default_shell` — 自动切换登录 shell。dotman 会用 `command -v` 解析实际路径，并确保路径在 `/etc/shells` 中。
 - `install: [name]` — 要安装的工具名列表。dotman 从内置工具数据库中选择对应平台的安装命令。
-- `links:` — target → source 映射。dotman 处理相对/绝对路径、备份和重链接。
+- `links:` — target -> source 映射。也支持 list 写法，可为单个链接设置
+  `target`、`source`、`backup`、`relink`。
 - `create:` — 需要确保存在的目录。
 - `shell:` — 要执行的 shell 命令列表。支持 `description`、`optional: true` 和 `if:` 条件。
+- `clean:` — 要清理的路径。默认只移除 symlink；使用 `force: true` 时会先备份再移除普通文件/目录。
 
 Profile 配置（仓库 URL、branch、checkout 路径、自动同步）保存在
 `~/.config/dotman/config.toml`。dotman 自动管理此文件，不需要手动创建或编辑。
@@ -134,31 +167,29 @@ dotman 的 profile 系统管理 dotfiles 仓库本身（URL、分支、clone 路
 找不到 profile 或配置时，auto-init 自动触发。headless 模式下使用全部默认值；
 交互模式下会提示你确认。
 
-## 状态
+## 0.2 Release Notes
 
-### 已实现
+0.2 是第一个基于 profile 的版本，主要变化：
 
-- 80 个测试通过（`cargo test`）
-- `cargo build --release` 生成 ~4MB 二进制
-- `cargo clippy --all-targets -- -D warnings` 和 `cargo fmt --check` 通过
-- TUI：MainMenu / PlanView / ConfirmView / RunView / ResultView /
-  HistoryView / RunReplay，Catppuccin Mocha 主题和 Nerd Font 图标
-- 首次运行自动 init（clone 仓库、写入 profile、加载配置）
-- Profile 管理（添加/删除/列出，支持多个 dotfiles 仓库）
-- Git 引导安装（headless 模式下 `--bootstrap-git` 自动安装 git）
-- Headless 模式（`--headless`），适合脚本、CI 和远程 bootstrap
+- 首次运行自动 init：clone 仓库、写入 profile 配置、加载 `dotman.yaml`
+- Profile 管理：`init`、`sync`、`status`、`profile list/add/remove`
+- Headless 部署，适合脚本、CI 和远程 bootstrap
+- `--bootstrap-git`：需要时先安装 git，再继续 profile 初始化
+- `--config <path>`：直接测试某个配置文件，不走 profile
+- TUI 主菜单、plan、confirm、run、result、history、run replay 视图
 - Plan 选择持久化到 `~/.local/share/dotman/state.toml`
-- RunView 实时显示子进程 stdout/stderr 输出，支持终止当前进程组的中断
-- 工具数据库有 17 个条目，覆盖实际使用的工具
-- `dotman plan --headless` 输出 JSON
-- `dotman deploy --headless` 端到端运行
-- 安装操作的步骤级重试（5s/10s/20s 指数退避）
-- `dotman new-link <target> <source>` 更新 `dotman.yaml`
-- `dotman history` 和 `dotman run <ulid>` 浏览和重放历史运行
-
-### 尚未实现
-
-- **E2E 覆盖**：新的 profile-based bootstrap 流程的端到端测试尚未实现。
+- 运行历史持久化到 `~/.local/share/dotman/runs/<ulid>.json`
+- 执行时实时显示 stdout/stderr，并支持中断
+- 安装步骤支持 5s/10s/20s 退避重试
+- `links` 支持 map/list 两种格式，并支持 backup/relink
+- `clean` action 可清理旧 symlink 或备份后移除旧路径
+- `new-link <target> <source>` 辅助更新 `dotman.yaml`
+- 内置工具数据库包含 25 个命名工具和默认包管理器模板
+- E2E 场景覆盖 profile lifecycle、repo sync、runtime deploy、history、
+  failure behavior、sudo prompt、new-link、install branches
+- 113 个测试通过（`cargo test`）
+- `cargo build --release` 生成轻量 CLI 二进制
+- `cargo clippy --all-targets -- -D warnings` 和 `cargo fmt --check` 通过
 
 ## 本地覆盖
 

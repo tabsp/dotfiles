@@ -3,28 +3,43 @@
 [中文](README.zh-CN.md)
 
 dotman is a tiny Rust-based TUI dotfiles deployer for my personal macOS/Linux environment.
-It uses a flat YAML config to install software, link config files, and run setup commands — all in a Plan → Confirm → Run flow with per-machine state and persistent run history.
+It uses a flat YAML config to install software, link config files, create directories,
+clean old paths, and run setup commands — all in a Plan -> Confirm -> Run flow with
+per-machine state and persistent run history.
 
 ## Preview
 
-![Terminal setup preview](assets/screenshots/terminal-preview.png)
+![dotman main menu](assets/screenshots/dotman-main-menu.png)
+
+![dotfiles workspace](assets/screenshots/dotfiles-workspace.png)
 
 ## Quick Start
 
-Install `dotman` via Homebrew (or any other method):
+Install the latest `dotman` release binary:
 
 ```sh
-brew install tabsp/tap/dotman
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) target="aarch64-apple-darwin" ;;
+  Darwin-x86_64) target="x86_64-apple-darwin" ;;
+  Linux-aarch64) target="aarch64-unknown-linux-gnu" ;;
+  Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
+  *) echo "unsupported platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
+
+mkdir -p ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
+curl -fsSL "https://github.com/tabsp/dotfiles/releases/latest/download/dotman-${target}.tar.gz" |
+  tar -xz -C ~/.local/bin dotman
 ```
 
-Then run it. The first time, dotman will auto-initialize with the default dotfiles repo:
+Then run it. On first launch, dotman auto-initializes the default dotfiles profile:
 
 ```sh
 dotman
 ```
 
-This clones `https://github.com/tabsp/dotfiles.git` to `~/.local/share/dotman/repos/main`,
-loads the deployment config from `dotman.yaml`, and opens the TUI plan view.
+This clones `https://github.com/tabsp/dotfiles.git` to
+`~/.local/share/dotman/repos/main`, loads `dotman.yaml`, and opens the TUI.
 
 For unattended setup (CI, scripted setup):
 
@@ -32,10 +47,10 @@ For unattended setup (CI, scripted setup):
 dotman deploy --headless
 ```
 
-For a custom dotfiles repo:
+To initialize this repository explicitly:
 
 ```sh
-dotman init https://github.com/you/dotfiles.git
+dotman init https://github.com/tabsp/dotfiles.git --branch main --profile main
 dotman deploy
 ```
 
@@ -45,15 +60,27 @@ dotman deploy
 dotman                       # TUI main menu (auto-inits on first run)
 dotman deploy                # TUI: sync → plan → confirm → run
 dotman plan                  # TUI: show plan only, no execution
-dotman init [repo]           # initialize dotfiles profile
+dotman init [repo]           # initialize a dotfiles profile
 dotman sync                  # git pull current profile
 dotman status                # show profile and repo state
 dotman doctor                # check prerequisites
 dotman profile list          # list configured profiles
+dotman profile add <name> <repo>
+dotman profile remove <name>
 dotman history               # TUI: browse past runs
 dotman run <ulid>            # TUI: replay a past run
+dotman new-link <target> <source>
 dotman deploy --headless     # headless: non-interactive deploy
 dotman plan --headless       # headless: emit JSON plan to stdout
+```
+
+Global options:
+
+```sh
+--headless         no prompts; use safe defaults and fail on ambiguity
+--bootstrap-git    allow dotman to install git before profile/bootstrap work
+--config <path>    use a dotman.yaml directly and bypass profile resolution
+--no-init          fail instead of auto-initializing when no config is found
 ```
 
 ## TUI Keys
@@ -99,6 +126,11 @@ shell:
   - command: fish -lc 'fisher update'
     description: Sync fish plugins
     optional: true
+    if: command -v fish >/dev/null 2>&1
+
+clean:
+  - target: ~/.config/old-tool
+    force: true
 ```
 
 YAML field reference:
@@ -110,11 +142,13 @@ YAML field reference:
   the real path with `command -v` and ensures it is listed in `/etc/shells`.
 - `install: [name]` — list of tool names to install. dotman picks the right
   install command for your platform from its internal tool database.
-- `links:` — map of target → source. dotman handles relative/absolute,
-  backup, and relink based on source state.
+- `links:` — map of target -> source. dotman also accepts list entries with
+  `target`, `source`, `backup`, and `relink` for per-link behavior.
 - `create:` — directories to ensure exist.
 - `shell:` — list of shell commands. Supports `description`,
   `optional: true`, and `if:` (condition guard).
+- `clean:` — paths to remove. By default only symlinks are removed; use
+  `force: true` to back up and remove regular files/directories.
 
 Profile configuration (repo URL, branch, checkout path, auto-sync) lives at
 `~/.config/dotman/config.toml`. dotman manages this automatically — you
@@ -143,33 +177,29 @@ Auto-init triggers automatically when no profile or config is found. In
 headless mode all defaults are used; in interactive mode you're prompted to
 confirm.
 
-## Status
+## 0.2 Release Notes
 
-### What works
+The 0.2 line is the first profile-based release. Notable changes:
 
-- 80 tests pass (`cargo test`)
-- `cargo build --release` produces a ~4MB binary
+- First-run auto-init: clone repo, write profile config, load `dotman.yaml`
+- Profile management: `init`, `sync`, `status`, `profile list/add/remove`
+- Headless deployment for scripts, CI, and remote bootstrap
+- `--bootstrap-git` for installing git before profile setup when needed
+- `--config <path>` for direct config testing without profiles
+- TUI main menu, plan, confirm, run, result, history, and run replay views
+- Plan selections persisted in `~/.local/share/dotman/state.toml`
+- Persistent run history in `~/.local/share/dotman/runs/<ulid>.json`
+- Live stdout/stderr streaming during execution, with abort support
+- Step-level install retry with 5s/10s/20s backoff
+- Link map/list config formats with backup/relink support
+- `clean` actions for removing stale symlinks or backed-up paths
+- `new-link <target> <source>` helper for updating `dotman.yaml`
+- Embedded tool DB with 25 named tools plus default package templates
+- E2E scenarios for profile lifecycle, repo sync, runtime deploy, history,
+  failure behavior, sudo prompt, new-link, and install branches
+- 113 tests pass (`cargo test`)
+- `cargo build --release` produces a small static-feeling CLI binary
 - `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` clean
-- TUI: MainMenu / PlanView / ConfirmView / RunView / ResultView /
-  HistoryView / RunReplay with Catppuccin Mocha theme and Nerd Font icons
-- First-run auto-init (clone repo, write profile, load config)
-- Profile management (add/remove/list, multiple dotfiles repos)
-- Git bootstrap (auto-install git on macOS/Linux in headless mode with
-  `--bootstrap-git`)
-- Headless mode (`--headless`) for scripts, CI, and remote bootstrap
-- Plan selections persist to `~/.local/share/dotman/state.toml`
-- RunView shows execution events, live streaming stdout/stderr from
-  subprocesses, with abort that kills the current process group
-- Tool DB has 17 entries covering the user's actual tools
-- `dotman plan --headless` emits JSON
-- `dotman deploy --headless` runs end-to-end
-- Per-step retry for install actions (5s/10s/20s exponential backoff)
-- `dotman new-link <target> <source>` updates `dotman.yaml`
-- `dotman history` and `dotman run <ulid>` browse and replay past runs
-
-### Not yet implemented
-
-- E2E coverage for early bootstrap and auto-clone is still in progress.
 
 ## Local Overrides
 
