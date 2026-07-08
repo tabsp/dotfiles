@@ -29,27 +29,37 @@ pub struct IconSet {
     pub menu_plan: &'static str,
     pub menu_history: &'static str,
     pub menu_quit: &'static str,
+    pub action_install: &'static str,
+    pub action_link: &'static str,
+    pub action_create: &'static str,
+    pub action_clean: &'static str,
+    pub action_shell: &'static str,
 }
 
 pub const NERD: IconSet = IconSet {
-    expanded: "\u{f47c}",     // nf-oct-chevron_down
-    collapsed: "\u{f460}",    // nf-oct-chevron_right
-    selected: "\u{f0132}",    // nf-md-checkbox_marked
-    unselected: "\u{f0131}",  // nf-md-checkbox_blank_outline
-    success: "\u{f058}",      // nf-fa-check_circle
-    failed: "\u{f057}",       // nf-fa-times_circle
-    skipped: "\u{eb9f}",      // Nerd Font glyph U+EB9F
-    running: "\u{f04b}",      // nf-fa-play
-    warning: "\u{f071}",      // nf-fa-warning
-    pending: "\u{f04c}",      // nf-fa-pause
-    retry: "\u{f021}",        // nf-fa-refresh
-    app: "\u{f013}",          // nf-fa-gear
-    info: "\u{f05a}",         // nf-fa-info_circle
-    host: "\u{f109}",         // nf-fa-laptop
-    menu_deploy: "\u{f135}",  // nf-fa-rocket
-    menu_plan: "\u{f0ae}",    // nf-fa-tasks
-    menu_history: "\u{f1da}", // nf-fa-history
-    menu_quit: "\u{f011}",    // nf-fa-power_off
+    expanded: "\u{f47c}",       // nf-oct-chevron_down
+    collapsed: "\u{f460}",      // nf-oct-chevron_right
+    selected: "\u{f0132}",      // nf-md-checkbox_marked
+    unselected: "\u{f0131}",    // nf-md-checkbox_blank_outline
+    success: "\u{f058}",        // nf-fa-check_circle
+    failed: "\u{f057}",         // nf-fa-times_circle
+    skipped: "\u{eb9f}",        // Nerd Font glyph U+EB9F
+    running: "\u{f04b}",        // nf-fa-play
+    warning: "\u{f071}",        // nf-fa-warning
+    pending: "\u{f04c}",        // nf-fa-pause
+    retry: "\u{f021}",          // nf-fa-refresh
+    app: "\u{f013}",            // nf-fa-gear
+    info: "\u{f05a}",           // nf-fa-info_circle
+    host: "\u{f109}",           // nf-fa-laptop
+    menu_deploy: "\u{f135}",    // nf-fa-rocket
+    menu_plan: "\u{f0ae}",      // nf-fa-tasks
+    menu_history: "\u{f1da}",   // nf-fa-history
+    menu_quit: "\u{f011}",      // nf-fa-power_off
+    action_install: "\u{f019}", // nf-fa-download
+    action_link: "\u{f0c1}",    // nf-fa-link
+    action_create: "\u{f067}",  // nf-fa-plus
+    action_clean: "\u{f1f8}",   // nf-fa-trash
+    action_shell: "\u{f120}",   // nf-fa-terminal
 };
 
 pub const PLAIN: IconSet = IconSet {
@@ -71,6 +81,11 @@ pub const PLAIN: IconSet = IconSet {
     menu_plan: "☷",
     menu_history: "◷",
     menu_quit: "×",
+    action_install: "↓",
+    action_link: "→",
+    action_create: "+",
+    action_clean: "-",
+    action_shell: "$",
 };
 
 // Spinners (braille, 10 frames)
@@ -182,6 +197,11 @@ mod tests {
             assert!(!set.menu_plan.is_empty());
             assert!(!set.menu_history.is_empty());
             assert!(!set.menu_quit.is_empty());
+            assert!(!set.action_install.is_empty());
+            assert!(!set.action_link.is_empty());
+            assert!(!set.action_create.is_empty());
+            assert!(!set.action_clean.is_empty());
+            assert!(!set.action_shell.is_empty());
         }
     }
 

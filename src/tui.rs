@@ -10,6 +10,7 @@ use crate::model::{
     Action, ActionStatus, Mode as PlanMode, Plan, PlanItem, Run, RunStatus, Selection,
 };
 use crate::ops::clean;
+use crate::ops::install;
 use crate::ops::link::{self, LinkAction, LinkSettings};
 use crate::ops::shell;
 use crate::plan;
@@ -28,12 +29,14 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::BTreeSet;
 use std::io;
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
 use std::time::{Duration, Instant};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
@@ -68,6 +71,8 @@ pub struct App {
     pub plan: Option<Plan>,
     pub run: Option<Run>,
     pub runs: Vec<Run>,
+    review_entries: Vec<ReviewEntry>,
+    review_scroll: usize,
     pub list_state: ListState,
     pub grid_col: usize,
     pub plan_columns: usize,
@@ -109,6 +114,8 @@ impl App {
             plan: None,
             run: None,
             runs: Vec::new(),
+            review_entries: Vec::new(),
+            review_scroll: 0,
             list_state,
             grid_col: 0,
             plan_columns: GRID_COLUMNS,
@@ -160,6 +167,8 @@ impl App {
         apply_saved_selection(&mut plan)?;
         plan.sync_auto_steps();
         self.plan = Some(plan);
+        self.review_entries.clear();
+        self.review_scroll = 0;
         select_first_plan_row(
             &mut self.list_state,
             self.plan.as_ref(),
@@ -414,7 +423,7 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
         .split(area);
 
     let title_prefix = format!("{}  dotman - Main Menu ", icon_set.app);
-    let divider_width = usize::from(chunks[0].width).saturating_sub(title_prefix.chars().count());
+    let divider_width = usize::from(chunks[0].width).saturating_sub(display_width(&title_prefix));
     let title = Paragraph::new(Line::from(vec![
         Span::styled(
             format!("{}  dotman - Main Menu", icon_set.app),
@@ -455,8 +464,8 @@ fn render_main_menu(f: &mut Frame, app: &mut App) {
         let title_text = format!("{} {}", icon, title);
         if is_sel {
             let bg = focus_bg();
-            let title_content_w = 2 + title_text.chars().count();
-            let desc_content_w = 4 + desc.chars().count();
+            let title_content_w = 2 + display_width(&title_text);
+            let desc_content_w = 4 + display_width(desc);
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled(" ", Style::default().bg(bg)),
@@ -708,6 +717,12 @@ fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
                 app.status_message = "nothing selected".into();
                 app.status_is_focus_info = false;
             } else {
+                app.review_entries = if let Some(plan) = app.plan.as_ref() {
+                    review_entries(plan, app.config.as_ref())
+                } else {
+                    Vec::new()
+                };
+                app.review_scroll = 0;
                 app.screen = Screen::ConfirmView;
             }
         }
@@ -748,7 +763,7 @@ fn render_plan(f: &mut Frame, app: &mut App) {
         "{}  dotman - Plan (○ {state})  {selected} selected · {actions} actions ",
         icon_set.app
     );
-    let divider_width = usize::from(chunks[0].width).saturating_sub(status_prefix.chars().count());
+    let divider_width = usize::from(chunks[0].width).saturating_sub(display_width(&status_prefix));
     let status = Paragraph::new(Line::from(vec![
         Span::styled(
             format!("{}  dotman - Plan (", icon_set.app),
@@ -943,7 +958,7 @@ fn plan_header_line(
     let left = format!("{} {:02}  {}", icon, ordinal, capitalize(layer));
     let right = format!("{enabled} / {total}");
     let content_width = width.saturating_sub(2);
-    let right_width = right.chars().count();
+    let right_width = display_width(&right);
     let left_width = content_width.saturating_sub(right_width + 1);
     let gap = content_width
         .saturating_sub(left_width + right_width)
@@ -1349,8 +1364,12 @@ fn divider_style() -> Style {
     Style::default().fg(CATPPUCCIN_MOCHA.divider)
 }
 
+fn display_width(value: &str) -> usize {
+    UnicodeWidthStr::width(value)
+}
+
 fn fit_to_width(value: &str, width: usize) -> String {
-    let len = value.chars().count();
+    let len = display_width(value);
     if len <= width {
         let mut out = value.to_string();
         out.push_str(&" ".repeat(width - len));
@@ -1362,7 +1381,17 @@ fn fit_to_width(value: &str, width: usize) -> String {
     if width <= 3 {
         return ".".repeat(width);
     }
-    let mut out = value.chars().take(width - 3).collect::<String>();
+    let mut out = String::new();
+    let target = width - 3;
+    let mut used = 0;
+    for ch in value.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if used + ch_width > target {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+    }
     out.push_str("...");
     out
 }
@@ -1392,6 +1421,12 @@ fn capitalize(s: &str) -> String {
 
 fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
     match key {
+        KeyCode::Down | KeyCode::Char('j') => scroll_review(app, 1),
+        KeyCode::Up | KeyCode::Char('k') => scroll_review(app, -1),
+        KeyCode::PageDown => scroll_review(app, 8),
+        KeyCode::PageUp => scroll_review(app, -8),
+        KeyCode::Home => app.review_scroll = 0,
+        KeyCode::End => app.review_scroll = usize::MAX,
         KeyCode::Enter | KeyCode::Char('r') => {
             // Pre-cache sudo credentials before executing if the plan needs them.
             if let Some(plan) = &app.plan
@@ -1418,17 +1453,22 @@ fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
     Ok(())
 }
 
-fn render_confirm(f: &mut Frame, app: &App) {
+fn scroll_review(app: &mut App, delta: isize) {
+    if delta < 0 {
+        app.review_scroll = app.review_scroll.saturating_sub(delta.unsigned_abs());
+    } else {
+        app.review_scroll = app.review_scroll.saturating_add(delta as usize);
+    }
+}
+
+fn render_confirm(f: &mut Frame, app: &mut App) {
     let icon_set = icons::current();
     let area = f.area();
     let block = Block::default()
-        .title(format!(
-            " {} Review changes — {:?} ",
-            icon_set.warning, app.mode
-        ))
+        .title(format!(" {} Review — {:?} ", icon_set.info, app.mode))
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(CATPPUCCIN_MOCHA.warning));
+        .border_style(Style::default().fg(CATPPUCCIN_MOCHA.border_strong));
     f.render_widget(block, area);
 
     let chunks = Layout::default()
@@ -1457,8 +1497,26 @@ fn render_confirm(f: &mut Frame, app: &App) {
         .filter(|item| item.selected)
         .map(|item| item.actions.len())
         .sum::<usize>();
-    let risk_lines = review_lines(plan);
-    let risk_count = risk_lines.len();
+    let entries = &app.review_entries;
+    let review_count = entries.len();
+    let change_count = entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.severity,
+                ReviewSeverity::Run | ReviewSeverity::Warning
+            )
+        })
+        .count();
+    let risk_count = entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.severity,
+                ReviewSeverity::Warning | ReviewSeverity::Danger
+            )
+        })
+        .count();
 
     let summary = vec![
         Line::from(vec![
@@ -1481,27 +1539,25 @@ fn render_confirm(f: &mut Frame, app: &App) {
         ]),
         Line::from(vec![
             Span::styled("Review: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
-            Span::raw(if risk_count == 0 {
-                "no file-changing link/clean actions need attention".to_string()
-            } else {
-                format!("{risk_count} file-changing items below")
-            }),
+            Span::raw(format!(
+                "{review_count} actions, {change_count} active, {risk_count} attention"
+            )),
         ]),
     ];
     f.render_widget(Paragraph::new(summary), chunks[0]);
 
-    let body = if risk_lines.is_empty() {
-        vec![Line::from(
-            "No selected link or clean actions require review.",
-        )]
+    let body_width = usize::from(chunks[1].width).saturating_sub(2);
+    let body_height = usize::from(chunks[1].height).saturating_sub(2);
+    let body = if entries.is_empty() {
+        vec![Line::from("No selected actions.")]
     } else {
-        risk_lines
+        review_body_lines(entries, body_width, body_height, &mut app.review_scroll)
     };
     f.render_widget(
         Paragraph::new(body)
             .block(
                 Block::default()
-                    .title(" changes ")
+                    .title(" actions ")
                     .borders(Borders::ALL)
                     .border_type(ratatui::widgets::BorderType::Rounded),
             )
@@ -1510,6 +1566,11 @@ fn render_confirm(f: &mut Frame, app: &App) {
     );
 
     let help = Paragraph::new(Line::from(vec![
+        Span::styled(
+            " [↑↓/j/k] scroll ",
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        ),
+        Span::styled(" [pg] page ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
         Span::styled(
             " [enter/r] run ",
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
@@ -1538,79 +1599,408 @@ fn selected_action_count(plan: Option<&Plan>) -> usize {
     .unwrap_or(0)
 }
 
-fn review_lines(plan: &Plan) -> Vec<Line<'static>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReviewSeverity {
+    Success,
+    Skip,
+    Run,
+    Warning,
+    Danger,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReviewGroup {
+    Attention,
+    WillRun,
+    AlreadyOk,
+    Skipped,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewEntry {
+    item: String,
+    kind: &'static str,
+    kind_icon: &'static str,
+    severity: ReviewSeverity,
+    status: String,
+    detail: String,
+}
+
+fn review_entries(plan: &Plan, config: Option<&config::Config>) -> Vec<ReviewEntry> {
     let icon_set = icons::current();
-    let config_dir = plan
-        .config_path
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
-    let mut lines = Vec::new();
+    let config_dir = plan.config_path.parent().unwrap_or(Path::new("."));
+    let mut entries = Vec::new();
     for item in plan.items.iter().filter(|item| item.selected) {
         for action in &item.actions {
-            match action {
+            entries.push(match action {
+                Action::Install {
+                    pkg_mgr,
+                    binary,
+                    source,
+                } => review_install_entry(item, config, pkg_mgr, binary, source),
                 Action::Link { target, source } => {
-                    let settings = LinkSettings {
-                        create: true,
-                        relative: true,
-                        backup: true,
-                        relink: false,
-                    };
-                    let status = match link::plan_link(config_dir, target, source, settings) {
-                        Ok(link_plan) => describe_link_action(&link_plan.action),
-                        Err(e) => format!("inspect failed: {e}"),
-                    };
-                    lines.push(review_line(
-                        &item.name,
-                        icon_set.warning,
-                        &status,
-                        &format!("{} -> {}", target.display(), source.display()),
-                    ));
+                    review_link_entry(item, config_dir, target, source, icon_set.action_link)
                 }
+                Action::Create { target } => {
+                    review_create_entry(item, target, icon_set.action_create)
+                }
+                Action::Shell {
+                    command,
+                    description,
+                    optional,
+                    if_condition,
+                } => review_shell_entry(
+                    item,
+                    command,
+                    description.as_deref(),
+                    *optional,
+                    if_condition.as_deref(),
+                    icon_set.action_shell,
+                ),
                 Action::Clean { target, force } => {
-                    let status = match clean::plan_clean(target, *force) {
-                        Ok(clean_action) => format!("{clean_action:?}"),
-                        Err(e) => format!("inspect failed: {e}"),
-                    };
-                    lines.push(review_line(
-                        &item.name,
-                        icon_set.warning,
-                        &status,
-                        &target.display().to_string(),
-                    ));
+                    review_clean_entry(item, target, *force, icon_set.action_clean)
                 }
-                _ => {}
+            });
+        }
+    }
+    entries
+}
+
+fn review_install_entry(
+    item: &PlanItem,
+    config: Option<&config::Config>,
+    pkg_mgr: &str,
+    binary: &str,
+    source: &str,
+) -> ReviewEntry {
+    let icon_set = icons::current();
+    let resolved_pkg_mgr = config
+        .and_then(|cfg| crate::package_managers::resolve_pkg_mgr_name(&cfg.package_managers))
+        .unwrap_or_else(|| {
+            if pkg_mgr == "auto" {
+                crate::package_managers::default_pkg_mgr_name()
+            } else {
+                pkg_mgr.to_string()
+            }
+        });
+    let command = install_command_summary(binary, &resolved_pkg_mgr).unwrap_or_else(|| {
+        if source.trim().is_empty() {
+            format!("install {binary}")
+        } else {
+            source.to_string()
+        }
+    });
+
+    let db = install::load_db().ok();
+    let entry = db.as_ref().and_then(|db| install::find(db, binary));
+    match entry
+        .as_ref()
+        .map(|entry| install::detect_presence(entry, Some(&command)))
+        .unwrap_or(install::InstallPresence::Unknown)
+    {
+        install::InstallPresence::Present => ReviewEntry {
+            item: item.name.clone(),
+            kind: "install",
+            kind_icon: icon_set.action_install,
+            severity: ReviewSeverity::Success,
+            status: "present".into(),
+            detail: command,
+        },
+        install::InstallPresence::Missing => ReviewEntry {
+            item: item.name.clone(),
+            kind: "install",
+            kind_icon: icon_set.action_install,
+            severity: ReviewSeverity::Run,
+            status: "missing".into(),
+            detail: command,
+        },
+        install::InstallPresence::Unknown => ReviewEntry {
+            item: item.name.clone(),
+            kind: "install",
+            kind_icon: icon_set.action_install,
+            severity: ReviewSeverity::Warning,
+            status: "unknown".into(),
+            detail: command,
+        },
+    }
+}
+
+fn review_link_entry(
+    item: &PlanItem,
+    config_dir: &Path,
+    target: &Path,
+    source: &Path,
+    kind_icon: &'static str,
+) -> ReviewEntry {
+    let (severity, status) = match link::plan_link(
+        config_dir,
+        target,
+        source,
+        LinkSettings {
+            create: true,
+            relative: true,
+            backup: true,
+            relink: false,
+        },
+    ) {
+        Ok(link_plan) => describe_link_review(&link_plan.action),
+        Err(e) => (ReviewSeverity::Danger, format!("inspect failed: {e}")),
+    };
+    ReviewEntry {
+        item: item.name.clone(),
+        kind: "link",
+        kind_icon,
+        severity,
+        status,
+        detail: format!("{} -> {}", target.display(), source.display()),
+    }
+}
+
+fn review_create_entry(item: &PlanItem, target: &Path, kind_icon: &'static str) -> ReviewEntry {
+    let expanded = crate::path::expand_home(&target.to_string_lossy())
+        .unwrap_or_else(|_| target.to_path_buf());
+    let (severity, status) = if expanded.exists() {
+        (ReviewSeverity::Success, "exists".into())
+    } else {
+        (ReviewSeverity::Run, "create".into())
+    };
+    ReviewEntry {
+        item: item.name.clone(),
+        kind: "create",
+        kind_icon,
+        severity,
+        status,
+        detail: target.display().to_string(),
+    }
+}
+
+fn review_shell_entry(
+    item: &PlanItem,
+    command: &str,
+    description: Option<&str>,
+    optional: bool,
+    if_condition: Option<&str>,
+    kind_icon: &'static str,
+) -> ReviewEntry {
+    let mut status = if optional {
+        "optional".to_string()
+    } else {
+        "run".to_string()
+    };
+    let mut severity = if optional {
+        ReviewSeverity::Warning
+    } else {
+        ReviewSeverity::Run
+    };
+    if let Some(cond) = if_condition {
+        match shell::condition_matches(cond) {
+            Ok(true) => status = format!("if ok · {status}"),
+            Ok(false) => {
+                status = "if skip".into();
+                severity = ReviewSeverity::Skip;
+            }
+            Err(_) => {
+                status = "if unknown".into();
+                severity = ReviewSeverity::Warning;
             }
         }
     }
-    lines
-}
-
-fn describe_link_action(action: &LinkAction) -> String {
-    match action {
-        LinkAction::Skip => "skip: already linked".into(),
-        LinkAction::Link => "link: create symlink".into(),
-        LinkAction::Backup(path) => format!("backup then link: {}", path.display()),
-        LinkAction::Relink => "relink: replace wrong symlink".into(),
-        LinkAction::Fail(reason) => format!("fail: {reason}"),
+    if shell::command_contains_sudo(command) && !matches!(severity, ReviewSeverity::Skip) {
+        status = format!("{status} · sudo");
+        severity = ReviewSeverity::Warning;
+    }
+    ReviewEntry {
+        item: item.name.clone(),
+        kind: "shell",
+        kind_icon,
+        severity,
+        status,
+        detail: description.unwrap_or(command).to_string(),
     }
 }
 
-fn review_line(item: &str, icon: &'static str, status: &str, detail: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(icon, Style::default().fg(CATPPUCCIN_MOCHA.warning)),
-        Span::raw(" "),
-        Span::styled(item.to_string(), Style::default().fg(CATPPUCCIN_MOCHA.fg)),
-        Span::raw(" — "),
-        Span::styled(
-            status.to_string(),
-            Style::default().fg(CATPPUCCIN_MOCHA.accent),
+fn review_clean_entry(
+    item: &PlanItem,
+    target: &Path,
+    force: bool,
+    kind_icon: &'static str,
+) -> ReviewEntry {
+    let (severity, status) = match clean::plan_clean(target, force) {
+        Ok(clean::CleanAction::Skip) => (ReviewSeverity::Skip, "skip".into()),
+        Ok(clean::CleanAction::RemoveSymlink) => (ReviewSeverity::Warning, "remove symlink".into()),
+        Ok(clean::CleanAction::BackupAndRemove(_)) => {
+            (ReviewSeverity::Warning, "backup remove".into())
+        }
+        Err(e) => (ReviewSeverity::Danger, format!("inspect failed: {e}")),
+    };
+    ReviewEntry {
+        item: item.name.clone(),
+        kind: "clean",
+        kind_icon,
+        severity,
+        status,
+        detail: target.display().to_string(),
+    }
+}
+
+fn describe_link_review(action: &LinkAction) -> (ReviewSeverity, String) {
+    match action {
+        LinkAction::Skip => (ReviewSeverity::Success, "linked".into()),
+        LinkAction::Link => (ReviewSeverity::Run, "link".into()),
+        LinkAction::Backup(_) => (ReviewSeverity::Warning, "backup link".into()),
+        LinkAction::Relink => (ReviewSeverity::Warning, "relink".into()),
+        LinkAction::Fail(reason) => (ReviewSeverity::Danger, format!("fail: {reason}")),
+    }
+}
+
+fn review_body_lines(
+    entries: &[ReviewEntry],
+    width: usize,
+    height: usize,
+    scroll: &mut usize,
+) -> Vec<Line<'static>> {
+    if height == 0 {
+        return Vec::new();
+    }
+    let mut all_lines = Vec::new();
+    for group in [
+        ReviewGroup::Attention,
+        ReviewGroup::WillRun,
+        ReviewGroup::AlreadyOk,
+        ReviewGroup::Skipped,
+    ] {
+        let group_entries = entries
+            .iter()
+            .filter(|entry| review_group_for(entry) == group)
+            .collect::<Vec<_>>();
+        if group_entries.is_empty() {
+            continue;
+        }
+        all_lines.push(review_group_header_line(group, group_entries.len(), width));
+        for entry in group_entries {
+            all_lines.extend(review_entry_lines(entry, width));
+        }
+    }
+    if all_lines.len() <= height {
+        *scroll = 0;
+        return all_lines;
+    }
+
+    let max_scroll = all_lines.len().saturating_sub(height);
+    *scroll = (*scroll).min(max_scroll);
+
+    let mut visible = all_lines
+        .iter()
+        .skip(*scroll)
+        .take(height)
+        .cloned()
+        .collect::<Vec<_>>();
+    if *scroll > 0
+        && let Some(first) = visible.first_mut()
+    {
+        *first = Line::from(Span::styled(
+            fit_to_width(&format!("  ... {} above", *scroll), width),
+            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+        ));
+    }
+    let below = all_lines.len().saturating_sub(*scroll + height);
+    if below > 0
+        && let Some(last) = visible.last_mut()
+    {
+        *last = Line::from(Span::styled(
+            fit_to_width(&format!("  ... {below} below"), width),
+            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+        ));
+    }
+    visible
+}
+
+fn review_group_for(entry: &ReviewEntry) -> ReviewGroup {
+    match entry.severity {
+        ReviewSeverity::Warning | ReviewSeverity::Danger => ReviewGroup::Attention,
+        ReviewSeverity::Run => ReviewGroup::WillRun,
+        ReviewSeverity::Success => ReviewGroup::AlreadyOk,
+        ReviewSeverity::Skip => ReviewGroup::Skipped,
+    }
+}
+
+fn review_group_header_line(group: ReviewGroup, count: usize, width: usize) -> Line<'static> {
+    let icon_set = icons::current();
+    let (icon, label, style) = match group {
+        ReviewGroup::Attention => (
+            icon_set.warning,
+            "Attention",
+            Style::default().fg(CATPPUCCIN_MOCHA.warning),
         ),
-        Span::raw("  "),
-        Span::styled(
-            detail.to_string(),
+        ReviewGroup::WillRun => (
+            icon_set.running,
+            "Will Run",
+            Style::default().fg(CATPPUCCIN_MOCHA.running),
+        ),
+        ReviewGroup::AlreadyOk => (
+            icon_set.success,
+            "Already OK",
+            Style::default().fg(CATPPUCCIN_MOCHA.success),
+        ),
+        ReviewGroup::Skipped => (
+            icon_set.skipped,
+            "Skipped",
+            Style::default().fg(CATPPUCCIN_MOCHA.skip),
+        ),
+    };
+    Line::from(Span::styled(
+        fit_to_width(&format!("{icon} {label} ({count})"), width),
+        style.add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn review_entry_lines(entry: &ReviewEntry, width: usize) -> Vec<Line<'static>> {
+    let icon_set = icons::current();
+    let status_icon = review_status_icon(icon_set, entry.severity);
+    let status_style = review_status_style(entry.severity);
+    let left = format!("{} {:<7} {}", entry.kind_icon, entry.kind, entry.item);
+    let first = format!("{left}  {}", entry.status);
+    let detail = format!("  {} {}", icon_set.info, entry.detail);
+    vec![
+        Line::from(vec![
+            Span::styled(status_icon, status_style),
+            Span::raw(" "),
+            Span::styled(
+                fit_to_width(&first, width.saturating_sub(2)),
+                Style::default().fg(CATPPUCCIN_MOCHA.fg),
+            ),
+        ]),
+        Line::from(Span::styled(
+            fit_to_width(&detail, width),
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
-    ])
+        )),
+    ]
+}
+
+fn review_status_icon(icon_set: &'static icons::IconSet, severity: ReviewSeverity) -> &'static str {
+    match severity {
+        ReviewSeverity::Success => icon_set.success,
+        ReviewSeverity::Skip => icon_set.skipped,
+        ReviewSeverity::Run => icon_set.running,
+        ReviewSeverity::Warning => icon_set.warning,
+        ReviewSeverity::Danger => icon_set.failed,
+    }
+}
+
+fn review_status_style(severity: ReviewSeverity) -> Style {
+    Style::default().fg(match severity {
+        ReviewSeverity::Success => CATPPUCCIN_MOCHA.success,
+        ReviewSeverity::Skip => CATPPUCCIN_MOCHA.skip,
+        ReviewSeverity::Run => CATPPUCCIN_MOCHA.running,
+        ReviewSeverity::Warning => CATPPUCCIN_MOCHA.warning,
+        ReviewSeverity::Danger => CATPPUCCIN_MOCHA.danger,
+    })
+}
+
+fn install_command_summary(binary: &str, pkg_mgr: &str) -> Option<String> {
+    let db = install::load_db().ok()?;
+    let entry = install::find(&db, binary)?;
+    install::command_for_current_platform(&entry, pkg_mgr)
 }
 
 // ---------------- RunView ----------------

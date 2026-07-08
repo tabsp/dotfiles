@@ -5,6 +5,15 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallPresence {
+    Present,
+    Missing,
+    Unknown,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InstallCommand {
@@ -127,6 +136,50 @@ pub fn tool_layer(db: &ToolDb, name: &str) -> Option<String> {
     db.tools.get(name).and_then(|rule| rule.layer.clone())
 }
 
+pub fn command_for_current_platform(entry: &ToolEntry, pkg_mgr: &str) -> Option<String> {
+    let distro = crate::package_managers::distro_id();
+    let mut candidates = vec![pkg_mgr.to_string()];
+    if let Some(distro) = &distro
+        && !candidates.iter().any(|candidate| candidate == distro)
+    {
+        candidates.push(distro.clone());
+    }
+    let os = crate::package_managers::os_name().to_string();
+    if !candidates.iter().any(|candidate| candidate == &os) {
+        candidates.push(os);
+    }
+
+    for candidate in candidates {
+        if let Some(command) = entry.platforms.get(&candidate)
+            && command_supports_current_platform(command, distro.as_deref())
+        {
+            return Some(command.command().to_string());
+        }
+    }
+    None
+}
+
+pub fn detect_presence(entry: &ToolEntry, install_command: Option<&str>) -> InstallPresence {
+    if entry.kind == "font" {
+        return detect_font_presence(entry);
+    }
+
+    if crate::package_managers::os_name() == "macos"
+        && let Some(command) = install_command
+        && let Some(package) = cask_package_from_command(command)
+    {
+        return detect_macos_cask_presence(&package);
+    }
+
+    if entry.binary.trim().is_empty() {
+        InstallPresence::Unknown
+    } else if command_available(&entry.binary) {
+        InstallPresence::Present
+    } else {
+        InstallPresence::Missing
+    }
+}
+
 fn expand_platforms(
     db: &ToolDb,
     name: &str,
@@ -154,6 +207,139 @@ fn package_for(name: &str, platform_key: &str, rule: Option<&ToolRule>) -> Strin
     rule.and_then(|r| r.packages.get(platform_key).cloned())
         .or_else(|| rule.and_then(|r| r.package.clone()))
         .unwrap_or_else(|| name.to_string())
+}
+
+fn command_supports_current_platform(command: &InstallCommand, distro: Option<&str>) -> bool {
+    command.supports_os(crate::package_managers::os_name())
+        || distro.is_some_and(|distro| command.supports_os(distro))
+}
+
+fn command_available(binary: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "command -v {} >/dev/null 2>&1",
+            shell_quote(binary)
+        ))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()
+        .is_some_and(|status| status.success())
+}
+
+fn detect_macos_cask_presence(package: &str) -> InstallPresence {
+    let app_bundle = app_bundle_name(package);
+    let mut app_paths = vec![
+        PathBuf::from("/Applications").join(&app_bundle),
+        PathBuf::from("/opt/homebrew/Caskroom").join(package),
+        PathBuf::from("/usr/local/Caskroom").join(package),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        app_paths.push(home.join("Applications").join(&app_bundle));
+    }
+
+    if app_paths.iter().any(|path| path.exists()) {
+        InstallPresence::Present
+    } else {
+        InstallPresence::Missing
+    }
+}
+
+fn detect_font_presence(entry: &ToolEntry) -> InstallPresence {
+    if !entry.font_family.trim().is_empty()
+        && command_available("fc-list")
+        && fontconfig_reports_family(&entry.font_family)
+    {
+        return InstallPresence::Present;
+    }
+
+    let token = font_match_token(entry);
+    if token.is_empty() {
+        return InstallPresence::Unknown;
+    }
+
+    let mut dirs = vec![PathBuf::from("/Library/Fonts")];
+    if let Some(home) = dirs::home_dir() {
+        dirs.push(home.join("Library/Fonts"));
+        dirs.push(home.join(".local/share/fonts"));
+    }
+
+    if dirs.iter().any(|dir| font_dir_contains(dir, &token)) {
+        InstallPresence::Present
+    } else {
+        InstallPresence::Missing
+    }
+}
+
+fn fontconfig_reports_family(family: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("fc-list | grep -qi {}", shell_quote(family)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()
+        .is_some_and(|status| status.success())
+}
+
+fn font_dir_contains(dir: &Path, token: &str) -> bool {
+    std::fs::read_dir(dir).ok().is_some_and(|entries| {
+        entries.filter_map(Result::ok).any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .replace([' ', '-', '_'], "")
+                .contains(token)
+        })
+    })
+}
+
+fn cask_package_from_command(command: &str) -> Option<String> {
+    let parts = command.split_whitespace().collect::<Vec<_>>();
+    if parts.first() != Some(&"brew")
+        || parts.get(1) != Some(&"install")
+        || !parts.contains(&"--cask")
+    {
+        return None;
+    }
+    parts
+        .iter()
+        .skip(2)
+        .rev()
+        .find(|part| !part.starts_with('-'))
+        .map(|part| (*part).to_string())
+}
+
+fn app_bundle_name(package: &str) -> String {
+    let name = package
+        .split(['-', '_', '.'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<String>();
+    format!("{name}.app")
+}
+
+fn font_match_token(entry: &ToolEntry) -> String {
+    let raw = if entry.font_family.trim().is_empty() {
+        entry.name.trim_start_matches("font-")
+    } else {
+        &entry.font_family
+    };
+    raw.to_ascii_lowercase().replace([' ', '-', '_'], "")
+}
+
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]
@@ -246,5 +432,65 @@ mod tests {
         assert_eq!(cmd.command(), "brew install --cask ghostty");
         assert!(cmd.supports_os("macos"));
         assert!(!cmd.supports_os("linux"));
+    }
+
+    #[test]
+    fn detects_present_cli_binary() {
+        let entry = ToolEntry {
+            name: "sh".into(),
+            binary: "sh".into(),
+            layer: "software".into(),
+            kind: String::new(),
+            source_url: String::new(),
+            font_family: String::new(),
+            platforms: BTreeMap::new(),
+        };
+        assert_eq!(detect_presence(&entry, None), InstallPresence::Present);
+    }
+
+    #[test]
+    fn detects_missing_cli_binary() {
+        let entry = ToolEntry {
+            name: "definitely-not-installed-dotman-test".into(),
+            binary: "definitely-not-installed-dotman-test".into(),
+            layer: "software".into(),
+            kind: String::new(),
+            source_url: String::new(),
+            font_family: String::new(),
+            platforms: BTreeMap::new(),
+        };
+        assert_eq!(detect_presence(&entry, None), InstallPresence::Missing);
+    }
+
+    #[test]
+    fn parses_brew_cask_package() {
+        assert_eq!(
+            cask_package_from_command("brew install --cask ghostty"),
+            Some("ghostty".into())
+        );
+        assert_eq!(cask_package_from_command("brew install fish"), None);
+    }
+
+    #[test]
+    fn derives_simple_app_bundle_name() {
+        assert_eq!(app_bundle_name("ghostty"), "Ghostty.app");
+        assert_eq!(
+            app_bundle_name("visual-studio-code"),
+            "VisualStudioCode.app"
+        );
+    }
+
+    #[test]
+    fn builds_font_match_token_from_family() {
+        let entry = ToolEntry {
+            name: "font-maple-mono-nf-cn".into(),
+            binary: "font-maple-mono-nf-cn".into(),
+            layer: "enhancement".into(),
+            kind: "font".into(),
+            source_url: String::new(),
+            font_family: "Maple Mono".into(),
+            platforms: BTreeMap::new(),
+        };
+        assert_eq!(font_match_token(&entry), "maplemono");
     }
 }

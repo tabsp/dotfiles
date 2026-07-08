@@ -469,6 +469,29 @@ where
     let pkg_mgr = crate::package_managers::resolve_pkg_mgr_name(pkg_mgrs)
         .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
     let platform_cmd = install_command_for_platform(&entry, &pkg_mgr);
+    let presence_command = platform_cmd
+        .as_ref()
+        .and_then(|cmd| cmd.as_ref().ok())
+        .map(String::as_str);
+    if matches!(
+        install::detect_presence(&entry, presence_command),
+        install::InstallPresence::Present
+    ) {
+        let msg = format!("already installed: {}", entry.name);
+        emit(ExecuteEvent::ActionMessage {
+            item: item_name.to_string(),
+            message: msg.clone(),
+        });
+        return Ok((
+            ActionStatus::NoChange,
+            None,
+            0,
+            vec![OutputLine {
+                stream: OutputStream::Action,
+                line: msg,
+            }],
+        ));
+    }
 
     // Fonts can use package-manager installs on platforms where a package
     // exists, with source_url as a fallback for platforms without one.
@@ -831,6 +854,38 @@ mod tests {
         assert!(saw_abort);
         assert_eq!(run.status, RunStatus::Aborted);
         assert!(run.items.is_empty());
+    }
+
+    #[test]
+    fn install_skips_when_binary_is_present() {
+        fn deny_sudo(_: &str) -> bool {
+            false
+        }
+
+        let mut events = Vec::new();
+        let mut sudo_auth = deny_sudo;
+        let (status, err, attempts, output) = run_install_streaming(
+            "sh",
+            &crate::config::PackageManagerConfig::default(),
+            DEFAULT_INSTALL_RETRIES,
+            "sh",
+            &mut |event| events.push(event),
+            &|| false,
+            &mut sudo_auth,
+        )
+        .unwrap();
+
+        assert_eq!(status, ActionStatus::NoChange);
+        assert!(err.is_none());
+        assert_eq!(attempts, 0);
+        assert!(
+            output
+                .iter()
+                .any(|line| line.line.contains("already installed: sh"))
+        );
+        assert!(events.iter().any(|event| {
+            matches!(event, ExecuteEvent::ActionMessage { message, .. } if message.contains("already installed: sh"))
+        }));
     }
 
     #[test]
