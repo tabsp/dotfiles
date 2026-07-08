@@ -22,9 +22,26 @@ new_cwd = "follow"
 shell_mode = "auto"
 
 [theme]
-# Closest built-in match to the tmux Catppuccin status colors.
+# Keep Catppuccin while raising contrast for Herdr tabs and selected rows.
 name = "catppuccin"
 auto_switch = false
+
+[theme.custom]
+panel_bg = "#11111b"
+surface0 = "#313244"
+surface1 = "#45475a"
+surface_dim = "#181825"
+overlay0 = "#9399b2"
+overlay1 = "#bac2de"
+text = "#cdd6f4"
+subtext0 = "#bac2de"
+accent = "#89b4fa"
+blue = "#89b4fa"
+teal = "#94e2d5"
+green = "#a6e3a1"
+yellow = "#f9e2af"
+red = "#f38ba8"
+peach = "#fab387"
 
 [ui]
 mouse_capture = true
@@ -36,7 +53,7 @@ prompt_new_tab_name = false
 hide_tab_bar_when_single_tab = false
 sidebar_collapsed_mode = "compact"
 agent_panel_sort = "spaces"
-accent = "blue"
+accent = "#89b4fa"
 
 [ui.toast]
 delivery = "off"
@@ -62,11 +79,12 @@ prefix = "ctrl+x"
 
 # Workspaces: nearest Herdr equivalent to tmux sessions.
 new_workspace = "prefix+ctrl+c"
+settings = "prefix+shift+s"
 workspace_picker = ["prefix+ctrl+f", "prefix+w"]
-goto = "prefix+g"
+goto = ["prefix+s", "prefix+g"]
 rename_workspace = "prefix+shift+w"
 close_workspace = "prefix+shift+d"
-switch_workspace = "prefix+shift+1..9"
+switch_workspace = "prefix+alt+1..9"
 
 # Tabs: nearest Herdr equivalent to tmux windows.
 new_tab = "prefix+c"
@@ -79,7 +97,7 @@ close_tab = "prefix+shift+x"
 
 # Panes: keep your tmux split and navigation muscle memory.
 split_horizontal = "prefix+minus"
-split_vertical = "prefix+shift+minus"
+split_vertical = "prefix+v"
 focus_pane_left = "prefix+h"
 focus_pane_down = "prefix+j"
 focus_pane_up = "prefix+k"
@@ -122,4 +140,3 @@ key = "prefix+r"
 type = "shell"
 command = "herdr server reload-config"
 description = "reload Herdr config"
-

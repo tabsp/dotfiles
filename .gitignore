@@ -30,6 +30,7 @@ config/ghostty/config.local
 config/herdr/*.sock
 config/herdr/*.log
 config/herdr/session.json
+config/herdr/release-notes.json
 
 # Superpowers working documents
 docs/superpowers/
