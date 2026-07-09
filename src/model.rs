@@ -170,6 +170,19 @@ pub struct RunItem {
     /// Per-action output lines, capped at MAX_HISTORY_OUTPUT_LINES (500 by default).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub output: Vec<OutputLine>,
+    /// Per-action execution results. Older history entries may not have this.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<RunAction>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunAction {
+    pub kind: String,
+    pub name: String,
+    pub status: ActionStatus,
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output: Vec<OutputLine>,
 }
 
 /// A single line of output from an action (for run history).

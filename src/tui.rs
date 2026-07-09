@@ -7,7 +7,8 @@ use crate::config;
 use crate::execute::MAX_TUI_OUTPUT_LINES;
 use crate::icons;
 use crate::model::{
-    Action, ActionStatus, Mode as PlanMode, Plan, PlanItem, Run, RunStatus, Selection,
+    Action, ActionStatus, Mode as PlanMode, Plan, PlanItem, Run, RunAction, RunItem, RunStatus,
+    Selection,
 };
 use crate::ops::clean;
 use crate::ops::install;
@@ -89,7 +90,9 @@ pub struct App {
     pub progress: (usize, usize), // (done, total)
     pub current_log: Vec<LogLine>,
     pub current_item: Option<usize>,
+    pub current_action: Option<(usize, usize)>,
     pub run_item_statuses: Vec<Option<ActionStatus>>,
+    pub run_action_statuses: Vec<Vec<Option<ActionStatus>>>,
     pub run_started: Option<Instant>,
     /// Set to true after `sudo -v` restores the terminal; signals the event
     /// loop to recreate the Terminal backend on the next tick.
@@ -131,7 +134,9 @@ impl App {
             progress: (0, 0),
             current_log: Vec::new(),
             current_item: None,
+            current_action: None,
             run_item_statuses: Vec::new(),
+            run_action_statuses: Vec::new(),
             run_started: None,
             needs_terminal_reset: false,
         }
@@ -708,7 +713,6 @@ fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
                 app.dirty = true;
             }
         }
-        KeyCode::Char('i') => show_plan_info(app, &rows),
         KeyCode::Char('r') => {
             if matches!(app.mode, Mode::Plan) {
                 app.status_message = "plan mode is read-only; choose deploy to run".into();
@@ -868,24 +872,7 @@ fn render_plan(f: &mut Frame, app: &mut App) {
     };
     let help = Paragraph::new(vec![
         status_line,
-        Line::from(vec![
-            keycap("↑↓"),
-            hint(" Navigate  "),
-            keycap("Space"),
-            hint(" Toggle  "),
-            keycap("Enter"),
-            hint(" Expand  "),
-            keycap("1-6"),
-            hint(" Jump  "),
-            keycap("I"),
-            hint(" Info  "),
-            keycap("S"),
-            hint(" Save  "),
-            keycap("R"),
-            hint(" Review  "),
-            keycap("Q"),
-            hint(" Back"),
-        ]),
+        plan_help_line(usize::from(chunks[2].width)),
     ]);
     f.render_widget(help, chunks[2]);
 }
@@ -1161,55 +1148,6 @@ fn keep_selection_in_range(app: &mut App) {
     }
 }
 
-fn show_plan_info(app: &mut App, rows: &[PlanRow]) {
-    let Some(plan) = &app.plan else {
-        app.status_message = "no plan loaded".into();
-        app.status_is_focus_info = false;
-        return;
-    };
-    let Some(row_idx) = app.list_state.selected() else {
-        app.status_message = "nothing focused".into();
-        app.status_is_focus_info = false;
-        return;
-    };
-
-    match rows.get(row_idx) {
-        Some(PlanRow::Header {
-            layer,
-            enabled,
-            total,
-            ..
-        }) => {
-            let state = if app.collapsed_layers.contains(layer) {
-                "collapsed"
-            } else {
-                "expanded"
-            };
-            app.status_message =
-                format!("{}: {enabled}/{total} selected, {state}", capitalize(layer));
-            app.status_is_focus_info = true;
-        }
-        Some(PlanRow::Item(item_idx)) => {
-            if let Some(item) = plan.items.get(*item_idx) {
-                app.status_message = plan_item_info(item);
-                app.status_is_focus_info = true;
-            }
-        }
-        Some(PlanRow::InlineItems(item_indices)) => {
-            let col = app.grid_col.min(item_indices.len().saturating_sub(1));
-            if let Some(item_idx) = item_indices.get(col)
-                && let Some(item) = plan.items.get(*item_idx)
-            {
-                app.status_message = plan_item_info(item);
-                app.status_is_focus_info = true;
-            }
-        }
-        Some(PlanRow::Divider) | None => {
-            clear_focus_info(app);
-        }
-    }
-}
-
 fn update_plan_focus_info(app: &mut App) {
     if let Some(info) = focused_plan_item_info(app) {
         app.status_message = info;
@@ -1409,6 +1347,111 @@ fn hint(label: &'static str) -> Span<'static> {
     Span::styled(label, Style::default().fg(CATPPUCCIN_MOCHA.fg_dim))
 }
 
+fn plan_help_line(width: usize) -> Line<'static> {
+    let full = [
+        ("↑↓", " Navigate  "),
+        ("Space", " Toggle  "),
+        ("Enter", " Expand  "),
+        ("1-6", " Jump  "),
+        ("S", " Save  "),
+        ("R", " Review  "),
+        ("Q", " Back"),
+    ];
+    let short = [
+        ("↑↓", " "),
+        ("Space", " "),
+        ("Enter", " "),
+        ("1-6", " "),
+        ("S", " "),
+        ("R", " "),
+        ("Q", ""),
+    ];
+    let compact = [
+        ("↑↓", " "),
+        ("Spc", " "),
+        ("Ent", " "),
+        ("1-6", " "),
+        ("S", " "),
+        ("R", " "),
+        ("Q", ""),
+    ];
+
+    for parts in [&full[..], &short[..], &compact[..]] {
+        let line = help_line_from_parts(parts);
+        if line_display_width(&line) <= width {
+            return line;
+        }
+    }
+
+    help_line_from_parts(&[("Q", "")])
+}
+
+fn review_help_line(width: usize) -> Line<'static> {
+    let full = [
+        ("↑↓/j/k", " Scroll  "),
+        ("Pg", " Page  "),
+        ("Enter/R", " Run  "),
+        ("E/Q", " Edit"),
+    ];
+    let short = [("↑↓/jk", " "), ("Pg", " "), ("Enter/R", " "), ("E/Q", "")];
+    let compact = [("↑↓", " "), ("Pg", " "), ("R", " "), ("E/Q", "")];
+
+    for parts in [&full[..], &short[..], &compact[..]] {
+        let line = help_line_from_parts(parts);
+        if line_display_width(&line) <= width {
+            return line;
+        }
+    }
+
+    help_line_from_parts(&[("Q", "")])
+}
+
+fn run_help_line(width: usize, aborting: bool, finished: bool) -> Line<'static> {
+    if aborting {
+        let full = [("Q/Esc", " Stopping")];
+        let compact = [("Q", "")];
+        for parts in [&full[..], &compact[..]] {
+            let line = help_line_from_parts(parts);
+            if line_display_width(&line) <= width {
+                return line;
+            }
+        }
+        return help_line_from_parts(&[("Q", "")]);
+    }
+
+    let full = if finished {
+        [("Q/Esc", " Back")]
+    } else {
+        [("Q/Esc", " Abort")]
+    };
+    let compact = [("Q", "")];
+    for parts in [&full[..], &compact[..]] {
+        let line = help_line_from_parts(parts);
+        if line_display_width(&line) <= width {
+            return line;
+        }
+    }
+    help_line_from_parts(&[("Q", "")])
+}
+
+fn help_line_from_parts(parts: &[(&'static str, &'static str)]) -> Line<'static> {
+    let mut spans = Vec::with_capacity(parts.len() * 2);
+    for (key, label) in parts {
+        spans.push(keycap(key));
+        if !label.is_empty() {
+            spans.push(hint(label));
+        }
+    }
+    Line::from(spans)
+}
+
+fn line_display_width(line: &Line<'_>) -> usize {
+    line.spans
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum()
+}
+
 fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
@@ -1429,9 +1472,7 @@ fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
         KeyCode::End => app.review_scroll = usize::MAX,
         KeyCode::Enter | KeyCode::Char('r') => {
             // Pre-cache sudo credentials before executing if the plan needs them.
-            if let Some(plan) = &app.plan
-                && plan.needs_sudo()
-            {
+            if review_entries_need_sudo(&app.review_entries) {
                 restore_terminal()?;
                 let ok = shell::pre_cache_sudo().unwrap_or(false);
                 // Re-enter raw mode; the event loop will recreate the Terminal
@@ -1565,21 +1606,7 @@ fn render_confirm(f: &mut Frame, app: &mut App) {
         chunks[1],
     );
 
-    let help = Paragraph::new(Line::from(vec![
-        Span::styled(
-            " [↑↓/j/k] scroll ",
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
-        Span::styled(" [pg] page ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
-        Span::styled(
-            " [enter/r] run ",
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
-        Span::styled(
-            " [e/q] edit plan ",
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
-    ]));
+    let help = Paragraph::new(review_help_line(usize::from(chunks[2].width)));
     f.render_widget(help, chunks[2]);
 }
 
@@ -1618,6 +1645,7 @@ enum ReviewGroup {
 
 #[derive(Debug, Clone)]
 struct ReviewEntry {
+    order: usize,
     item: String,
     kind: &'static str,
     kind_icon: &'static str,
@@ -1632,7 +1660,7 @@ fn review_entries(plan: &Plan, config: Option<&config::Config>) -> Vec<ReviewEnt
     let mut entries = Vec::new();
     for item in plan.items.iter().filter(|item| item.selected) {
         for action in &item.actions {
-            entries.push(match action {
+            let mut entry = match action {
                 Action::Install {
                     pkg_mgr,
                     binary,
@@ -1660,7 +1688,9 @@ fn review_entries(plan: &Plan, config: Option<&config::Config>) -> Vec<ReviewEnt
                 Action::Clean { target, force } => {
                     review_clean_entry(item, target, *force, icon_set.action_clean)
                 }
-            });
+            };
+            entry.order = entries.len();
+            entries.push(entry);
         }
     }
     entries
@@ -1699,6 +1729,7 @@ fn review_install_entry(
         .unwrap_or(install::InstallPresence::Unknown)
     {
         install::InstallPresence::Present => ReviewEntry {
+            order: 0,
             item: item.name.clone(),
             kind: "install",
             kind_icon: icon_set.action_install,
@@ -1707,6 +1738,7 @@ fn review_install_entry(
             detail: command,
         },
         install::InstallPresence::Missing => ReviewEntry {
+            order: 0,
             item: item.name.clone(),
             kind: "install",
             kind_icon: icon_set.action_install,
@@ -1715,6 +1747,7 @@ fn review_install_entry(
             detail: command,
         },
         install::InstallPresence::Unknown => ReviewEntry {
+            order: 0,
             item: item.name.clone(),
             kind: "install",
             kind_icon: icon_set.action_install,
@@ -1747,6 +1780,7 @@ fn review_link_entry(
         Err(e) => (ReviewSeverity::Danger, format!("inspect failed: {e}")),
     };
     ReviewEntry {
+        order: 0,
         item: item.name.clone(),
         kind: "link",
         kind_icon,
@@ -1765,6 +1799,7 @@ fn review_create_entry(item: &PlanItem, target: &Path, kind_icon: &'static str) 
         (ReviewSeverity::Run, "create".into())
     };
     ReviewEntry {
+        order: 0,
         item: item.name.clone(),
         kind: "create",
         kind_icon,
@@ -1787,11 +1822,7 @@ fn review_shell_entry(
     } else {
         "run".to_string()
     };
-    let mut severity = if optional {
-        ReviewSeverity::Warning
-    } else {
-        ReviewSeverity::Run
-    };
+    let mut severity = ReviewSeverity::Run;
     if let Some(cond) = if_condition {
         match shell::condition_matches(cond) {
             Ok(true) => status = format!("if ok · {status}"),
@@ -1810,6 +1841,7 @@ fn review_shell_entry(
         severity = ReviewSeverity::Warning;
     }
     ReviewEntry {
+        order: 0,
         item: item.name.clone(),
         kind: "shell",
         kind_icon,
@@ -1834,6 +1866,7 @@ fn review_clean_entry(
         Err(e) => (ReviewSeverity::Danger, format!("inspect failed: {e}")),
     };
     ReviewEntry {
+        order: 0,
         item: item.name.clone(),
         kind: "clean",
         kind_icon,
@@ -1869,10 +1902,7 @@ fn review_body_lines(
         ReviewGroup::AlreadyOk,
         ReviewGroup::Skipped,
     ] {
-        let group_entries = entries
-            .iter()
-            .filter(|entry| review_group_for(entry) == group)
-            .collect::<Vec<_>>();
+        let group_entries = sorted_review_group_entries(entries, group);
         if group_entries.is_empty() {
             continue;
         }
@@ -1913,6 +1943,26 @@ fn review_body_lines(
         ));
     }
     visible
+}
+
+fn sorted_review_group_entries(entries: &[ReviewEntry], group: ReviewGroup) -> Vec<&ReviewEntry> {
+    let mut group_entries = entries
+        .iter()
+        .filter(|entry| review_group_for(entry) == group)
+        .collect::<Vec<_>>();
+    group_entries.sort_by_key(|entry| (review_kind_rank(entry.kind), entry.order));
+    group_entries
+}
+
+fn review_kind_rank(kind: &str) -> usize {
+    match kind {
+        "install" => 0,
+        "link" => 1,
+        "create" => 2,
+        "shell" => 3,
+        "clean" => 4,
+        _ => usize::MAX,
+    }
 }
 
 fn review_group_for(entry: &ReviewEntry) -> ReviewGroup {
@@ -1959,22 +2009,52 @@ fn review_entry_lines(entry: &ReviewEntry, width: usize) -> Vec<Line<'static>> {
     let status_icon = review_status_icon(icon_set, entry.severity);
     let status_style = review_status_style(entry.severity);
     let left = format!("{} {:<7} {}", entry.kind_icon, entry.kind, entry.item);
-    let first = format!("{left}  {}", entry.status);
-    let detail = format!("  {} {}", icon_set.info, entry.detail);
-    vec![
-        Line::from(vec![
+    let detail = review_entry_detail(entry);
+    let single = if let Some(detail) = detail {
+        format!("{left}  {}  {detail}", entry.status)
+    } else {
+        format!("{left}  {}", entry.status)
+    };
+    if display_width(&single) <= width.saturating_sub(2) {
+        return vec![Line::from(vec![
             Span::styled(status_icon, status_style),
             Span::raw(" "),
-            Span::styled(
-                fit_to_width(&first, width.saturating_sub(2)),
-                Style::default().fg(CATPPUCCIN_MOCHA.fg),
-            ),
-        ]),
-        Line::from(Span::styled(
-            fit_to_width(&detail, width),
+            Span::styled(single, Style::default().fg(CATPPUCCIN_MOCHA.fg)),
+        ])];
+    }
+
+    let first = format!("{left}  {}", entry.status);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(status_icon, status_style),
+        Span::raw(" "),
+        Span::styled(
+            fit_to_width(&first, width.saturating_sub(2)),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg),
+        ),
+    ])];
+    if let Some(detail) = detail {
+        lines.push(Line::from(Span::styled(
+            fit_to_width(&format!("  {} {detail}", icon_set.info), width),
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        )),
-    ]
+        )));
+    }
+    lines
+}
+
+fn review_entry_detail(entry: &ReviewEntry) -> Option<&str> {
+    let detail = entry.detail.trim();
+    (!detail.is_empty() && detail != entry.item.trim()).then_some(detail)
+}
+
+fn review_entries_need_sudo(entries: &[ReviewEntry]) -> bool {
+    entries.iter().any(review_entry_needs_sudo)
+}
+
+fn review_entry_needs_sudo(entry: &ReviewEntry) -> bool {
+    matches!(
+        entry.severity,
+        ReviewSeverity::Run | ReviewSeverity::Warning
+    ) && (entry.status.contains("sudo") || shell::command_contains_sudo(&entry.detail))
 }
 
 fn review_status_icon(icon_set: &'static icons::IconSet, severity: ReviewSeverity) -> &'static str {
@@ -2012,6 +2092,10 @@ fn handle_run(app: &mut App, key: KeyCode) -> Result<()> {
                 flag.store(true, Ordering::SeqCst);
                 app.status_message = "abort requested; waiting for current action".into();
                 push_log(app, "abort requested; waiting for current action", None);
+            } else if app.plan.is_some() {
+                app.screen = Screen::PlanView;
+            } else {
+                app.screen = Screen::MainMenu;
             }
         }
         _ => {}
@@ -2028,9 +2112,16 @@ fn start_run(app: &mut App) {
     let total = plan.items.iter().filter(|i| i.selected).count();
     app.progress = (0, total);
     app.current_item = None;
+    app.current_action = None;
     app.run_started = Some(Instant::now());
     app.current_log.clear();
+    app.run = None;
     app.run_item_statuses = vec![None; plan.items.len()];
+    app.run_action_statuses = plan
+        .items
+        .iter()
+        .map(|item| vec![None; item.actions.len()])
+        .collect();
     app.screen = Screen::RunView;
 
     let (tx, rx) = mpsc::channel();
@@ -2063,7 +2154,6 @@ fn start_run(app: &mut App) {
 }
 
 fn render_run(f: &mut Frame, app: &mut App) {
-    let icon_set = icons::current();
     let area = f.area();
     drain_run_events(app);
 
@@ -2075,34 +2165,31 @@ fn render_run(f: &mut Frame, app: &mut App) {
         match handle.join() {
             Ok(Ok(run)) => {
                 app.run = Some(run.clone());
-                app.progress.0 = app.progress.1;
+                sync_finished_run_state(app, &run);
                 app.abort_flag = None;
                 app.run_events = None;
-                app.screen = Screen::ResultView;
             }
             Ok(Err(e)) => {
                 app.status_message = format!("run failed: {e}");
                 app.abort_flag = None;
                 app.run_events = None;
-                app.screen = Screen::ResultView;
             }
             Err(_) => {
                 app.status_message = "run thread panicked".into();
                 app.abort_flag = None;
                 app.run_events = None;
-                app.screen = Screen::ResultView;
             }
         }
     }
 
+    let aborting = run_is_aborting(app);
+    let finished = finished_run_for_view(app).is_some();
+    let border_color = run_border_color(app, aborting);
     let block = Block::default()
-        .title(format!(
-            " {} Running: {:?} — {}/{} ",
-            icon_set.running, app.mode, app.progress.0, app.progress.1
-        ))
+        .title(run_title(app, usize::from(area.width.saturating_sub(4))))
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(CATPPUCCIN_MOCHA.running));
+        .border_style(Style::default().fg(border_color));
     f.render_widget(block, area);
 
     let chunks = Layout::default()
@@ -2115,25 +2202,7 @@ fn render_run(f: &mut Frame, app: &mut App) {
         ])
         .split(area);
 
-    // Steps list.
-    let step_lines = if let Some(plan) = &app.plan {
-        let total = plan.items.len();
-        let visible_height = chunks[0].height as usize;
-        let (start, end) = visible_run_step_range(app, total, visible_height);
-        let mut lines = Vec::new();
-        for (i, item) in plan.items.iter().enumerate().skip(start).take(end - start) {
-            let icon = run_step_icon(app, i, item);
-            let name = if item.selected {
-                item.name.clone()
-            } else {
-                format!("{} (skipped)", item.name)
-            };
-            lines.push(Line::from(vec![icon, Span::raw(" "), Span::raw(name)]));
-        }
-        lines
-    } else {
-        vec![Line::from("loading...")]
-    };
+    let step_lines = run_body_lines(app, usize::from(chunks[0].width), chunks[0].height as usize);
     f.render_widget(
         Paragraph::new(step_lines).block(Block::default().borders(Borders::NONE)),
         chunks[0],
@@ -2166,11 +2235,150 @@ fn render_run(f: &mut Frame, app: &mut App) {
         chunks[1],
     );
 
-    let help = Paragraph::new(Line::from(vec![Span::styled(
-        " [q] abort ",
-        Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-    )]));
+    let help = Paragraph::new(run_help_line(
+        usize::from(chunks[2].width),
+        aborting,
+        finished,
+    ));
     f.render_widget(help, chunks[2]);
+}
+
+fn sync_finished_run_state(app: &mut App, run: &Run) {
+    app.progress = (run.items.len(), run.items.len());
+    app.current_item = None;
+    app.current_action = None;
+    app.run_item_statuses = run.items.iter().map(|item| Some(item.status)).collect();
+    app.run_action_statuses = run
+        .items
+        .iter()
+        .map(|item| {
+            item.actions
+                .iter()
+                .map(|action| Some(action.status))
+                .collect()
+        })
+        .collect();
+}
+
+fn finished_run_for_view(app: &App) -> Option<&Run> {
+    if app.run_thread.is_none() {
+        app.run.as_ref()
+    } else {
+        None
+    }
+}
+
+fn run_is_aborting(app: &App) -> bool {
+    app.abort_flag
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::SeqCst))
+}
+
+fn run_border_color(app: &App, aborting: bool) -> Color {
+    if aborting {
+        CATPPUCCIN_MOCHA.warning
+    } else if let Some(run) = finished_run_for_view(app) {
+        match run.status {
+            RunStatus::Running => CATPPUCCIN_MOCHA.running,
+            RunStatus::Success => CATPPUCCIN_MOCHA.success,
+            RunStatus::Failed => CATPPUCCIN_MOCHA.danger,
+            RunStatus::Aborted => CATPPUCCIN_MOCHA.warning,
+        }
+    } else {
+        CATPPUCCIN_MOCHA.running
+    }
+}
+
+fn run_title(app: &App, width: usize) -> String {
+    let icon_set = icons::current();
+    let (state, done, total, current) = if let Some(run) = finished_run_for_view(app) {
+        (
+            run_status_label(run.status),
+            run.items.len(),
+            run.items.len(),
+            final_run_summary(run),
+        )
+    } else if run_is_aborting(app) {
+        (
+            "Stopping",
+            app.progress.0,
+            app.progress.1,
+            current_run_item_name(app).unwrap_or("waiting").to_string(),
+        )
+    } else {
+        (
+            "Running",
+            app.progress.0,
+            app.progress.1,
+            current_run_item_name(app).unwrap_or("waiting").to_string(),
+        )
+    };
+    let title = format!(
+        " {} {state}: {:?}  {}/{}  {}  {} ",
+        icon_set.running,
+        app.mode,
+        done,
+        total,
+        run_progress_bar(done, total, 10),
+        current
+    );
+    fit_to_width(&title, width)
+}
+
+fn run_status_label(status: RunStatus) -> &'static str {
+    match status {
+        RunStatus::Running => "Running",
+        RunStatus::Success => "Success",
+        RunStatus::Failed => "Failed",
+        RunStatus::Aborted => "Aborted",
+    }
+}
+
+fn final_run_summary(run: &Run) -> String {
+    let mut changed = 0;
+    let mut no_change = 0;
+    let mut failed = 0;
+    for item in &run.items {
+        if item.actions.is_empty() {
+            match run_group_for_status(Some(item.status), false) {
+                RunGroup::Changed => changed += 1,
+                RunGroup::NoChange => no_change += 1,
+                RunGroup::Failed => failed += 1,
+                _ => {}
+            }
+            continue;
+        }
+        for action in &item.actions {
+            match run_group_for_status(Some(action.status), false) {
+                RunGroup::Changed => changed += 1,
+                RunGroup::NoChange => no_change += 1,
+                RunGroup::Failed => failed += 1,
+                _ => {}
+            }
+        }
+    }
+    format!("{changed} changed, {no_change} no change, {failed} failed")
+}
+
+fn current_run_item_name(app: &App) -> Option<&str> {
+    let plan = app.plan.as_ref()?;
+    let index = app.current_item.or_else(|| app.progress.0.checked_sub(1))?;
+    plan.items.get(index).map(|item| item.name.as_str())
+}
+
+fn run_progress_bar(done: usize, total: usize, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if total == 0 {
+        return "░".repeat(width);
+    }
+    let filled = (done.saturating_mul(width) + total / 2) / total;
+    format!(
+        "{}{}",
+        "█".repeat(filled.min(width)),
+        "░".repeat(width.saturating_sub(filled))
+    )
 }
 
 fn run_log_panel_height(total_height: u16) -> u16 {
@@ -2180,24 +2388,375 @@ fn run_log_panel_height(total_height: u16) -> u16 {
     desired.min(max_log)
 }
 
-fn visible_run_step_range(app: &App, total: usize, visible_height: usize) -> (usize, usize) {
-    if total == 0 || visible_height == 0 {
-        return (0, 0);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunGroup {
+    Failed,
+    Running,
+    Changed,
+    NoChange,
+    Skipped,
+    Pending,
+}
+
+struct RunDisplayLine {
+    group: RunGroup,
+    line: Line<'static>,
+    active: bool,
+}
+
+fn run_body_lines(app: &App, width: usize, height: usize) -> Vec<Line<'static>> {
+    if height == 0 {
+        return Vec::new();
     }
-    if total <= visible_height {
-        return (0, total);
+    let display_lines = if let Some(run) = finished_run_for_view(app) {
+        finished_run_display_lines(run, width)
+    } else if let Some(plan) = &app.plan {
+        live_run_display_lines(app, plan, width)
+    } else {
+        return vec![Line::from("loading...")];
+    };
+    grouped_run_lines(display_lines, width, height)
+}
+
+fn live_run_display_lines(app: &App, plan: &Plan, width: usize) -> Vec<RunDisplayLine> {
+    let mut lines = Vec::new();
+    for (item_index, item) in plan.items.iter().enumerate() {
+        if item.actions.is_empty() {
+            let active = Some(item_index) == app.current_item;
+            let status = if !item.selected {
+                Some(ActionStatus::WillSkip)
+            } else if active {
+                None
+            } else {
+                app.run_item_statuses
+                    .get(item_index)
+                    .and_then(|status| *status)
+            };
+            lines.push(RunDisplayLine {
+                group: run_group_for_status(status, active),
+                line: run_action_line(
+                    "shell",
+                    &item.name,
+                    "",
+                    run_status_label_for_view(status, active),
+                    status,
+                    active,
+                    width,
+                ),
+                active,
+            });
+            continue;
+        }
+
+        for (action_index, action) in item.actions.iter().enumerate() {
+            let active = app.current_action == Some((item_index, action_index));
+            let status = if !item.selected {
+                Some(ActionStatus::WillSkip)
+            } else if active {
+                None
+            } else {
+                app.run_action_statuses
+                    .get(item_index)
+                    .and_then(|statuses| statuses.get(action_index))
+                    .and_then(|status| *status)
+            };
+            lines.push(RunDisplayLine {
+                group: run_group_for_status(status, active),
+                line: run_action_line(
+                    action_kind_for_view(action),
+                    &item.name,
+                    &action.describe(),
+                    run_status_label_for_view(status, active),
+                    status,
+                    active,
+                    width,
+                ),
+                active,
+            });
+        }
+    }
+    lines
+}
+
+fn finished_run_display_lines(run: &Run, width: usize) -> Vec<RunDisplayLine> {
+    let mut lines = Vec::new();
+    for item in &run.items {
+        if item.actions.is_empty() {
+            let status = Some(item.status);
+            lines.push(RunDisplayLine {
+                group: run_group_for_status(status, false),
+                line: run_action_line(
+                    "shell",
+                    &item.name,
+                    "",
+                    run_status_label_for_view(status, false),
+                    status,
+                    false,
+                    width,
+                ),
+                active: false,
+            });
+            continue;
+        }
+
+        for action in &item.actions {
+            let status = Some(action.status);
+            lines.push(RunDisplayLine {
+                group: run_group_for_status(status, false),
+                line: finished_action_line(item, action, width),
+                active: false,
+            });
+        }
+    }
+    lines
+}
+
+fn grouped_run_lines(
+    display_lines: Vec<RunDisplayLine>,
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
+    let mut all_lines = Vec::new();
+    let mut active_line = None;
+    for group in [
+        RunGroup::Failed,
+        RunGroup::Running,
+        RunGroup::Changed,
+        RunGroup::NoChange,
+        RunGroup::Skipped,
+        RunGroup::Pending,
+    ] {
+        let group_lines = display_lines
+            .iter()
+            .filter(|line| line.group == group)
+            .collect::<Vec<_>>();
+        if group_lines.is_empty() {
+            continue;
+        }
+        all_lines.push(run_group_header_line(group, group_lines.len(), width));
+        for display_line in group_lines {
+            if display_line.active {
+                active_line = Some(all_lines.len());
+            }
+            all_lines.push(display_line.line.clone());
+        }
     }
 
-    let current = app
-        .current_item
-        .or_else(|| app.progress.0.checked_sub(1))
-        .unwrap_or(0)
-        .min(total - 1);
-    let mut start = current.saturating_sub(visible_height / 2);
-    if start + visible_height > total {
-        start = total - visible_height;
+    if all_lines.len() <= height {
+        return all_lines;
     }
-    (start, start + visible_height)
+    let focus = active_line.unwrap_or_else(|| all_lines.len().saturating_sub(1));
+    let mut start = focus.saturating_sub(height / 2);
+    if start + height > all_lines.len() {
+        start = all_lines.len() - height;
+    }
+    let end = start + height;
+    let mut visible = all_lines[start..end].to_vec();
+    if start > 0
+        && let Some(first) = visible.first_mut()
+    {
+        *first = Line::from(Span::styled(
+            fit_to_width(&format!("  ... {start} above"), width),
+            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+        ));
+    }
+    let below = all_lines.len().saturating_sub(end);
+    if below > 0
+        && let Some(last) = visible.last_mut()
+    {
+        *last = Line::from(Span::styled(
+            fit_to_width(&format!("  ... {below} below"), width),
+            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+        ));
+    }
+    visible
+}
+
+fn run_group_for_status(status: Option<ActionStatus>, active: bool) -> RunGroup {
+    if active {
+        return RunGroup::Running;
+    }
+    match status {
+        Some(ActionStatus::WillFail) => RunGroup::Failed,
+        Some(ActionStatus::NoChange) => RunGroup::NoChange,
+        Some(ActionStatus::WillSkip) => RunGroup::Skipped,
+        Some(_) => RunGroup::Changed,
+        None => RunGroup::Pending,
+    }
+}
+
+fn run_group_header_line(group: RunGroup, count: usize, width: usize) -> Line<'static> {
+    let icon_set = icons::current();
+    let (icon, label, style) = match group {
+        RunGroup::Failed => (
+            icon_set.failed,
+            "Failed",
+            Style::default().fg(CATPPUCCIN_MOCHA.danger),
+        ),
+        RunGroup::Running => (
+            icon_set.running,
+            "Running",
+            Style::default().fg(CATPPUCCIN_MOCHA.running),
+        ),
+        RunGroup::Changed => (
+            icon_set.success,
+            "Changed",
+            Style::default().fg(CATPPUCCIN_MOCHA.success),
+        ),
+        RunGroup::NoChange => (
+            icon_set.info,
+            "No Change",
+            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+        ),
+        RunGroup::Skipped => (
+            icon_set.skipped,
+            "Skipped",
+            Style::default().fg(CATPPUCCIN_MOCHA.skip),
+        ),
+        RunGroup::Pending => (
+            icon_set.pending,
+            "Pending",
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        ),
+    };
+    Line::from(Span::styled(
+        fit_to_width(&format!("{icon} {label} ({count})"), width),
+        style.add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn finished_action_line(item: &RunItem, action: &RunAction, width: usize) -> Line<'static> {
+    run_action_line(
+        &action.kind,
+        &item.name,
+        &action.name,
+        run_status_label_for_view(Some(action.status), false),
+        Some(action.status),
+        false,
+        width,
+    )
+}
+
+fn run_action_line(
+    kind: &str,
+    item_name: &str,
+    action_name: &str,
+    status_label: &'static str,
+    status: Option<ActionStatus>,
+    active: bool,
+    width: usize,
+) -> Line<'static> {
+    let status_width = 10;
+    let left_width = width.saturating_sub(status_width + 3);
+    let name = if action_name.is_empty() || action_name == item_name {
+        item_name.to_string()
+    } else {
+        format!("{item_name} / {action_name}")
+    };
+    let icon = if active {
+        Span::styled(
+            icons::SPINNER_BRAILLE[0],
+            Style::default().fg(CATPPUCCIN_MOCHA.running),
+        )
+    } else {
+        run_status_icon(status)
+    };
+    let status_style = run_status_style(status, active);
+    Line::from(vec![
+        icon,
+        Span::raw(" "),
+        Span::styled(
+            run_action_kind_icon(kind),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            fit_to_width(&name, left_width),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            fit_to_width(status_label, status_width),
+            status_style.add_modifier(if active {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
+        ),
+    ])
+}
+
+fn run_status_label_for_view(status: Option<ActionStatus>, active: bool) -> &'static str {
+    if active {
+        "running"
+    } else {
+        match status {
+            Some(status) => run_item_status_label(status),
+            None => "pending",
+        }
+    }
+}
+
+fn run_status_icon(status: Option<ActionStatus>) -> Span<'static> {
+    let icon_set = icons::current();
+    match status {
+        Some(ActionStatus::WillFail) => Span::styled(
+            icon_set.failed,
+            Style::default().fg(CATPPUCCIN_MOCHA.danger),
+        ),
+        Some(ActionStatus::WillSkip) => Span::styled(
+            icon_set.skipped,
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        ),
+        Some(ActionStatus::NoChange) => Span::styled(
+            icon_set.info,
+            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+        ),
+        Some(_) => Span::styled(
+            icon_set.success,
+            Style::default().fg(CATPPUCCIN_MOCHA.success),
+        ),
+        None => Span::styled(
+            icon_set.pending,
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        ),
+    }
+}
+
+fn run_status_style(status: Option<ActionStatus>, active: bool) -> Style {
+    Style::default().fg(if active {
+        CATPPUCCIN_MOCHA.running
+    } else {
+        match status {
+            Some(ActionStatus::WillFail) => CATPPUCCIN_MOCHA.danger,
+            Some(ActionStatus::WillSkip) => CATPPUCCIN_MOCHA.fg_dim,
+            Some(ActionStatus::NoChange) => CATPPUCCIN_MOCHA.text_muted,
+            Some(_) => CATPPUCCIN_MOCHA.success,
+            None => CATPPUCCIN_MOCHA.fg_dim,
+        }
+    })
+}
+
+fn action_kind_for_view(action: &Action) -> &'static str {
+    match action {
+        Action::Install { .. } => "install",
+        Action::Link { .. } => "link",
+        Action::Create { .. } => "create",
+        Action::Shell { .. } => "shell",
+        Action::Clean { .. } => "clean",
+    }
+}
+
+fn run_action_kind_icon(kind: &str) -> &'static str {
+    let icon_set = icons::current();
+    match kind {
+        "install" => icon_set.action_install,
+        "link" => icon_set.action_link,
+        "create" => icon_set.action_create,
+        "clean" => icon_set.action_clean,
+        "shell" => icon_set.action_shell,
+        _ => icon_set.info,
+    }
 }
 
 fn drain_run_events(app: &mut App) {
@@ -2208,10 +2767,32 @@ fn drain_run_events(app: &mut App) {
         match event {
             crate::execute::ExecuteEvent::ItemStarted { index, name } => {
                 app.current_item = Some(index);
+                app.current_action = None;
                 push_log(app, &format!("started {name}"), None);
             }
-            crate::execute::ExecuteEvent::ActionStarted { item, action } => {
+            crate::execute::ExecuteEvent::ActionStarted {
+                item_index,
+                action_index,
+                item,
+                action,
+            } => {
+                app.current_action = Some((item_index, action_index));
                 push_log(app, &format!("{item}: {action}"), None);
+            }
+            crate::execute::ExecuteEvent::ActionFinished {
+                item_index,
+                action_index,
+                item,
+                action,
+                status,
+            } => {
+                if let Some(statuses) = app.run_action_statuses.get_mut(item_index)
+                    && let Some(slot) = statuses.get_mut(action_index)
+                {
+                    *slot = Some(status);
+                }
+                app.current_action = None;
+                push_log(app, &format!("{item}: finished {action}: {status:?}"), None);
             }
             crate::execute::ExecuteEvent::Output { item, stream, line } => {
                 let color = match stream {
@@ -2235,6 +2816,7 @@ fn drain_run_events(app: &mut App) {
             } => {
                 app.progress.0 = app.progress.0.max(index.saturating_add(1));
                 app.current_item = None;
+                app.current_action = None;
                 if let Some(slot) = app.run_item_statuses.get_mut(index) {
                     *slot = Some(status);
                 }
@@ -2314,39 +2896,13 @@ fn sanitize_tui_log_line(line: &str) -> String {
     sanitized
 }
 
-fn run_step_icon(app: &App, index: usize, item: &PlanItem) -> Span<'static> {
-    let icon_set = icons::current();
-    if !item.selected {
-        return Span::styled(
-            icon_set.skipped,
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        );
-    }
-
-    if Some(index) == app.current_item {
-        return Span::styled(
-            icons::SPINNER_BRAILLE[app.spinner_frame % icons::SPINNER_BRAILLE.len()],
-            Style::default().fg(CATPPUCCIN_MOCHA.running),
-        );
-    }
-
-    match app.run_item_statuses.get(index).and_then(|status| *status) {
-        Some(ActionStatus::WillFail) => Span::styled(
-            icon_set.failed,
-            Style::default().fg(CATPPUCCIN_MOCHA.danger),
-        ),
-        Some(ActionStatus::WillSkip) => Span::styled(
-            icon_set.skipped,
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
-        Some(_) => Span::styled(
-            icon_set.success,
-            Style::default().fg(CATPPUCCIN_MOCHA.success),
-        ),
-        None => Span::styled(
-            icon_set.pending,
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
+fn run_item_status_label(status: ActionStatus) -> &'static str {
+    match status {
+        ActionStatus::WillFail => "failed",
+        ActionStatus::WillSkip => "skipped",
+        ActionStatus::NoChange => "no change",
+        ActionStatus::WillRun => "ran",
+        _ => "changed",
     }
 }
 
@@ -2659,10 +3215,556 @@ fn render(app: &mut App, f: &mut Frame) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn test_plan_item(name: &str) -> PlanItem {
+        PlanItem {
+            id: name.to_string(),
+            name: name.to_string(),
+            layer: "misc".into(),
+            actions: Vec::new(),
+            selected: true,
+        }
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
+    fn lines_text(lines: &[Line<'_>]) -> String {
+        lines.iter().map(line_text).collect::<Vec<_>>().join("\n")
+    }
+
+    fn test_plan_with_items(names: &[&str]) -> Plan {
+        Plan {
+            id: "test-run".into(),
+            mode: PlanMode::Deploy,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            config_path: PathBuf::from("dotman.yaml"),
+            config_hash: "hash".into(),
+            host: crate::model::HostInfo {
+                hostname: "host".into(),
+                os: "macos".into(),
+                arch: "aarch64".into(),
+                user: "user".into(),
+                home: PathBuf::from("/tmp"),
+            },
+            items: names.iter().map(|name| test_plan_item(name)).collect(),
+            auto_install_pkg_manager: false,
+        }
+    }
+
+    fn test_run_item(name: &str, status: ActionStatus, error: Option<&str>) -> RunItem {
+        RunItem {
+            id: name.to_string(),
+            name: name.to_string(),
+            status,
+            started_at: Some("2026-01-01T00:00:00Z".into()),
+            finished_at: Some("2026-01-01T00:00:01Z".into()),
+            duration_ms: Some(1000),
+            attempts: 1,
+            error: error.map(str::to_string),
+            output: Vec::new(),
+            actions: vec![RunAction {
+                kind: "shell".into(),
+                name: name.to_string(),
+                status,
+                error: error.map(str::to_string),
+                output: Vec::new(),
+            }],
+        }
+    }
+
+    fn test_run(status: RunStatus, items: Vec<RunItem>) -> Run {
+        Run {
+            id: "test-run".into(),
+            mode: PlanMode::Deploy,
+            started_at: "2026-01-01T00:00:00Z".into(),
+            finished_at: Some("2026-01-01T00:00:01Z".into()),
+            status,
+            config_hash: "hash".into(),
+            items,
+        }
+    }
 
     #[test]
     fn tui_log_sanitizer_strips_terminal_control_sequences() {
         let line = "fetch \x1b[31mred\x1b[0m\rprogress\tok\x07";
         assert_eq!(sanitize_tui_log_line(line), "fetch redprogress ok");
+    }
+
+    #[test]
+    fn plan_help_line_fits_narrow_terminal() {
+        let line = plan_help_line(78);
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(line_display_width(&line) <= 78);
+        assert!(text.contains("[R]"));
+        assert!(text.contains("[Q]"));
+        assert!(!text.contains("Info"));
+    }
+
+    #[test]
+    fn plan_help_line_keeps_full_labels_when_space_allows() {
+        let line = plan_help_line(120);
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("Navigate"));
+        assert!(text.contains("Review"));
+        assert!(text.contains("Back"));
+        assert!(!text.contains("Info"));
+    }
+
+    #[test]
+    fn review_help_line_fits_narrow_terminal() {
+        let line = review_help_line(44);
+        let text = line_text(&line);
+
+        assert!(line_display_width(&line) <= 44);
+        assert!(text.contains("[R]") || text.contains("[Enter/R]"));
+        assert!(text.contains("[E/Q]"));
+    }
+
+    #[test]
+    fn review_help_line_keeps_full_labels_when_space_allows() {
+        let line = review_help_line(100);
+        let text = line_text(&line);
+
+        assert!(text.contains("Scroll"));
+        assert!(text.contains("Page"));
+        assert!(text.contains("Run"));
+        assert!(text.contains("Edit"));
+    }
+
+    #[test]
+    fn run_progress_bar_reflects_done_ratio() {
+        assert_eq!(run_progress_bar(0, 4, 8), "░░░░░░░░");
+        assert_eq!(run_progress_bar(2, 4, 8), "████░░░░");
+        assert_eq!(run_progress_bar(4, 4, 8), "████████");
+    }
+
+    #[test]
+    fn run_help_line_switches_to_stopping() {
+        let running = line_text(&run_help_line(40, false, false));
+        let stopping = line_text(&run_help_line(40, true, false));
+        let finished = line_text(&run_help_line(40, false, true));
+
+        assert!(running.contains("Abort"));
+        assert!(stopping.contains("Stopping"));
+        assert!(finished.contains("Back"));
+        assert!(line_display_width(&run_help_line(8, true, false)) <= 8);
+    }
+
+    #[test]
+    fn run_title_includes_current_item_and_abort_state() {
+        let mut app = App::new(Mode::Deploy);
+        app.plan = Some(test_plan_with_items(&["ghostty", "fish"]));
+        app.progress = (1, 2);
+        app.current_item = Some(1);
+
+        let title = run_title(&app, 80);
+        assert!(title.contains("Running"));
+        assert!(title.contains("1/2"));
+        assert!(title.contains("fish"));
+
+        app.abort_flag = Some(Arc::new(AtomicBool::new(true)));
+        let stopping = run_title(&app, 80);
+        assert!(stopping.contains("Stopping"));
+    }
+
+    #[test]
+    fn run_title_keeps_finished_summary() {
+        let mut app = App::new(Mode::Deploy);
+        app.run = Some(test_run(
+            RunStatus::Success,
+            vec![
+                test_run_item("ghostty", ActionStatus::NoChange, None),
+                test_run_item("config", ActionStatus::WillLink, None),
+            ],
+        ));
+
+        let title = run_title(&app, 100);
+
+        assert!(title.contains("Success"));
+        assert!(title.contains("2/2"));
+        assert!(title.contains("1 changed"));
+        assert!(title.contains("1 no change"));
+    }
+
+    #[test]
+    fn run_body_lines_group_live_actions() {
+        let mut app = App::new(Mode::Deploy);
+        let mut item = test_plan_item("ghostty");
+        item.actions = vec![Action::Shell {
+            command: "echo ghostty".into(),
+            description: Some("check ghostty".into()),
+            optional: false,
+            if_condition: None,
+        }];
+        app.plan = Some(Plan {
+            items: vec![item],
+            ..test_plan_with_items(&[])
+        });
+        app.run_action_statuses = vec![vec![Some(ActionStatus::NoChange)]];
+
+        let done = lines_text(&run_body_lines(&app, 60, 8));
+        assert!(done.contains("No Change (1)"));
+        assert!(done.contains("no change"));
+
+        app.current_action = Some((0, 0));
+        let running = lines_text(&run_body_lines(&app, 60, 8));
+        assert!(running.contains("Running (1)"));
+        assert!(running.contains("running"));
+
+        app.current_action = None;
+        if let Some(plan) = &mut app.plan {
+            plan.items[0].selected = false;
+        }
+        let skipped = lines_text(&run_body_lines(&app, 60, 8));
+        assert!(skipped.contains("Skipped (1)"));
+        assert!(skipped.contains("skipped"));
+    }
+
+    #[test]
+    fn run_body_lines_group_finished_actions() {
+        let run = test_run(
+            RunStatus::Failed,
+            vec![
+                test_run_item("config", ActionStatus::WillLink, None),
+                test_run_item("ghostty", ActionStatus::NoChange, None),
+                test_run_item("shell", ActionStatus::WillFail, Some("exit code 1")),
+            ],
+        );
+        let mut app = App::new(Mode::Deploy);
+        app.run = Some(run);
+        let text = lines_text(&run_body_lines(&app, 80, 12));
+
+        assert!(text.contains("Failed (1)"));
+        assert!(text.contains("Changed (1)"));
+        assert!(text.contains("No Change (1)"));
+        assert!(text.contains("changed"));
+        assert!(text.contains("no change"));
+        assert!(text.contains("failed"));
+    }
+
+    #[test]
+    fn sync_finished_run_state_preserves_final_statuses() {
+        let run = test_run(
+            RunStatus::Success,
+            vec![
+                test_run_item("ghostty", ActionStatus::NoChange, None),
+                test_run_item("config", ActionStatus::WillLink, None),
+            ],
+        );
+        let mut app = App::new(Mode::Deploy);
+        app.current_item = Some(0);
+
+        sync_finished_run_state(&mut app, &run);
+
+        assert_eq!(app.progress, (2, 2));
+        assert_eq!(app.current_item, None);
+        assert_eq!(
+            app.run_item_statuses,
+            vec![Some(ActionStatus::NoChange), Some(ActionStatus::WillLink)]
+        );
+        assert_eq!(
+            app.run_action_statuses,
+            vec![
+                vec![Some(ActionStatus::NoChange)],
+                vec![Some(ActionStatus::WillLink)]
+            ]
+        );
+    }
+
+    #[test]
+    fn review_sudo_check_ignores_already_ok_entries() {
+        let icon_set = icons::current();
+        let entries = vec![ReviewEntry {
+            order: 0,
+            item: "ghostty".into(),
+            kind: "install",
+            kind_icon: icon_set.action_install,
+            severity: ReviewSeverity::Success,
+            status: "present".into(),
+            detail: "sudo pacman -S --needed --noconfirm ghostty".into(),
+        }];
+
+        assert!(!review_entries_need_sudo(&entries));
+    }
+
+    #[test]
+    fn review_sudo_check_detects_pending_sudo_entries() {
+        let icon_set = icons::current();
+        let entries = vec![ReviewEntry {
+            order: 0,
+            item: "ghostty".into(),
+            kind: "install",
+            kind_icon: icon_set.action_install,
+            severity: ReviewSeverity::Run,
+            status: "missing".into(),
+            detail: "sudo pacman -S --needed --noconfirm ghostty".into(),
+        }];
+
+        assert!(review_entries_need_sudo(&entries));
+    }
+
+    #[test]
+    fn review_entry_uses_one_line_when_it_fits() {
+        let entry = ReviewEntry {
+            order: 0,
+            item: "ghostty".into(),
+            kind: "install",
+            kind_icon: icons::current().action_install,
+            severity: ReviewSeverity::Success,
+            status: "present".into(),
+            detail: "brew install --cask ghostty".into(),
+        };
+
+        let lines = review_entry_lines(&entry, 76);
+        let text = line_text(&lines[0]);
+
+        assert_eq!(lines.len(), 1);
+        assert!(line_display_width(&lines[0]) <= 76);
+        assert!(text.contains("present"));
+        assert!(text.contains("brew install --cask ghostty"));
+    }
+
+    #[test]
+    fn review_entry_keeps_two_lines_for_long_details() {
+        let entry = ReviewEntry {
+            order: 0,
+            item: "ghostty".into(),
+            kind: "link",
+            kind_icon: icons::current().action_link,
+            severity: ReviewSeverity::Success,
+            status: "linked".into(),
+            detail: "~/.config/ghostty -> config/ghostty".into(),
+        };
+
+        let lines = review_entry_lines(&entry, 32);
+
+        assert_eq!(lines.len(), 2);
+        assert!(lines.iter().all(|line| line_display_width(line) <= 32));
+    }
+
+    #[test]
+    fn review_entry_omits_duplicate_detail() {
+        let entry = ReviewEntry {
+            order: 0,
+            item: "Sync fish plugins".into(),
+            kind: "shell",
+            kind_icon: icons::current().action_shell,
+            severity: ReviewSeverity::Warning,
+            status: "if ok · optional".into(),
+            detail: "Sync fish plugins".into(),
+        };
+
+        let lines = review_entry_lines(&entry, 76);
+        let text = lines_text(&lines);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(text.matches("Sync fish plugins").count(), 1);
+    }
+
+    #[test]
+    fn review_group_entries_sort_by_action_kind_then_plan_order() {
+        let icon_set = icons::current();
+        let entries = vec![
+            ReviewEntry {
+                order: 0,
+                item: "z-link".into(),
+                kind: "link",
+                kind_icon: icon_set.action_link,
+                severity: ReviewSeverity::Success,
+                status: "linked".into(),
+                detail: String::new(),
+            },
+            ReviewEntry {
+                order: 1,
+                item: "b-install".into(),
+                kind: "install",
+                kind_icon: icon_set.action_install,
+                severity: ReviewSeverity::Success,
+                status: "present".into(),
+                detail: String::new(),
+            },
+            ReviewEntry {
+                order: 2,
+                item: "a-install".into(),
+                kind: "install",
+                kind_icon: icon_set.action_install,
+                severity: ReviewSeverity::Success,
+                status: "present".into(),
+                detail: String::new(),
+            },
+            ReviewEntry {
+                order: 3,
+                item: "x-shell".into(),
+                kind: "shell",
+                kind_icon: icon_set.action_shell,
+                severity: ReviewSeverity::Success,
+                status: "run".into(),
+                detail: String::new(),
+            },
+            ReviewEntry {
+                order: 4,
+                item: "y-create".into(),
+                kind: "create",
+                kind_icon: icon_set.action_create,
+                severity: ReviewSeverity::Success,
+                status: "exists".into(),
+                detail: String::new(),
+            },
+        ];
+
+        let sorted = sorted_review_group_entries(&entries, ReviewGroup::AlreadyOk);
+        let names = sorted
+            .iter()
+            .map(|entry| entry.item.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec!["b-install", "a-install", "z-link", "y-create", "x-shell"]
+        );
+    }
+
+    #[test]
+    fn review_body_shows_group_headers() {
+        let icon_set = icons::current();
+        let entries = vec![
+            ReviewEntry {
+                order: 0,
+                item: "sudo shell".into(),
+                kind: "shell",
+                kind_icon: icon_set.action_shell,
+                severity: ReviewSeverity::Warning,
+                status: "run · sudo".into(),
+                detail: String::new(),
+            },
+            ReviewEntry {
+                order: 1,
+                item: "install".into(),
+                kind: "install",
+                kind_icon: icon_set.action_install,
+                severity: ReviewSeverity::Run,
+                status: "missing".into(),
+                detail: String::new(),
+            },
+            ReviewEntry {
+                order: 2,
+                item: "link".into(),
+                kind: "link",
+                kind_icon: icon_set.action_link,
+                severity: ReviewSeverity::Success,
+                status: "linked".into(),
+                detail: String::new(),
+            },
+            ReviewEntry {
+                order: 3,
+                item: "skip".into(),
+                kind: "shell",
+                kind_icon: icon_set.action_shell,
+                severity: ReviewSeverity::Skip,
+                status: "if skip".into(),
+                detail: String::new(),
+            },
+        ];
+        let mut scroll = 0;
+
+        let lines = review_body_lines(&entries, 76, 20, &mut scroll);
+        let text = lines_text(&lines);
+
+        assert!(text.contains("Attention (1)"));
+        assert!(text.contains("Will Run (1)"));
+        assert!(text.contains("Already OK (1)"));
+        assert!(text.contains("Skipped (1)"));
+        assert_eq!(scroll, 0);
+    }
+
+    #[test]
+    fn review_body_shows_scroll_markers() {
+        let icon_set = icons::current();
+        let entries = (0..8)
+            .map(|idx| ReviewEntry {
+                order: idx,
+                item: format!("item-{idx}"),
+                kind: "install",
+                kind_icon: icon_set.action_install,
+                severity: ReviewSeverity::Success,
+                status: "present".into(),
+                detail: String::new(),
+            })
+            .collect::<Vec<_>>();
+        let mut scroll = 2;
+
+        let lines = review_body_lines(&entries, 76, 4, &mut scroll);
+        let text = lines_text(&lines);
+
+        assert!(text.contains("2 above"));
+        assert!(text.contains("below"));
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn optional_shell_that_will_run_is_not_attention() {
+        let item = test_plan_item("Sync fish plugins");
+        let entry = review_shell_entry(
+            &item,
+            "true",
+            Some("Sync fish plugins"),
+            true,
+            Some("true"),
+            icons::current().action_shell,
+        );
+
+        assert_eq!(entry.severity, ReviewSeverity::Run);
+        assert_eq!(review_group_for(&entry), ReviewGroup::WillRun);
+        assert_eq!(entry.status, "if ok · optional");
+    }
+
+    #[test]
+    fn sudo_shell_stays_attention() {
+        let item = test_plan_item("Set default shell");
+        let entry = review_shell_entry(
+            &item,
+            "sudo chsh -s /opt/homebrew/bin/fish",
+            Some("Set default shell to fish"),
+            false,
+            None,
+            icons::current().action_shell,
+        );
+
+        assert_eq!(entry.severity, ReviewSeverity::Warning);
+        assert_eq!(review_group_for(&entry), ReviewGroup::Attention);
+        assert!(entry.status.contains("sudo"));
+    }
+
+    #[test]
+    fn shell_with_false_condition_is_skipped() {
+        let item = test_plan_item("Skip shell");
+        let entry = review_shell_entry(
+            &item,
+            "echo skipped",
+            None,
+            true,
+            Some("false"),
+            icons::current().action_shell,
+        );
+
+        assert_eq!(entry.severity, ReviewSeverity::Skip);
+        assert_eq!(review_group_for(&entry), ReviewGroup::Skipped);
+        assert_eq!(entry.status, "if skip");
     }
 }

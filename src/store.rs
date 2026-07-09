@@ -141,6 +141,7 @@ mod tests {
                 attempts: 1,
                 error: None,
                 output: vec![],
+                actions: vec![],
             }],
         }
     }

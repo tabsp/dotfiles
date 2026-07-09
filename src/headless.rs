@@ -113,6 +113,9 @@ fn run_full(cfg: &config::Config) -> Result<(), String> {
             ExecuteEvent::ActionStarted { .. } => {
                 // Headless: action starts are implicit from the output that follows.
             }
+            ExecuteEvent::ActionFinished { .. } => {
+                // Headless: final action status is summarized by the item result.
+            }
         },
         || false,
     )
@@ -186,6 +189,7 @@ mod tests {
                 attempts: 1,
                 error: None,
                 output: vec![],
+                actions: vec![],
             }],
         };
         let saved = std::path::Path::new("/tmp/test-run.json");

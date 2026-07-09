@@ -160,20 +160,55 @@ pub fn command_for_current_platform(entry: &ToolEntry, pkg_mgr: &str) -> Option<
 }
 
 pub fn detect_presence(entry: &ToolEntry, install_command: Option<&str>) -> InstallPresence {
+    detect_presence_with_probe(entry, install_command, &RealPresenceProbe)
+}
+
+trait PresenceProbe {
+    fn command_available(&self, binary: &str) -> bool;
+    fn fontconfig_reports_family(&self, family: &str) -> bool;
+    fn font_dir_contains(&self, dir: &Path, token: &str) -> bool;
+    fn path_exists(&self, path: &Path) -> bool;
+}
+
+struct RealPresenceProbe;
+
+impl PresenceProbe for RealPresenceProbe {
+    fn command_available(&self, binary: &str) -> bool {
+        command_available(binary)
+    }
+
+    fn fontconfig_reports_family(&self, family: &str) -> bool {
+        fontconfig_reports_family(family)
+    }
+
+    fn font_dir_contains(&self, dir: &Path, token: &str) -> bool {
+        font_dir_contains(dir, token)
+    }
+
+    fn path_exists(&self, path: &Path) -> bool {
+        path.exists()
+    }
+}
+
+fn detect_presence_with_probe(
+    entry: &ToolEntry,
+    install_command: Option<&str>,
+    probe: &impl PresenceProbe,
+) -> InstallPresence {
     if entry.kind == "font" {
-        return detect_font_presence(entry);
+        return detect_font_presence(entry, probe);
     }
 
     if crate::package_managers::os_name() == "macos"
         && let Some(command) = install_command
         && let Some(package) = cask_package_from_command(command)
     {
-        return detect_macos_cask_presence(&package);
+        return detect_macos_cask_presence(&package, probe);
     }
 
     if entry.binary.trim().is_empty() {
         InstallPresence::Unknown
-    } else if command_available(&entry.binary) {
+    } else if probe.command_available(&entry.binary) {
         InstallPresence::Present
     } else {
         InstallPresence::Missing
@@ -229,7 +264,7 @@ fn command_available(binary: &str) -> bool {
         .is_some_and(|status| status.success())
 }
 
-fn detect_macos_cask_presence(package: &str) -> InstallPresence {
+fn detect_macos_cask_presence(package: &str, probe: &impl PresenceProbe) -> InstallPresence {
     let app_bundle = app_bundle_name(package);
     let mut app_paths = vec![
         PathBuf::from("/Applications").join(&app_bundle),
@@ -240,17 +275,17 @@ fn detect_macos_cask_presence(package: &str) -> InstallPresence {
         app_paths.push(home.join("Applications").join(&app_bundle));
     }
 
-    if app_paths.iter().any(|path| path.exists()) {
+    if app_paths.iter().any(|path| probe.path_exists(path)) {
         InstallPresence::Present
     } else {
         InstallPresence::Missing
     }
 }
 
-fn detect_font_presence(entry: &ToolEntry) -> InstallPresence {
+fn detect_font_presence(entry: &ToolEntry, probe: &impl PresenceProbe) -> InstallPresence {
     if !entry.font_family.trim().is_empty()
-        && command_available("fc-list")
-        && fontconfig_reports_family(&entry.font_family)
+        && probe.command_available("fc-list")
+        && probe.fontconfig_reports_family(&entry.font_family)
     {
         return InstallPresence::Present;
     }
@@ -266,7 +301,7 @@ fn detect_font_presence(entry: &ToolEntry) -> InstallPresence {
         dirs.push(home.join(".local/share/fonts"));
     }
 
-    if dirs.iter().any(|dir| font_dir_contains(dir, &token)) {
+    if dirs.iter().any(|dir| probe.font_dir_contains(dir, &token)) {
         InstallPresence::Present
     } else {
         InstallPresence::Missing
@@ -345,6 +380,45 @@ fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    #[derive(Default)]
+    struct FakePresenceProbe {
+        commands: BTreeSet<String>,
+        font_families: BTreeSet<String>,
+        font_tokens: BTreeSet<String>,
+        paths: BTreeSet<PathBuf>,
+    }
+
+    impl PresenceProbe for FakePresenceProbe {
+        fn command_available(&self, binary: &str) -> bool {
+            self.commands.contains(binary)
+        }
+
+        fn fontconfig_reports_family(&self, family: &str) -> bool {
+            self.font_families.contains(family)
+        }
+
+        fn font_dir_contains(&self, _dir: &Path, token: &str) -> bool {
+            self.font_tokens.contains(token)
+        }
+
+        fn path_exists(&self, path: &Path) -> bool {
+            self.paths.contains(path)
+        }
+    }
+
+    fn tool_entry(name: &str, binary: &str, kind: &str, font_family: &str) -> ToolEntry {
+        ToolEntry {
+            name: name.into(),
+            binary: binary.into(),
+            layer: "software".into(),
+            kind: kind.into(),
+            source_url: String::new(),
+            font_family: font_family.into(),
+            platforms: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn loads_embedded_db() {
@@ -436,30 +510,82 @@ mod tests {
 
     #[test]
     fn detects_present_cli_binary() {
-        let entry = ToolEntry {
-            name: "sh".into(),
-            binary: "sh".into(),
-            layer: "software".into(),
-            kind: String::new(),
-            source_url: String::new(),
-            font_family: String::new(),
-            platforms: BTreeMap::new(),
-        };
+        let entry = tool_entry("sh", "sh", "", "");
         assert_eq!(detect_presence(&entry, None), InstallPresence::Present);
     }
 
     #[test]
     fn detects_missing_cli_binary() {
-        let entry = ToolEntry {
-            name: "definitely-not-installed-dotman-test".into(),
-            binary: "definitely-not-installed-dotman-test".into(),
-            layer: "software".into(),
-            kind: String::new(),
-            source_url: String::new(),
-            font_family: String::new(),
-            platforms: BTreeMap::new(),
-        };
+        let entry = tool_entry(
+            "definitely-not-installed-dotman-test",
+            "definitely-not-installed-dotman-test",
+            "",
+            "",
+        );
         assert_eq!(detect_presence(&entry, None), InstallPresence::Missing);
+    }
+
+    #[test]
+    fn detects_unknown_when_binary_is_empty() {
+        let entry = tool_entry("metadata-only", "", "", "");
+        let probe = FakePresenceProbe::default();
+
+        assert_eq!(
+            detect_presence_with_probe(&entry, None, &probe),
+            InstallPresence::Unknown
+        );
+    }
+
+    #[test]
+    fn detects_linux_ghostty_from_binary_probe() {
+        let db = load_db().unwrap();
+        let entry = find(&db, "ghostty").unwrap();
+        let mut probe = FakePresenceProbe::default();
+        probe.commands.insert("ghostty".into());
+
+        assert_eq!(
+            detect_presence_with_probe(
+                &entry,
+                Some("sudo pacman -S --needed --noconfirm ghostty"),
+                &probe
+            ),
+            InstallPresence::Present
+        );
+    }
+
+    #[test]
+    fn detects_font_from_fontconfig_probe() {
+        let entry = tool_entry(
+            "font-maple-mono-nf-cn",
+            "font-maple-mono-nf-cn",
+            "font",
+            "Maple Mono",
+        );
+        let mut probe = FakePresenceProbe::default();
+        probe.commands.insert("fc-list".into());
+        probe.font_families.insert("Maple Mono".into());
+
+        assert_eq!(
+            detect_presence_with_probe(&entry, None, &probe),
+            InstallPresence::Present
+        );
+    }
+
+    #[test]
+    fn detects_font_from_font_dir_probe() {
+        let entry = tool_entry(
+            "font-maple-mono-nf-cn",
+            "font-maple-mono-nf-cn",
+            "font",
+            "Maple Mono",
+        );
+        let mut probe = FakePresenceProbe::default();
+        probe.font_tokens.insert("maplemono".into());
+
+        assert_eq!(
+            detect_presence_with_probe(&entry, None, &probe),
+            InstallPresence::Present
+        );
     }
 
     #[test]

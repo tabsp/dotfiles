@@ -6,7 +6,7 @@
 use crate::config::Config;
 use crate::model::ActionStatus;
 use crate::model::MAX_HISTORY_OUTPUT_LINES;
-use crate::model::{Action, OutputLine, OutputStream, Plan, Run, RunItem, RunStatus};
+use crate::model::{Action, OutputLine, OutputStream, Plan, Run, RunAction, RunItem, RunStatus};
 use crate::ops::clean::{self};
 use crate::ops::create::create_dir;
 use crate::ops::install::{self};
@@ -36,8 +36,17 @@ pub enum ExecuteEvent {
         name: String,
     },
     ActionStarted {
+        item_index: usize,
+        action_index: usize,
         item: String,
         action: String,
+    },
+    ActionFinished {
+        item_index: usize,
+        action_index: usize,
+        item: String,
+        action: String,
+        status: ActionStatus,
     },
     /// Real-time stdout/stderr output line.
     Output {
@@ -121,6 +130,17 @@ where
                 attempts: 0,
                 error: Some("skipped (not selected)".into()),
                 output: vec![],
+                actions: plan_item
+                    .actions
+                    .iter()
+                    .map(|action| RunAction {
+                        kind: action_kind(action).into(),
+                        name: action.describe(),
+                        status: ActionStatus::WillSkip,
+                        error: Some("skipped (not selected)".into()),
+                        output: vec![],
+                    })
+                    .collect(),
             });
             continue;
         }
@@ -135,16 +155,21 @@ where
         let mut attempts: u32 = 0;
         let mut last_status = ActionStatus::WillRun;
         let mut item_output: Vec<OutputLine> = Vec::new();
+        let mut run_actions: Vec<RunAction> = Vec::new();
 
-        for action in &plan_item.actions {
+        for (action_index, action) in plan_item.actions.iter().enumerate() {
             if should_abort() {
                 aborted = true;
                 emit(ExecuteEvent::Aborted);
                 break;
             }
+            let action_name = action.describe();
+            let action_output_start = item_output.len();
             emit(ExecuteEvent::ActionStarted {
+                item_index: index,
+                action_index,
                 item: plan_item.name.clone(),
-                action: action.describe(),
+                action: action_name.clone(),
             });
             match action {
                 Action::Install { binary, .. } => {
@@ -174,6 +199,12 @@ where
                     };
                     let link_plan = link::plan_link(config_dir, target, source, settings)?;
                     let action_desc = describe_link_action(&link_plan.action);
+                    last_status = match &link_plan.action {
+                        link::LinkAction::Skip => ActionStatus::NoChange,
+                        link::LinkAction::Link | link::LinkAction::Relink => ActionStatus::WillLink,
+                        link::LinkAction::Backup(_) => ActionStatus::WillBackupLink,
+                        link::LinkAction::Fail(_) => ActionStatus::WillFail,
+                    };
                     match link::apply_link(link_plan) {
                         Ok(()) => {
                             let msg = format!(
@@ -199,36 +230,44 @@ where
                         }
                     }
                 }
-                Action::Create { target } => match create_dir(
-                    &crate::path::expand_home(&target.to_string_lossy())
-                        .unwrap_or_else(|_| target.clone()),
-                ) {
-                    Ok(()) => {
-                        let msg = format!("created {}", target.display());
-                        emit(ExecuteEvent::ActionMessage {
-                            item: plan_item.name.clone(),
-                            message: msg.clone(),
-                        });
-                        push_output_line(&mut item_output, OutputStream::Action, &msg);
+                Action::Create { target } => {
+                    let expanded = crate::path::expand_home(&target.to_string_lossy())
+                        .unwrap_or_else(|_| target.clone());
+                    let existed = expanded.exists();
+                    match create_dir(&expanded) {
+                        Ok(()) => {
+                            last_status = if existed {
+                                ActionStatus::NoChange
+                            } else {
+                                ActionStatus::WillCreate
+                            };
+                            let action_desc = if existed { "exists" } else { "created" };
+                            let msg = format!("{action_desc} {}", target.display());
+                            emit(ExecuteEvent::ActionMessage {
+                                item: plan_item.name.clone(),
+                                message: msg.clone(),
+                            });
+                            push_output_line(&mut item_output, OutputStream::Action, &msg);
+                        }
+                        Err(e) => {
+                            let msg = format!("create failed: {e}");
+                            emit(ExecuteEvent::ActionMessage {
+                                item: plan_item.name.clone(),
+                                message: msg.clone(),
+                            });
+                            push_output_line(&mut item_output, OutputStream::Action, &msg);
+                            error = Some(e.to_string());
+                            last_status = ActionStatus::WillFail;
+                        }
                     }
-                    Err(e) => {
-                        let msg = format!("create failed: {e}");
-                        emit(ExecuteEvent::ActionMessage {
-                            item: plan_item.name.clone(),
-                            message: msg.clone(),
-                        });
-                        push_output_line(&mut item_output, OutputStream::Action, &msg);
-                        error = Some(e.to_string());
-                        last_status = ActionStatus::WillFail;
-                    }
-                },
+                }
                 Action::Shell {
                     command,
                     if_condition,
                     optional,
                     ..
                 } => {
-                    if let Some(cond) = if_condition
+                    let condition_skipped = if let Some(cond) = if_condition
                         && !shell::condition_matches(cond).unwrap_or(false)
                     {
                         last_status = ActionStatus::WillSkip;
@@ -238,51 +277,58 @@ where
                             message: msg.clone(),
                         });
                         push_output_line(&mut item_output, OutputStream::Action, &msg);
-                        continue;
-                    }
-                    // Keep sudo fresh before commands that need it. This must
-                    // stay non-interactive so abort can still work in the TUI.
-                    if shell::command_contains_sudo(command)
-                        && !ensure_sudo_session(&plan_item.name, &mut sudo_auth)
-                    {
-                        let msg = "sudo session expired — re-run to re-authenticate".to_string();
-                        emit(ExecuteEvent::ActionMessage {
-                            item: plan_item.name.clone(),
-                            message: msg.clone(),
-                        });
-                        push_output_line(&mut item_output, OutputStream::Action, &msg);
-                        error = Some("sudo session expired".into());
-                        last_status = ActionStatus::WillFail;
-                        break;
-                    }
-                    let (exit_code, output) = run_command_streaming_with_events(
-                        command,
-                        config_dir,
-                        &plan_item.name,
-                        &mut emit,
-                        &should_abort,
-                    )?;
-                    item_output.extend(output);
-                    cap_output_len(&mut item_output);
-                    match exit_code {
-                        Some(0) => {}
-                        Some(code) if *optional => {
-                            let msg = format!("optional command failed (exit {code})");
+                        true
+                    } else {
+                        false
+                    };
+                    if !condition_skipped {
+                        // Keep sudo fresh before commands that need it. This must
+                        // stay non-interactive so abort can still work in the TUI.
+                        if shell::command_contains_sudo(command)
+                            && !ensure_sudo_session(&plan_item.name, &mut sudo_auth)
+                        {
+                            let msg =
+                                "sudo session expired — re-run to re-authenticate".to_string();
                             emit(ExecuteEvent::ActionMessage {
                                 item: plan_item.name.clone(),
                                 message: msg.clone(),
                             });
                             push_output_line(&mut item_output, OutputStream::Action, &msg);
-                            last_status = ActionStatus::NoChange;
-                        }
-                        Some(code) => {
-                            error = Some(format!("exit code {code}"));
+                            error = Some("sudo session expired".into());
                             last_status = ActionStatus::WillFail;
-                        }
-                        None => {
-                            error = Some("killed (aborted)".into());
-                            last_status = ActionStatus::WillFail;
-                            aborted = true;
+                        } else {
+                            let (exit_code, output) = run_command_streaming_with_events(
+                                command,
+                                config_dir,
+                                &plan_item.name,
+                                &mut emit,
+                                &should_abort,
+                            )?;
+                            item_output.extend(output);
+                            cap_output_len(&mut item_output);
+                            match exit_code {
+                                Some(0) => {
+                                    last_status = ActionStatus::WillRun;
+                                }
+                                Some(code) if *optional => {
+                                    let msg = format!("optional command failed (exit {code})");
+                                    emit(ExecuteEvent::ActionMessage {
+                                        item: plan_item.name.clone(),
+                                        message: msg.clone(),
+                                    });
+                                    push_output_line(&mut item_output, OutputStream::Action, &msg);
+                                    last_status = ActionStatus::NoChange;
+                                }
+                                Some(code) => {
+                                    error = Some(format!("exit code {code}"));
+                                    last_status = ActionStatus::WillFail;
+                                }
+                                None => {
+                                    error = Some("killed (aborted)".into());
+                                    last_status = ActionStatus::WillFail;
+                                    aborted = true;
+                                }
+                            }
                         }
                     }
                 }
@@ -291,6 +337,11 @@ where
                         .unwrap_or_else(|_| target.clone());
                     let clean_action = clean::plan_clean(&expanded_target, *force)?;
                     let action_desc = describe_clean_action(&clean_action);
+                    last_status = match &clean_action {
+                        clean::CleanAction::Skip => ActionStatus::NoChange,
+                        clean::CleanAction::RemoveSymlink => ActionStatus::WillClean,
+                        clean::CleanAction::BackupAndRemove(_) => ActionStatus::WillBackupRemove,
+                    };
                     match clean::apply_clean(clean_action, &expanded_target) {
                         Ok(()) => {
                             let msg =
@@ -315,6 +366,29 @@ where
                 }
             }
 
+            let action_error = if matches!(last_status, ActionStatus::WillFail) {
+                error.clone()
+            } else {
+                None
+            };
+            let action_output = item_output
+                .get(action_output_start..)
+                .map_or_else(Vec::new, ToOwned::to_owned);
+            run_actions.push(RunAction {
+                kind: action_kind(action).into(),
+                name: action_name.clone(),
+                status: last_status,
+                error: action_error,
+                output: action_output,
+            });
+            emit(ExecuteEvent::ActionFinished {
+                item_index: index,
+                action_index,
+                item: plan_item.name.clone(),
+                action: action_name,
+                status: last_status,
+            });
+
             if error.is_some() {
                 break;
             }
@@ -334,6 +408,7 @@ where
             attempts,
             error,
             output: item_output,
+            actions: run_actions,
         });
         emit(ExecuteEvent::ItemFinished {
             index,
@@ -568,7 +643,7 @@ where
                     message: msg.clone(),
                 });
                 push_output_line(&mut output, OutputStream::Action, &msg);
-                return Ok((ActionStatus::NoChange, None, 1, output));
+                return Ok((ActionStatus::WillInstall, None, 1, output));
             }
             Some(code) => {
                 let msg = format!("font install failed (exit {code})");
@@ -659,7 +734,7 @@ where
 
         match exit_code {
             Some(0) => {
-                return Ok((ActionStatus::NoChange, None, attempt, all_output));
+                return Ok((ActionStatus::WillInstall, None, attempt, all_output));
             }
             Some(code) => {
                 last_err = Some(format!("install failed (exit {code})"));
@@ -705,6 +780,16 @@ fn describe_link_action(action: &link::LinkAction) -> String {
         link::LinkAction::Backup(path) => format!("backup then link: {}", path.display()),
         link::LinkAction::Relink => "relink: replace wrong symlink".into(),
         link::LinkAction::Fail(reason) => format!("fail: {reason}"),
+    }
+}
+
+fn action_kind(action: &Action) -> &'static str {
+    match action {
+        Action::Install { .. } => "install",
+        Action::Link { .. } => "link",
+        Action::Create { .. } => "create",
+        Action::Shell { .. } => "shell",
+        Action::Clean { .. } => "clean",
     }
 }
 
@@ -997,7 +1082,38 @@ mod tests {
         .unwrap();
 
         assert_eq!(run.status, RunStatus::Success);
+        assert_eq!(run.items[0].status, ActionStatus::WillLink);
         assert!(messages.iter().any(|m| m.contains("linked")));
+    }
+
+    #[test]
+    fn create_existing_directory_reports_no_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("already-there");
+        std::fs::create_dir_all(&target).unwrap();
+
+        let cfg = Config {
+            path: dir.path().join("dotman.yaml"),
+            package_managers: crate::config::PackageManagerConfig::default(),
+            install: vec![],
+            links: vec![],
+            create: vec![target.clone()],
+            shell: vec![],
+            default_shell: None,
+            clean: vec![],
+            auto_install_pkg_manager: false,
+        };
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let run = execute(&plan, &cfg).unwrap();
+
+        assert_eq!(run.status, RunStatus::Success);
+        assert_eq!(run.items[0].status, ActionStatus::NoChange);
+        assert!(
+            run.items[0]
+                .output
+                .iter()
+                .any(|line| line.line.contains("exists"))
+        );
     }
 
     #[test]
