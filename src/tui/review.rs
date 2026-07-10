@@ -170,7 +170,21 @@ pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
     };
     f.render_widget(Paragraph::new(body).wrap(Wrap { trim: false }), chunks[2]);
 
-    let help = Paragraph::new(review_help_line(usize::from(chunks[3].width)));
+    let help_line = if app.status_message.is_empty() {
+        review_help_line(usize::from(chunks[3].width))
+    } else {
+        Line::from(vec![
+            Span::styled("  error  ", Style::default().fg(CATPPUCCIN_MOCHA.danger)),
+            Span::styled(
+                fit_to_width(
+                    &app.status_message,
+                    usize::from(chunks[3].width).saturating_sub(9),
+                ),
+                Style::default().fg(CATPPUCCIN_MOCHA.danger),
+            ),
+        ])
+    };
+    let help = Paragraph::new(help_line);
     f.render_widget(help, chunks[3]);
 }
 

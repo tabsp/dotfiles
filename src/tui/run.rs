@@ -12,22 +12,22 @@ pub(super) fn handle_run(app: &mut App, key: KeyCode) -> Result<()> {
         }
         KeyCode::End | KeyCode::Char('f') => {
             app.log_follow = true;
-            app.log_scroll = 0;
+            app.log_scroll = log_bottom_scroll(app, 0);
         }
         KeyCode::Tab => {
             app.log_filter = app.log_filter.next();
             app.log_follow = true;
-            app.log_scroll = 0;
+            app.log_scroll = log_bottom_scroll(app, 0);
         }
         KeyCode::Char('c') => {
             app.log_filter = LogFilter::Current;
             app.log_follow = true;
-            app.log_scroll = 0;
+            app.log_scroll = log_bottom_scroll(app, 0);
         }
         KeyCode::Char('e') => {
             app.log_filter = LogFilter::Errors;
             app.log_follow = true;
-            app.log_scroll = 0;
+            app.log_scroll = log_bottom_scroll(app, 0);
         }
         KeyCode::Enter => toggle_current_log_group(app),
         KeyCode::Char('q') | KeyCode::Esc => {
@@ -63,8 +63,11 @@ pub(super) fn start_run(app: &mut App) {
     app.log_follow = true;
     app.log_dropped_count = 0;
     app.log_group = None;
+    app.active_log_group = None;
     app.log_filter = LogFilter::All;
     app.collapsed_log_groups.clear();
+    app.run_error = None;
+    app.run_save_warning = None;
     app.run = None;
     app.run_item_statuses = vec![None; plan.items.len()];
     app.run_action_statuses = plan
@@ -78,8 +81,8 @@ pub(super) fn start_run(app: &mut App) {
     let sudo_tx = tx.clone();
     let abort_flag = Arc::new(AtomicBool::new(false));
     let thread_abort_flag = Arc::clone(&abort_flag);
-    let handle = std::thread::spawn(move || -> anyhow::Result<Run> {
-        let result = crate::execute::execute_with_events_and_sudo(
+    let handle = std::thread::spawn(move || -> RunThreadResult {
+        let result = match crate::execute::execute_with_events_and_sudo(
             &plan,
             &cfg,
             |event| {
@@ -94,9 +97,24 @@ pub(super) fn start_run(app: &mut App) {
                 });
                 response_rx.recv().unwrap_or(false)
             },
-        )?;
-        let _ = crate::store::save(&result)?;
-        Ok(result)
+        ) {
+            Ok(run) => run,
+            Err(error) => {
+                return RunThreadResult {
+                    run: None,
+                    error: Some(error.to_string()),
+                    save_warning: None,
+                };
+            }
+        };
+        let save_warning = crate::store::save(&result)
+            .err()
+            .map(|error| format!("history save failed: {error}"));
+        RunThreadResult {
+            run: Some(result),
+            error: None,
+            save_warning,
+        }
     });
     app.run_thread = Some(handle);
     app.run_events = Some(rx);
@@ -113,19 +131,14 @@ pub(super) fn render_run(f: &mut Frame, app: &mut App) {
     {
         let handle = app.run_thread.take().unwrap();
         match handle.join() {
-            Ok(Ok(run)) => {
-                app.run = Some(run.clone());
-                sync_finished_run_state(app, &run);
-                app.abort_flag = None;
-                app.run_events = None;
-            }
-            Ok(Err(e)) => {
-                app.status_message = format!("run failed: {e}");
+            Ok(result) => {
+                apply_run_thread_result(app, result);
                 app.abort_flag = None;
                 app.run_events = None;
             }
             Err(_) => {
-                app.status_message = "run thread panicked".into();
+                app.run_error = Some("run thread panicked".into());
+                push_log(app, "run thread panicked", Some(CATPPUCCIN_MOCHA.danger));
                 app.abort_flag = None;
                 app.run_events = None;
             }
@@ -184,6 +197,22 @@ pub(super) fn render_run(f: &mut Frame, app: &mut App) {
     f.render_widget(help, chunks[4]);
 }
 
+pub(super) fn apply_run_thread_result(app: &mut App, result: RunThreadResult) {
+    if let Some(run) = result.run {
+        app.run = Some(run.clone());
+        sync_finished_run_state(app, &run);
+    }
+    if let Some(warning) = result.save_warning {
+        app.run_save_warning = Some(warning.clone());
+        push_log(app, &warning, Some(CATPPUCCIN_MOCHA.warning));
+    }
+    if let Some(error) = result.error {
+        let message = format!("run failed: {error}");
+        app.run_error = Some(message.clone());
+        push_log(app, &message, Some(CATPPUCCIN_MOCHA.danger));
+    }
+}
+
 pub(super) fn sync_finished_run_state(app: &mut App, run: &Run) {
     let total = app.progress.1.max(run_action_total(run));
     let done = run_executed_action_total(run).min(total);
@@ -204,7 +233,7 @@ pub(super) fn sync_finished_run_state(app: &mut App, run: &Run) {
 }
 
 pub(super) fn finished_run_for_view(app: &App) -> Option<&Run> {
-    if app.run_thread.is_none() {
+    if app.run_thread.is_none() && app.run_error.is_none() {
         app.run.as_ref()
     } else {
         None
@@ -220,6 +249,8 @@ pub(super) fn run_is_aborting(app: &App) -> bool {
 pub(super) fn run_border_color(app: &App, aborting: bool) -> Color {
     if aborting {
         CATPPUCCIN_MOCHA.warning
+    } else if app.run_error.is_some() {
+        CATPPUCCIN_MOCHA.danger
     } else if let Some(run) = finished_run_for_view(app) {
         match run.status {
             RunStatus::Running => CATPPUCCIN_MOCHA.running,
@@ -239,7 +270,9 @@ pub(super) fn run_title(app: &App, width: usize) -> String {
 
 pub(super) fn run_title_line(app: &App, width: usize) -> Line<'static> {
     let icon_set = icons::current();
-    let (state, done, total) = if let Some(run) = finished_run_for_view(app) {
+    let (state, done, total) = if app.run_error.is_some() {
+        ("Failed", app.progress.0, app.progress.1)
+    } else if let Some(run) = finished_run_for_view(app) {
         let total = app.progress.1.max(run_action_total(run));
         let done = if app.progress.1 == 0 {
             run_executed_action_total(run)
@@ -277,25 +310,46 @@ pub(super) fn run_title_line(app: &App, width: usize) -> Line<'static> {
 }
 
 pub(super) fn run_status_line(app: &App, width: usize) -> Line<'static> {
-    let text = if let Some(run) = finished_run_for_view(app) {
-        final_run_summary(run)
+    let (label, text, style) = if let Some(error) = &app.run_error {
+        (
+            "  error    ",
+            error.clone(),
+            Style::default().fg(CATPPUCCIN_MOCHA.danger),
+        )
+    } else if let Some(warning) = &app.run_save_warning {
+        (
+            "  warning  ",
+            warning.clone(),
+            Style::default().fg(CATPPUCCIN_MOCHA.warning),
+        )
+    } else if let Some(run) = finished_run_for_view(app) {
+        (
+            "  current  ",
+            final_run_summary(run),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg),
+        )
     } else if let Some((item_idx, action_idx)) = app.current_action {
-        current_run_action_name(app, item_idx, action_idx).unwrap_or_else(|| {
+        (
+            "  current  ",
+            current_run_action_name(app, item_idx, action_idx).unwrap_or_else(|| {
+                current_run_item_name(app)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "waiting".into())
+            }),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg),
+        )
+    } else {
+        (
+            "  current  ",
             current_run_item_name(app)
                 .map(str::to_string)
-                .unwrap_or_else(|| "waiting".into())
-        })
-    } else {
-        current_run_item_name(app)
-            .map(str::to_string)
-            .unwrap_or_else(|| "waiting".into())
+                .unwrap_or_else(|| "waiting".into()),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg),
+        )
     };
     Line::from(vec![
-        Span::styled("  current  ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
-        Span::styled(
-            fit_to_width(&text, width.saturating_sub(11)),
-            Style::default().fg(CATPPUCCIN_MOCHA.fg),
-        ),
+        Span::styled(label, Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+        Span::styled(fit_to_width(&text, width.saturating_sub(11)), style),
     ])
 }
 
@@ -882,6 +936,7 @@ pub(super) fn drain_run_events(app: &mut App) {
                 app.current_item = Some(index);
                 app.last_item_index = Some(index);
                 app.current_action = None;
+                app.active_log_group = None;
                 push_log_group(app, &name);
                 push_log_indented(app, "started", None, 1, LogKind::System);
             }
@@ -894,7 +949,9 @@ pub(super) fn drain_run_events(app: &mut App) {
                 app.current_action = Some((item_index, action_index));
                 app.current_item = Some(item_index);
                 app.last_item_index = Some(item_index);
-                push_log_group(app, &format!("{item} / {action}"));
+                let group = format!("{item} / {action}");
+                app.active_log_group = Some(group.clone());
+                push_log_group(app, &group);
             }
             crate::execute::ExecuteEvent::ActionFinished {
                 item_index,
@@ -909,7 +966,6 @@ pub(super) fn drain_run_events(app: &mut App) {
                     *slot = Some(status);
                 }
                 app.progress.0 = app.progress.0.saturating_add(1).min(app.progress.1);
-                app.current_action = None;
                 push_log_indented(
                     app,
                     &format!("finished {action}: {status:?}"),
@@ -921,6 +977,8 @@ pub(super) fn drain_run_events(app: &mut App) {
                         LogKind::System
                     },
                 );
+                app.current_action = None;
+                app.active_log_group = None;
             }
             crate::execute::ExecuteEvent::Output { item, stream, line } => {
                 let color = match stream {
@@ -933,11 +991,13 @@ pub(super) fn drain_run_events(app: &mut App) {
                     crate::model::OutputStream::Stdout => LogKind::Stdout,
                     crate::model::OutputStream::Action => LogKind::Action,
                 };
-                push_log_group(app, &item);
+                let group = log_group_for_event(app, &item);
+                push_log_group(app, &group);
                 push_log_indented(app, &line, color, 1, kind);
             }
             crate::execute::ExecuteEvent::ActionMessage { item, message } => {
-                push_log_group(app, &item);
+                let group = log_group_for_event(app, &item);
+                push_log_group(app, &group);
                 push_log_indented(
                     app,
                     &message,
@@ -961,6 +1021,7 @@ pub(super) fn drain_run_events(app: &mut App) {
                 }
                 app.current_item = None;
                 app.current_action = None;
+                app.active_log_group = None;
                 app.last_item_index = Some(index);
                 if let Some(slot) = app.run_item_statuses.get_mut(index) {
                     *slot = Some(status);
@@ -978,7 +1039,8 @@ pub(super) fn drain_run_events(app: &mut App) {
                 push_log(app, "run aborted", Some(CATPPUCCIN_MOCHA.warning));
             }
             crate::execute::ExecuteEvent::SudoPrompt { item, response } => {
-                push_log_group(app, &item);
+                let group = log_group_for_event(app, &item);
+                push_log_group(app, &group);
                 push_log_indented(
                     app,
                     "sudo session expired; re-authenticating",
@@ -1009,6 +1071,12 @@ pub(super) fn drain_run_events(app: &mut App) {
         }
     }
     app.run_events = Some(rx);
+}
+
+pub(super) fn log_group_for_event(app: &App, item: &str) -> String {
+    app.active_log_group
+        .clone()
+        .unwrap_or_else(|| item.to_string())
 }
 
 pub(super) fn push_log(app: &mut App, line: &str, fg: Option<Color>) {
@@ -1052,36 +1120,52 @@ pub(super) fn push_log_indented(
         app.log_scroll = app.log_scroll.saturating_sub(drop_count);
     }
     if app.log_follow {
-        app.log_scroll = 0;
+        app.log_scroll = log_bottom_scroll(app, 0);
     }
 }
 
 pub(super) fn scroll_run_log(app: &mut App, pages: isize) {
     let step = 8usize;
+    if app.log_follow {
+        app.log_scroll = log_bottom_scroll(app, 0);
+    }
     app.log_follow = false;
     if pages.is_negative() {
         app.log_scroll = app
             .log_scroll
-            .saturating_add(step.saturating_mul(pages.unsigned_abs()));
+            .saturating_sub(step.saturating_mul(pages.unsigned_abs()));
     } else {
         app.log_scroll = app
             .log_scroll
-            .saturating_sub(step.saturating_mul(pages as usize));
+            .saturating_add(step.saturating_mul(pages as usize));
     }
-    app.log_scroll = app.log_scroll.min(app.current_log.len().saturating_sub(1));
+    clamp_log_scroll(app, 0);
 }
 
 pub(super) fn log_scroll_offset(app: &App, viewport_height: usize) -> u16 {
-    let visible_len = filtered_log_entries(app).len();
     if app.log_follow {
-        return visible_len
-            .saturating_sub(viewport_height)
-            .min(u16::MAX as usize) as u16;
+        return log_bottom_scroll(app, viewport_height).min(u16::MAX as usize) as u16;
     }
-    visible_len
-        .saturating_sub(viewport_height)
-        .saturating_sub(app.log_scroll)
+    app.log_scroll
+        .min(log_bottom_scroll(app, viewport_height))
         .min(u16::MAX as usize) as u16
+}
+
+pub(super) fn log_bottom_scroll(app: &App, viewport_height: usize) -> usize {
+    visible_log_len(app).saturating_sub(viewport_height)
+}
+
+pub(super) fn visible_log_len(app: &App) -> usize {
+    let base = if app.current_log.is_empty() {
+        1
+    } else {
+        filtered_log_entries(app).len().max(1)
+    };
+    base + usize::from(app.log_dropped_count > 0)
+}
+
+pub(super) fn clamp_log_scroll(app: &mut App, viewport_height: usize) {
+    app.log_scroll = app.log_scroll.min(log_bottom_scroll(app, viewport_height));
 }
 
 pub(super) fn visible_log_lines(app: &App, _viewport_height: usize) -> Vec<Line<'static>> {
@@ -1121,9 +1205,13 @@ pub(super) fn visible_log_lines(app: &App, _viewport_height: usize) -> Vec<Line<
 }
 
 pub(super) fn filtered_log_entries(app: &App) -> Vec<&LogLine> {
+    if app.log_filter == LogFilter::Errors {
+        return error_log_entries(app);
+    }
     let mut visible = Vec::new();
+    let current_group = current_log_filter_group(app);
     for entry in &app.current_log {
-        if !log_entry_matches_filter(entry, app.log_filter, app.log_group.as_deref()) {
+        if !log_entry_matches_filter(entry, app.log_filter, current_group.as_deref()) {
             continue;
         }
         if entry.kind != LogKind::Header
@@ -1139,6 +1227,41 @@ pub(super) fn filtered_log_entries(app: &App) -> Vec<&LogLine> {
     visible
 }
 
+pub(super) fn current_log_filter_group(app: &App) -> Option<String> {
+    app.active_log_group
+        .clone()
+        .or_else(|| app.log_group.clone())
+}
+
+pub(super) fn error_log_entries(app: &App) -> Vec<&LogLine> {
+    let mut error_groups = BTreeSet::new();
+    let mut include_ungrouped_error = false;
+    for entry in &app.current_log {
+        if is_error_log_entry(entry) {
+            if let Some(group) = &entry.group {
+                error_groups.insert(group.clone());
+            } else {
+                include_ungrouped_error = true;
+            }
+        }
+    }
+
+    let mut visible = Vec::new();
+    for entry in &app.current_log {
+        match &entry.group {
+            Some(group)
+                if error_groups.contains(group)
+                    && (entry.kind == LogKind::Header || is_error_log_entry(entry)) =>
+            {
+                visible.push(entry);
+            }
+            None if include_ungrouped_error && is_error_log_entry(entry) => visible.push(entry),
+            _ => {}
+        }
+    }
+    visible
+}
+
 pub(super) fn log_entry_matches_filter(
     entry: &LogLine,
     filter: LogFilter,
@@ -1147,11 +1270,13 @@ pub(super) fn log_entry_matches_filter(
     match filter {
         LogFilter::All => true,
         LogFilter::Current => entry.group.as_deref() == current_group,
-        LogFilter::Errors => {
-            let text = entry.text.to_ascii_lowercase();
-            entry.kind == LogKind::Stderr || text.contains("failed") || text.contains("aborted")
-        }
+        LogFilter::Errors => is_error_log_entry(entry),
     }
+}
+
+pub(super) fn is_error_log_entry(entry: &LogLine) -> bool {
+    let text = entry.text.to_ascii_lowercase();
+    entry.kind == LogKind::Stderr || text.contains("failed") || text.contains("aborted")
 }
 
 pub(super) fn log_line_for_view(entry: &LogLine) -> Line<'static> {

@@ -1007,13 +1007,19 @@ mod tests {
 
         assert!(saw_abort);
         assert_eq!(run.status, RunStatus::Aborted);
-        assert_eq!(run.items.len(), 1);
-        assert_eq!(run.items[0].status, ActionStatus::NotRun);
+        assert_eq!(
+            run.items.len(),
+            plan.items.iter().filter(|item| item.selected).count()
+        );
         assert!(
-            run.items[0]
-                .error
-                .as_deref()
-                .is_some_and(|e| e.contains("aborted"))
+            run.items
+                .iter()
+                .all(|item| item.status == ActionStatus::NotRun)
+        );
+        assert!(
+            run.items
+                .iter()
+                .all(|item| item.error.as_deref().is_some_and(|e| e.contains("aborted")))
         );
     }
 

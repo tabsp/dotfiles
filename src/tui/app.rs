@@ -31,7 +31,7 @@ pub struct App {
     pub dirty: bool,
     // For RunView
     pub spinner_frame: usize,
-    pub run_thread: Option<std::thread::JoinHandle<anyhow::Result<Run>>>,
+    pub run_thread: Option<std::thread::JoinHandle<RunThreadResult>>,
     pub run_events: Option<mpsc::Receiver<crate::execute::ExecuteEvent>>,
     pub abort_flag: Option<Arc<AtomicBool>>,
     pub progress: (usize, usize), // (done, total)
@@ -40,8 +40,11 @@ pub struct App {
     pub log_follow: bool,
     pub log_dropped_count: usize,
     pub log_group: Option<String>,
+    pub active_log_group: Option<String>,
     pub log_filter: LogFilter,
     pub collapsed_log_groups: BTreeSet<String>,
+    pub run_error: Option<String>,
+    pub run_save_warning: Option<String>,
     pub current_item: Option<usize>,
     pub last_item_index: Option<usize>,
     pub current_action: Option<(usize, usize)>,
@@ -77,6 +80,13 @@ pub enum LogFilter {
     All,
     Current,
     Errors,
+}
+
+#[derive(Debug)]
+pub struct RunThreadResult {
+    pub run: Option<Run>,
+    pub error: Option<String>,
+    pub save_warning: Option<String>,
 }
 
 impl LogFilter {
@@ -134,8 +144,11 @@ impl App {
             log_follow: true,
             log_dropped_count: 0,
             log_group: None,
+            active_log_group: None,
             log_filter: LogFilter::All,
             collapsed_log_groups: BTreeSet::new(),
+            run_error: None,
+            run_save_warning: None,
             current_item: None,
             last_item_index: None,
             current_action: None,

@@ -84,7 +84,14 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
 
     if app.runs.is_empty() {
         f.render_widget(
-            Paragraph::new("no runs yet").alignment(Alignment::Center),
+            Paragraph::new(vec![
+                Line::from("no runs yet"),
+                Line::from(Span::styled(
+                    "Q back - start deploy from the main menu",
+                    Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+                )),
+            ])
+            .alignment(Alignment::Center),
             chunks[1],
         );
     } else {

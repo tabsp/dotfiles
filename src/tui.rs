@@ -46,7 +46,7 @@ mod plan;
 mod review;
 mod run;
 
-pub use app::{App, LogFilter, LogKind, LogLine, Screen};
+pub use app::{App, LogFilter, LogKind, LogLine, RunThreadResult, Screen};
 use components::*;
 
 /// Entry point when a config path has already been resolved by init.rs.

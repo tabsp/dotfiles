@@ -277,7 +277,7 @@ pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
     };
     let help = Paragraph::new(vec![
         status_line,
-        plan_help_line(usize::from(chunks[2].width)),
+        plan_help_line(usize::from(chunks[2].width), matches!(app.mode, Mode::Plan)),
     ]);
     f.render_widget(help, chunks[2]);
 }

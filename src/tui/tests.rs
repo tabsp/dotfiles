@@ -91,7 +91,7 @@ fn tui_log_sanitizer_strips_terminal_control_sequences() {
 
 #[test]
 fn plan_help_line_fits_narrow_terminal() {
-    let line = plan_help_line(78);
+    let line = plan_help_line(78, false);
     let text = line
         .spans
         .iter()
@@ -106,7 +106,7 @@ fn plan_help_line_fits_narrow_terminal() {
 
 #[test]
 fn plan_help_line_keeps_full_labels_when_space_allows() {
-    let line = plan_help_line(120);
+    let line = plan_help_line(120, false);
     let text = line
         .spans
         .iter()
@@ -117,6 +117,16 @@ fn plan_help_line_keeps_full_labels_when_space_allows() {
     assert!(text.contains("Review"));
     assert!(text.contains("Back"));
     assert!(!text.contains("Info"));
+}
+
+#[test]
+fn plan_only_help_is_read_only_without_run_entry() {
+    let line = plan_help_line(120, true);
+    let text = line_text(&line);
+
+    assert!(text.contains("read-only"));
+    assert!(!text.contains("Review"));
+    assert!(!text.contains("[R]"));
 }
 
 #[test]
@@ -342,6 +352,41 @@ fn sync_finished_run_state_preserves_final_statuses() {
 }
 
 #[test]
+fn run_error_state_does_not_render_as_running() {
+    let mut app = App::new(Mode::Deploy);
+    app.progress = (1, 3);
+    app.run_error = Some("run failed: command error".into());
+
+    let title = run_title(&app, 80);
+    let status = line_text(&run_status_line(&app, 80));
+
+    assert!(title.contains("Failed"));
+    assert!(!title.contains("Running"));
+    assert!(status.contains("command error"));
+}
+
+#[test]
+fn run_save_warning_keeps_finished_run_result_visible() {
+    let run = test_run(
+        RunStatus::Success,
+        vec![test_run_item("ghostty", ActionStatus::NoChange, None)],
+    );
+    let mut app = App::new(Mode::Deploy);
+    apply_run_thread_result(
+        &mut app,
+        RunThreadResult {
+            run: Some(run),
+            error: None,
+            save_warning: Some("history save failed: disk full".into()),
+        },
+    );
+
+    assert!(finished_run_for_view(&app).is_some());
+    assert!(run_title(&app, 80).contains("Success"));
+    assert!(line_text(&run_status_line(&app, 80)).contains("history save failed"));
+}
+
+#[test]
 fn page_selection_states_are_independent_and_clamped() {
     let mut app = App::new(Mode::Menu);
     app.menu_state.select(Some(3));
@@ -459,17 +504,45 @@ fn log_follow_manual_scroll_and_resume_work() {
         push_log(&mut app, &format!("line {idx}"), None);
     }
     assert!(app.log_follow);
-    assert!(log_scroll_offset(&app, 5) > 0);
+    let bottom = log_scroll_offset(&app, 5);
+    assert!(bottom > 0);
 
     scroll_run_log(&mut app, -1);
     assert!(!app.log_follow);
-    assert!(app.log_scroll > 0);
+    assert!(app.log_scroll < usize::from(bottom));
     let paused_offset = log_scroll_offset(&app, 5);
-    assert!(paused_offset < 15);
+    assert_eq!(paused_offset as usize, app.log_scroll);
 
     handle_run(&mut app, KeyCode::Char('f')).unwrap();
     assert!(app.log_follow);
-    assert_eq!(app.log_scroll, 0);
+    assert_eq!(log_scroll_offset(&app, 5), bottom);
+}
+
+#[test]
+fn log_home_end_and_page_keys_use_absolute_scroll() {
+    let mut app = App::new(Mode::Deploy);
+    for idx in 0..30 {
+        push_log(&mut app, &format!("line {idx}"), None);
+    }
+
+    handle_run(&mut app, KeyCode::Home).unwrap();
+    assert!(!app.log_follow);
+    assert_eq!(log_scroll_offset(&app, 5), 0);
+
+    handle_run(&mut app, KeyCode::PageDown).unwrap();
+    assert!(!app.log_follow);
+    assert!(log_scroll_offset(&app, 5) > 0);
+
+    let after_down = app.log_scroll;
+    handle_run(&mut app, KeyCode::PageUp).unwrap();
+    assert!(app.log_scroll < after_down);
+
+    handle_run(&mut app, KeyCode::End).unwrap();
+    assert!(app.log_follow);
+    assert_eq!(
+        log_scroll_offset(&app, 5),
+        log_bottom_scroll(&app, 5) as u16
+    );
 }
 
 #[test]
@@ -495,6 +568,7 @@ fn log_filter_current_errors_and_fold_work() {
 
     app.log_filter = LogFilter::Errors;
     let errors = lines_text(&visible_log_lines(&app, 10));
+    assert!(errors.contains("neovim"));
     assert!(errors.contains("failed to extract"));
     assert!(!errors.contains("downloading package"));
 
@@ -504,6 +578,77 @@ fn log_filter_current_errors_and_fold_work() {
     assert!(folded.contains("neovim"));
     assert!(folded.contains("collapsed"));
     assert!(!folded.contains("downloading package"));
+}
+
+#[test]
+fn action_output_stays_in_current_action_group() {
+    let mut app = App::new(Mode::Deploy);
+    let (tx, rx) = mpsc::channel();
+    app.run_events = Some(rx);
+    tx.send(crate::execute::ExecuteEvent::ActionStarted {
+        item_index: 0,
+        action_index: 0,
+        item: "neovim".into(),
+        action: "install plugins".into(),
+    })
+    .unwrap();
+    tx.send(crate::execute::ExecuteEvent::Output {
+        item: "neovim".into(),
+        stream: crate::model::OutputStream::Stdout,
+        line: "downloading".into(),
+    })
+    .unwrap();
+    tx.send(crate::execute::ExecuteEvent::ActionMessage {
+        item: "neovim".into(),
+        message: "extracting".into(),
+    })
+    .unwrap();
+
+    drain_run_events(&mut app);
+
+    assert_eq!(
+        app.current_log
+            .iter()
+            .filter(|line| line.kind == LogKind::Header)
+            .count(),
+        1
+    );
+    assert!(
+        app.current_log
+            .iter()
+            .filter(|line| line.kind != LogKind::Header)
+            .all(|line| line.group.as_deref() == Some("neovim / install plugins"))
+    );
+
+    app.log_filter = LogFilter::Current;
+    let current = lines_text(&visible_log_lines(&app, 10));
+    assert!(current.contains("neovim / install plugins"));
+    assert!(current.contains("downloading"));
+    assert!(current.contains("extracting"));
+}
+
+#[test]
+fn errors_filter_keeps_headers_even_when_group_is_collapsed() {
+    let mut app = App::new(Mode::Deploy);
+    push_log_group(&mut app, "fish / install");
+    push_log_indented(&mut app, "ordinary stdout", None, 1, LogKind::Stdout);
+    push_log_group(&mut app, "neovim / install");
+    push_log_indented(&mut app, "ordinary stdout", None, 1, LogKind::Stdout);
+    push_log_indented(
+        &mut app,
+        "failed to extract archive",
+        Some(CATPPUCCIN_MOCHA.danger),
+        1,
+        LogKind::Stderr,
+    );
+    app.collapsed_log_groups.insert("neovim / install".into());
+    app.log_filter = LogFilter::Errors;
+
+    let errors = lines_text(&visible_log_lines(&app, 10));
+    assert!(errors.contains("neovim / install"));
+    assert!(errors.contains("failed to extract archive"));
+    assert!(!errors.contains("fish / install"));
+    assert!(!errors.contains("ordinary stdout"));
 }
 
 #[test]
@@ -547,6 +692,28 @@ fn review_sudo_check_detects_pending_sudo_entries() {
     }];
 
     assert!(review_entries_need_sudo(&entries));
+}
+
+#[test]
+fn review_renders_sudo_failure_message() {
+    let backend = ratatui::backend::TestBackend::new(80, 12);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["sudo"]));
+    app.review_entries = Vec::new();
+    app.status_message = "sudo authentication failed".into();
+
+    terminal
+        .draw(|frame| render_confirm(frame, &mut app))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let rendered = buffer
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+
+    assert!(rendered.contains("sudo authentication failed"));
 }
 
 #[test]

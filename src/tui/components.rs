@@ -75,7 +75,23 @@ pub(super) fn hint(label: &'static str) -> Span<'static> {
     Span::styled(label, Style::default().fg(CATPPUCCIN_MOCHA.fg_dim))
 }
 
-pub(super) fn plan_help_line(width: usize) -> Line<'static> {
+pub(super) fn plan_help_line(width: usize, read_only: bool) -> Line<'static> {
+    let readonly_full = [
+        ("↑↓", " Navigate  "),
+        ("Space", " Toggle  "),
+        ("Enter", " Expand  "),
+        ("S", " Save  "),
+        ("Q", " Back  "),
+        ("read-only", ""),
+    ];
+    let readonly_compact = [
+        ("↑↓", " "),
+        ("Spc", " "),
+        ("Ent", " "),
+        ("S", " "),
+        ("Q", " "),
+        ("read-only", ""),
+    ];
     let full = [
         ("↑↓", " Navigate  "),
         ("Space", " Toggle  "),
@@ -104,7 +120,12 @@ pub(super) fn plan_help_line(width: usize) -> Line<'static> {
         ("Q", ""),
     ];
 
-    for parts in [&full[..], &short[..], &compact[..]] {
+    let candidates: Vec<&[(&'static str, &'static str)]> = if read_only {
+        vec![&readonly_full[..], &readonly_compact[..]]
+    } else {
+        vec![&full[..], &short[..], &compact[..]]
+    };
+    for parts in candidates {
         let line = help_line_from_parts(parts);
         if line_display_width(&line) <= width {
             return line;
