@@ -5,25 +5,28 @@ use super::*;
 pub(super) fn handle_history(app: &mut App, key: KeyCode) -> Result<()> {
     match key {
         KeyCode::Char('q') | KeyCode::Esc => {
+            clamp_menu_selection(app);
             app.screen = Screen::MainMenu;
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            let next = match app.list_state.selected() {
+            let next = match app.history_state.selected() {
                 Some(i) if i + 1 < app.runs.len() => i + 1,
                 Some(_) => app.runs.len().saturating_sub(1),
                 None => 0,
             };
-            app.list_state.select(Some(next));
+            app.history_state
+                .select((!app.runs.is_empty()).then_some(next));
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let prev = match app.list_state.selected() {
+            let prev = match app.history_state.selected() {
                 Some(0) | None => 0,
                 Some(i) => i - 1,
             };
-            app.list_state.select(Some(prev));
+            app.history_state
+                .select((!app.runs.is_empty()).then_some(prev));
         }
         KeyCode::Enter => {
-            if let Some(idx) = app.list_state.selected()
+            if let Some(idx) = app.history_state.selected()
                 && let Some(run) = app.runs.get(idx)
             {
                 app.run = Some(run.clone());
@@ -31,10 +34,13 @@ pub(super) fn handle_history(app: &mut App, key: KeyCode) -> Result<()> {
             }
         }
         KeyCode::Char('d') => {
-            if let Some(idx) = app.list_state.selected() {
-                let id = app.runs[idx].id.clone();
+            if let Some(idx) = app.history_state.selected()
+                && let Some(run) = app.runs.get(idx)
+            {
+                let id = run.id.clone();
                 if store::delete(&id).is_ok() {
                     app.runs.remove(idx);
+                    clamp_history_selection(app);
                 }
             }
         }
@@ -87,7 +93,7 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
             .iter()
             .enumerate()
             .map(|(idx, r)| {
-                let selected = app.list_state.selected() == Some(idx);
+                let selected = app.history_state.selected() == Some(idx);
                 let status = format!("{:?}", r.status).to_lowercase();
                 let mode = format!("{:?}", r.mode).to_lowercase();
                 history_run_line(r, &mode, &status, selected, usize::from(chunks[1].width))
@@ -96,11 +102,29 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
         let list = List::new(items)
             .highlight_style(Style::default())
             .highlight_symbol("");
-        f.render_stateful_widget(list, chunks[1], &mut app.list_state);
+        f.render_stateful_widget(list, chunks[1], &mut app.history_state);
     }
 
     let help = Paragraph::new(history_help_line(usize::from(chunks[2].width)));
     f.render_widget(help, chunks[2]);
+}
+
+pub(super) fn clamp_history_selection(app: &mut App) {
+    clamp_list_state(&mut app.history_state, app.runs.len());
+}
+
+pub(super) fn clamp_menu_selection(app: &mut App) {
+    clamp_list_state(&mut app.menu_state, 4);
+}
+
+pub(super) fn clamp_list_state(state: &mut ListState, len: usize) {
+    if len == 0 {
+        state.select(None);
+        *state.offset_mut() = 0;
+        return;
+    }
+    let selected = state.selected().unwrap_or(0).min(len - 1);
+    state.select(Some(selected));
 }
 
 fn history_run_line(

@@ -106,6 +106,7 @@ where
     let mut items: Vec<RunItem> = Vec::new();
     let mut any_failed = false;
     let mut aborted = false;
+    let mut not_run_start_index: Option<usize> = None;
     let config_dir = config
         .path
         .parent()
@@ -116,6 +117,7 @@ where
         if should_abort() {
             aborted = true;
             emit(ExecuteEvent::Aborted);
+            not_run_start_index = Some(index);
             break;
         }
 
@@ -161,6 +163,12 @@ where
             if should_abort() {
                 aborted = true;
                 emit(ExecuteEvent::Aborted);
+                append_not_run_actions(
+                    &mut run_actions,
+                    &plan_item.actions,
+                    action_index,
+                    "not run (aborted)",
+                );
                 break;
             }
             let action_name = action.describe();
@@ -390,6 +398,12 @@ where
             });
 
             if error.is_some() {
+                append_not_run_actions(
+                    &mut run_actions,
+                    &plan_item.actions,
+                    action_index.saturating_add(1),
+                    "not run after previous failure",
+                );
                 break;
             }
         }
@@ -417,8 +431,13 @@ where
         });
 
         if aborted {
+            not_run_start_index = Some(index.saturating_add(1));
             break;
         }
+    }
+
+    if let Some(start_index) = not_run_start_index {
+        append_remaining_not_run_items(plan, &mut items, start_index);
     }
 
     let status = if aborted {
@@ -438,6 +457,56 @@ where
         config_hash: plan.config_hash.clone(),
         items,
     })
+}
+
+fn append_remaining_not_run_items(plan: &Plan, items: &mut Vec<RunItem>, start_index: usize) {
+    for plan_item in plan
+        .items
+        .iter()
+        .skip(start_index)
+        .filter(|item| item.selected)
+    {
+        items.push(RunItem {
+            id: plan_item.id.clone(),
+            name: plan_item.name.clone(),
+            status: ActionStatus::NotRun,
+            started_at: None,
+            finished_at: None,
+            duration_ms: None,
+            attempts: 0,
+            error: Some("not run (aborted)".into()),
+            output: vec![],
+            actions: plan_item
+                .actions
+                .iter()
+                .map(|action| not_run_action(action, "not run (aborted)"))
+                .collect(),
+        });
+    }
+}
+
+fn append_not_run_actions(
+    run_actions: &mut Vec<RunAction>,
+    actions: &[Action],
+    start_index: usize,
+    reason: &str,
+) {
+    run_actions.extend(
+        actions
+            .iter()
+            .skip(start_index)
+            .map(|action| not_run_action(action, reason)),
+    );
+}
+
+fn not_run_action(action: &Action, reason: &str) -> RunAction {
+    RunAction {
+        kind: action_kind(action).into(),
+        name: action.describe(),
+        status: ActionStatus::NotRun,
+        error: Some(reason.into()),
+        output: vec![],
+    }
 }
 
 /// Run a shell command with real-time streaming output via events.
@@ -938,7 +1007,14 @@ mod tests {
 
         assert!(saw_abort);
         assert_eq!(run.status, RunStatus::Aborted);
-        assert!(run.items.is_empty());
+        assert_eq!(run.items.len(), 1);
+        assert_eq!(run.items[0].status, ActionStatus::NotRun);
+        assert!(
+            run.items[0]
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("aborted"))
+        );
     }
 
     #[test]

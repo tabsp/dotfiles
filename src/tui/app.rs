@@ -19,7 +19,9 @@ pub struct App {
     pub runs: Vec<Run>,
     pub(super) review_entries: Vec<review::ReviewEntry>,
     pub(super) review_scroll: usize,
-    pub list_state: ListState,
+    pub menu_state: ListState,
+    pub plan_state: ListState,
+    pub history_state: ListState,
     pub grid_col: usize,
     pub plan_columns: usize,
     pub collapsed_layers: BTreeSet<String>,
@@ -34,7 +36,14 @@ pub struct App {
     pub abort_flag: Option<Arc<AtomicBool>>,
     pub progress: (usize, usize), // (done, total)
     pub current_log: Vec<LogLine>,
+    pub log_scroll: usize,
+    pub log_follow: bool,
+    pub log_dropped_count: usize,
+    pub log_group: Option<String>,
+    pub log_filter: LogFilter,
+    pub collapsed_log_groups: BTreeSet<String>,
     pub current_item: Option<usize>,
+    pub last_item_index: Option<usize>,
     pub current_action: Option<(usize, usize)>,
     pub run_item_statuses: Vec<Option<ActionStatus>>,
     pub run_action_statuses: Vec<Vec<Option<ActionStatus>>>,
@@ -49,12 +58,53 @@ pub struct App {
 pub struct LogLine {
     pub text: String,
     pub fg: Option<Color>,
+    pub indent: usize,
+    pub group: Option<String>,
+    pub kind: LogKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogKind {
+    Header,
+    Stdout,
+    Stderr,
+    Action,
+    System,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFilter {
+    All,
+    Current,
+    Errors,
+}
+
+impl LogFilter {
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Current,
+            Self::Current => Self::Errors,
+            Self::Errors => Self::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Current => "current",
+            Self::Errors => "errors",
+        }
+    }
 }
 
 impl App {
     pub fn new(mode: Mode) -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
+        let mut plan_state = ListState::default();
+        plan_state.select(Some(0));
+        let mut history_state = ListState::default();
+        history_state.select(None);
         Self {
             screen: Screen::MainMenu,
             mode,
@@ -64,7 +114,9 @@ impl App {
             runs: Vec::new(),
             review_entries: Vec::new(),
             review_scroll: 0,
-            list_state,
+            menu_state: list_state,
+            plan_state,
+            history_state,
             grid_col: 0,
             plan_columns: plan::GRID_COLUMNS,
             collapsed_layers: BTreeSet::new(),
@@ -78,7 +130,14 @@ impl App {
             abort_flag: None,
             progress: (0, 0),
             current_log: Vec::new(),
+            log_scroll: 0,
+            log_follow: true,
+            log_dropped_count: 0,
+            log_group: None,
+            log_filter: LogFilter::All,
+            collapsed_log_groups: BTreeSet::new(),
             current_item: None,
+            last_item_index: None,
             current_action: None,
             run_item_statuses: Vec::new(),
             run_action_statuses: Vec::new(),
@@ -120,7 +179,7 @@ impl App {
         self.review_entries.clear();
         self.review_scroll = 0;
         plan::select_first_plan_row(
-            &mut self.list_state,
+            &mut self.plan_state,
             self.plan.as_ref(),
             &self.collapsed_layers,
             self.plan_columns,
@@ -138,6 +197,7 @@ pub(super) fn initialize_screen(app: &mut App) {
     match app.mode.clone() {
         Mode::Menu => {
             app.runs = store::list().unwrap_or_default();
+            history::clamp_menu_selection(app);
         }
         Mode::Deploy | Mode::Plan => {
             if let Err(e) = app.build_plan() {
@@ -147,6 +207,7 @@ pub(super) fn initialize_screen(app: &mut App) {
         }
         Mode::History => {
             app.runs = store::list().unwrap_or_default();
+            history::clamp_history_selection(app);
             app.screen = Screen::HistoryView;
         }
         Mode::Run(id) => match store::load(&id) {

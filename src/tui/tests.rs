@@ -41,6 +41,15 @@ fn test_plan_with_items(names: &[&str]) -> Plan {
     }
 }
 
+fn test_shell_action(name: &str) -> Action {
+    Action::Shell {
+        command: format!("echo {name}"),
+        description: Some(name.into()),
+        optional: false,
+        if_condition: None,
+    }
+}
+
 fn test_run_item(name: &str, status: ActionStatus, error: Option<&str>) -> RunItem {
     RunItem {
         id: name.to_string(),
@@ -195,14 +204,16 @@ fn run_progress_advances_on_action_finished() {
 
 #[test]
 fn run_help_line_switches_to_stopping() {
-    let running = line_text(&run_help_line(40, false, false));
-    let stopping = line_text(&run_help_line(40, true, false));
-    let finished = line_text(&run_help_line(40, false, true));
+    let running = line_text(&run_help_line(100, false, false, true));
+    let stopping = line_text(&run_help_line(40, true, false, true));
+    let finished = line_text(&run_help_line(100, false, true, true));
+    let paused = line_text(&run_help_line(80, false, false, false));
 
     assert!(running.contains("Abort"));
     assert!(stopping.contains("Stopping"));
     assert!(finished.contains("Back"));
-    assert!(line_display_width(&run_help_line(8, true, false)) <= 8);
+    assert!(paused.contains("Follow"));
+    assert!(line_display_width(&run_help_line(8, true, false, true)) <= 8);
 }
 
 #[test]
@@ -328,6 +339,182 @@ fn sync_finished_run_state_preserves_final_statuses() {
             vec![Some(ActionStatus::WillLink)]
         ]
     );
+}
+
+#[test]
+fn page_selection_states_are_independent_and_clamped() {
+    let mut app = App::new(Mode::Menu);
+    app.menu_state.select(Some(3));
+    app.plan_state.select(Some(9));
+    app.history_state.select(Some(4));
+    app.runs = vec![test_run(RunStatus::Success, vec![])];
+
+    history::clamp_menu_selection(&mut app);
+    history::clamp_history_selection(&mut app);
+
+    assert_eq!(app.menu_state.selected(), Some(3));
+    assert_eq!(app.history_state.selected(), Some(0));
+    assert_eq!(app.plan_state.selected(), Some(9));
+}
+
+#[test]
+fn history_selection_handles_empty_first_and_last_delete_positions() {
+    let mut app = App::new(Mode::History);
+    history::clamp_history_selection(&mut app);
+    assert_eq!(app.history_state.selected(), None);
+
+    app.runs = vec![
+        test_run(
+            RunStatus::Success,
+            vec![test_run_item("one", ActionStatus::NoChange, None)],
+        ),
+        test_run(
+            RunStatus::Success,
+            vec![test_run_item("two", ActionStatus::NoChange, None)],
+        ),
+    ];
+    app.history_state.select(Some(0));
+    app.runs.remove(0);
+    history::clamp_history_selection(&mut app);
+    assert_eq!(app.history_state.selected(), Some(0));
+
+    app.history_state.select(Some(9));
+    app.runs.clear();
+    history::clamp_history_selection(&mut app);
+    assert_eq!(app.history_state.selected(), None);
+}
+
+#[test]
+fn current_run_item_name_uses_explicit_item_state_not_progress() {
+    let mut app = App::new(Mode::Deploy);
+    let mut first = test_plan_item("first");
+    first.actions = vec![test_shell_action("one"), test_shell_action("two")];
+    let second = test_plan_item("second");
+    app.plan = Some(Plan {
+        items: vec![first, second],
+        ..test_plan_with_items(&[])
+    });
+    app.progress = (2, 3);
+
+    assert_eq!(current_run_item_name(&app), None);
+    app.last_item_index = Some(0);
+    assert_eq!(current_run_item_name(&app), Some("first"));
+}
+
+#[test]
+fn finished_run_progress_keeps_not_run_actions_in_total() {
+    let mut item = test_run_item("multi", ActionStatus::WillFail, Some("exit code 1"));
+    item.actions = vec![
+        RunAction {
+            kind: "shell".into(),
+            name: "first".into(),
+            status: ActionStatus::WillFail,
+            error: Some("exit code 1".into()),
+            output: vec![],
+        },
+        RunAction {
+            kind: "shell".into(),
+            name: "second".into(),
+            status: ActionStatus::NotRun,
+            error: Some("not run after previous failure".into()),
+            output: vec![],
+        },
+    ];
+    let run = test_run(RunStatus::Failed, vec![item]);
+    let mut app = App::new(Mode::Deploy);
+    app.progress = (1, 2);
+    app.run = Some(run.clone());
+
+    sync_finished_run_state(&mut app, &run);
+
+    assert_eq!(run_action_total(&run), 2);
+    assert_eq!(run_executed_action_total(&run), 1);
+    assert_eq!(app.progress, (1, 2));
+    assert!(final_run_summary(&run).contains("1 not run"));
+    assert!(lines_text(&run_body_lines(&app, 80, 8)).contains("Not Run (1)"));
+}
+
+#[test]
+fn live_spinner_uses_current_spinner_frame() {
+    let mut app = App::new(Mode::Deploy);
+    let mut item = test_plan_item("ghostty");
+    item.actions = vec![test_shell_action("check")];
+    app.plan = Some(Plan {
+        items: vec![item],
+        ..test_plan_with_items(&[])
+    });
+    app.current_action = Some((0, 0));
+    app.spinner_frame = 0;
+    let first = lines_text(&run_body_lines(&app, 80, 4));
+    app.tick();
+    let second = lines_text(&run_body_lines(&app, 80, 4));
+
+    assert_ne!(first, second);
+}
+
+#[test]
+fn log_follow_manual_scroll_and_resume_work() {
+    let mut app = App::new(Mode::Deploy);
+    for idx in 0..20 {
+        push_log(&mut app, &format!("line {idx}"), None);
+    }
+    assert!(app.log_follow);
+    assert!(log_scroll_offset(&app, 5) > 0);
+
+    scroll_run_log(&mut app, -1);
+    assert!(!app.log_follow);
+    assert!(app.log_scroll > 0);
+    let paused_offset = log_scroll_offset(&app, 5);
+    assert!(paused_offset < 15);
+
+    handle_run(&mut app, KeyCode::Char('f')).unwrap();
+    assert!(app.log_follow);
+    assert_eq!(app.log_scroll, 0);
+}
+
+#[test]
+fn log_filter_current_errors_and_fold_work() {
+    let mut app = App::new(Mode::Deploy);
+    push_log_group(&mut app, "fish");
+    push_log_indented(&mut app, "installing plugins", None, 1, LogKind::Stdout);
+    push_log_group(&mut app, "neovim");
+    push_log_indented(&mut app, "downloading package", None, 1, LogKind::Stdout);
+    push_log_indented(
+        &mut app,
+        "failed to extract archive",
+        Some(CATPPUCCIN_MOCHA.danger),
+        1,
+        LogKind::Stderr,
+    );
+
+    app.log_filter = LogFilter::Current;
+    let current = lines_text(&visible_log_lines(&app, 10));
+    assert!(current.contains("neovim"));
+    assert!(current.contains("downloading package"));
+    assert!(!current.contains("fish"));
+
+    app.log_filter = LogFilter::Errors;
+    let errors = lines_text(&visible_log_lines(&app, 10));
+    assert!(errors.contains("failed to extract"));
+    assert!(!errors.contains("downloading package"));
+
+    app.log_filter = LogFilter::All;
+    toggle_current_log_group(&mut app);
+    let folded = lines_text(&visible_log_lines(&app, 10));
+    assert!(folded.contains("neovim"));
+    assert!(folded.contains("collapsed"));
+    assert!(!folded.contains("downloading package"));
+}
+
+#[test]
+fn compact_layout_and_empty_log_have_visible_hints() {
+    assert_eq!(layout_density(60, 18), LayoutDensity::Compact);
+    assert_eq!(layout_density(100, 30), LayoutDensity::Normal);
+
+    let app = App::new(Mode::Deploy);
+    let text = lines_text(&visible_log_lines(&app, 5));
+    assert!(text.contains("log is empty"));
+    assert_eq!(run_body_lines(&app, 20, 0).len(), 0);
 }
 
 #[test]

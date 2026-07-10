@@ -51,7 +51,7 @@ pub(super) fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
         }
         KeyCode::Enter | KeyCode::Char(' ') => {
             if let Some(plan) = &mut app.plan
-                && let Some(row_idx) = app.list_state.selected()
+                && let Some(row_idx) = app.plan_state.selected()
             {
                 match rows.get(row_idx) {
                     Some(PlanRow::Header { layer, .. }) => {
@@ -210,7 +210,7 @@ pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
     let cell_width = grid_cell_width(row_width, app.plan_columns);
     for (row_index, row) in rows.iter().enumerate() {
         let selected_row = app
-            .list_state
+            .plan_state
             .selected()
             .is_some_and(|selected| selected == row_index);
         match row {
@@ -262,7 +262,7 @@ pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
     let list = List::new(items)
         .highlight_style(Style::default())
         .highlight_symbol("");
-    f.render_stateful_widget(list, chunks[1], &mut app.list_state);
+    f.render_stateful_widget(list, chunks[1], &mut app.plan_state);
 
     let status_line = if app.status_message.is_empty() {
         Line::from("")
@@ -421,31 +421,31 @@ pub(super) fn select_first_plan_row(
 
 pub(super) fn select_next_plan_row(app: &mut App, rows: &[PlanRow]) {
     if rows.is_empty() {
-        select_plan_row(&mut app.list_state, 0, true);
+        select_plan_row(&mut app.plan_state, 0, true);
         return;
     }
-    let current = app.list_state.selected().unwrap_or(0);
-    let start = app.list_state.selected().unwrap_or(0).saturating_add(1);
+    let current = app.plan_state.selected().unwrap_or(0);
+    let start = app.plan_state.selected().unwrap_or(0).saturating_add(1);
     let next = (start..rows.len())
         .find(|idx| is_selectable_plan_row(&rows[*idx]))
         .or_else(|| rows.iter().position(is_selectable_plan_row))
         .unwrap_or(0);
     clamp_grid_col(app, rows.get(next));
-    select_plan_row(&mut app.list_state, next, next < current);
+    select_plan_row(&mut app.plan_state, next, next < current);
 }
 
 pub(super) fn select_prev_plan_row(app: &mut App, rows: &[PlanRow]) {
     if rows.is_empty() {
-        select_plan_row(&mut app.list_state, 0, true);
+        select_plan_row(&mut app.plan_state, 0, true);
         return;
     }
     let current = app
-        .list_state
+        .plan_state
         .selected()
         .unwrap_or(rows.len())
         .min(rows.len());
     let start = app
-        .list_state
+        .plan_state
         .selected()
         .unwrap_or(rows.len())
         .min(rows.len());
@@ -455,7 +455,7 @@ pub(super) fn select_prev_plan_row(app: &mut App, rows: &[PlanRow]) {
         .or_else(|| rows.iter().rposition(is_selectable_plan_row))
         .unwrap_or(0);
     clamp_grid_col(app, rows.get(prev));
-    select_plan_row(&mut app.list_state, prev, prev > current);
+    select_plan_row(&mut app.plan_state, prev, prev > current);
 }
 
 pub(super) fn select_plan_row(list_state: &mut ListState, idx: usize, reset_offset: bool) {
@@ -473,7 +473,7 @@ pub(super) fn is_selectable_plan_row(row: &PlanRow) -> bool {
 }
 
 pub(super) fn move_grid_col(app: &mut App, rows: &[PlanRow], delta: isize) {
-    let Some(row_idx) = app.list_state.selected() else {
+    let Some(row_idx) = app.plan_state.selected() else {
         return;
     };
     let Some(PlanRow::InlineItems(item_indices)) = rows.get(row_idx) else {
@@ -501,7 +501,7 @@ pub(super) fn clamped_grid_col_for_selection(app: &App) -> usize {
         return 0;
     };
     let rows = build_plan_rows(plan, &app.collapsed_layers, app.plan_columns);
-    let Some(row_idx) = app.list_state.selected() else {
+    let Some(row_idx) = app.plan_state.selected() else {
         return 0;
     };
     match rows.get(row_idx) {
@@ -543,11 +543,11 @@ pub(super) fn keep_selection_in_range(app: &mut App) {
         .as_ref()
         .map(|plan| build_plan_rows(plan, &app.collapsed_layers, app.plan_columns))
         .unwrap_or_default();
-    let selected = app.list_state.selected().unwrap_or(0);
+    let selected = app.plan_state.selected().unwrap_or(0);
     if selected >= rows.len() || !rows.get(selected).is_some_and(is_selectable_plan_row) {
         let first = rows.iter().position(is_selectable_plan_row).unwrap_or(0);
         clamp_grid_col(app, rows.get(first));
-        select_plan_row(&mut app.list_state, first, true);
+        select_plan_row(&mut app.plan_state, first, true);
     } else {
         clamp_grid_col(app, rows.get(selected));
     }
@@ -564,7 +564,7 @@ pub(super) fn update_plan_focus_info(app: &mut App) {
 
 pub(super) fn focused_plan_item_info(app: &App) -> Option<String> {
     let plan = app.plan.as_ref()?;
-    let row_idx = app.list_state.selected()?;
+    let row_idx = app.plan_state.selected()?;
     let rows = build_plan_rows(plan, &app.collapsed_layers, app.plan_columns);
     match rows.get(row_idx)? {
         PlanRow::Item(item_idx) => plan.items.get(*item_idx).map(plan_item_info),

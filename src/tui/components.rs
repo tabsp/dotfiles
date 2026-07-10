@@ -12,6 +12,20 @@ pub(super) fn focus_bg() -> Color {
     CATPPUCCIN_MOCHA.surface_active
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LayoutDensity {
+    Compact,
+    Normal,
+}
+
+pub(super) fn layout_density(width: u16, height: u16) -> LayoutDensity {
+    if width < 72 || height < 22 {
+        LayoutDensity::Compact
+    } else {
+        LayoutDensity::Normal
+    }
+}
+
 pub(super) fn divider_style() -> Style {
     Style::default().fg(CATPPUCCIN_MOCHA.divider)
 }
@@ -120,7 +134,12 @@ pub(super) fn review_help_line(width: usize) -> Line<'static> {
     help_line_from_parts(&[("Q", "")])
 }
 
-pub(super) fn run_help_line(width: usize, aborting: bool, finished: bool) -> Line<'static> {
+pub(super) fn run_help_line(
+    width: usize,
+    aborting: bool,
+    finished: bool,
+    log_follow: bool,
+) -> Line<'static> {
     if aborting {
         let full = [("Q/Esc", " Stopping")];
         let compact = [("Q", "")];
@@ -133,13 +152,36 @@ pub(super) fn run_help_line(width: usize, aborting: bool, finished: bool) -> Lin
         return help_line_from_parts(&[("Q", "")]);
     }
 
-    let full = if finished {
-        [("Q/Esc", " Back")]
+    const PAUSED_FULL: &[(&str, &str)] = &[
+        ("Pg/Home/End", " Log  "),
+        ("Tab", " Filter  "),
+        ("Enter", " Fold  "),
+        ("F", " Follow  "),
+        ("Q/Esc", " Back"),
+    ];
+    const FINISHED_FULL: &[(&str, &str)] = &[
+        ("Pg/Home/End", " Log  "),
+        ("Tab", " Filter  "),
+        ("Enter", " Fold  "),
+        ("Q/Esc", " Back"),
+    ];
+    const RUNNING_FULL: &[(&str, &str)] = &[
+        ("Pg/Home/End", " Log  "),
+        ("Tab", " Filter  "),
+        ("Enter", " Fold  "),
+        ("Q/Esc", " Abort"),
+    ];
+    const PAUSED_COMPACT: &[(&str, &str)] = &[("Pg", " "), ("F", " "), ("Q", "")];
+    const COMPACT: &[(&str, &str)] = &[("Pg", " "), ("Q", "")];
+    let full = if !log_follow {
+        PAUSED_FULL
+    } else if finished {
+        FINISHED_FULL
     } else {
-        [("Q/Esc", " Abort")]
+        RUNNING_FULL
     };
-    let compact = [("Q", "")];
-    for parts in [&full[..], &compact[..]] {
+    let compact = if !log_follow { PAUSED_COMPACT } else { COMPACT };
+    for parts in [full, compact] {
         let line = help_line_from_parts(parts);
         if line_display_width(&line) <= width {
             return line;

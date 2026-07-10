@@ -102,6 +102,7 @@ impl Action {
 pub enum ActionStatus {
     WillRun,
     WillSkip,
+    NotRun,
     WillFail,
     NoChange,
     WillInstall,
@@ -125,6 +126,7 @@ impl Ord for ActionStatus {
                 ActionStatus::NoChange => 0,
                 ActionStatus::WillRun => 1,
                 ActionStatus::WillSkip => 1,
+                ActionStatus::NotRun => 1,
                 ActionStatus::WillLink => 2,
                 ActionStatus::WillCreate => 2,
                 ActionStatus::WillInstall => 2,

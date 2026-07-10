@@ -45,12 +45,17 @@ pub(super) fn scroll_review(app: &mut App, delta: isize) {
 pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
     let icon_set = icons::current();
     let area = f.area();
+    let density = layout_density(area.width, area.height);
+    let summary_height = match density {
+        LayoutDensity::Compact => 1,
+        LayoutDensity::Normal => 3,
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
             Constraint::Length(1),
-            Constraint::Length(3),
+            Constraint::Length(summary_height),
             Constraint::Min(3),
             Constraint::Length(1),
         ])
@@ -109,32 +114,51 @@ pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
     ]));
     f.render_widget(title, chunks[0]);
 
-    let summary = vec![
-        Line::from(vec![
-            Span::styled("Selected: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+    let summary = if density == LayoutDensity::Compact {
+        vec![Line::from(vec![
+            Span::styled("Selected ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
             Span::styled(
                 selected.to_string(),
                 Style::default().fg(CATPPUCCIN_MOCHA.success),
             ),
-            Span::raw(" steps, "),
+            Span::raw(format!(" · {actions} actions · ")),
             Span::styled(
-                actions.to_string(),
-                Style::default().fg(CATPPUCCIN_MOCHA.accent),
+                format!("{risk_count} attention"),
+                Style::default().fg(if risk_count > 0 {
+                    CATPPUCCIN_MOCHA.warning
+                } else {
+                    CATPPUCCIN_MOCHA.text_muted
+                }),
             ),
-            Span::raw(" actions"),
-        ]),
-        Line::from(vec![
-            Span::styled("Skipped: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
-            Span::raw(skipped.to_string()),
-            Span::raw(" steps"),
-        ]),
-        Line::from(vec![
-            Span::styled("Review: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
-            Span::raw(format!(
-                "{review_count} actions, {change_count} active, {risk_count} attention"
-            )),
-        ]),
-    ];
+        ])]
+    } else {
+        vec![
+            Line::from(vec![
+                Span::styled("Selected: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+                Span::styled(
+                    selected.to_string(),
+                    Style::default().fg(CATPPUCCIN_MOCHA.success),
+                ),
+                Span::raw(" steps, "),
+                Span::styled(
+                    actions.to_string(),
+                    Style::default().fg(CATPPUCCIN_MOCHA.accent),
+                ),
+                Span::raw(" actions"),
+            ]),
+            Line::from(vec![
+                Span::styled("Skipped: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+                Span::raw(skipped.to_string()),
+                Span::raw(" steps"),
+            ]),
+            Line::from(vec![
+                Span::styled("Review: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+                Span::raw(format!(
+                    "{review_count} actions, {change_count} active, {risk_count} attention"
+                )),
+            ]),
+        ]
+    };
     f.render_widget(Paragraph::new(summary), chunks[1]);
 
     let body_width = usize::from(chunks[2].width);

@@ -21,21 +21,22 @@ pub(super) fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
         }
         KeyCode::Char('h') => {
             app.runs = store::list().unwrap_or_default();
+            history::clamp_history_selection(app);
             app.screen = Screen::HistoryView;
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            let i = app.list_state.selected().unwrap_or(0);
+            let i = app.menu_state.selected().unwrap_or(0);
             if i + 1 < 4 {
-                app.list_state.select(Some(i + 1));
+                app.menu_state.select(Some(i + 1));
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            let i = app.list_state.selected().unwrap_or(0);
+            let i = app.menu_state.selected().unwrap_or(0);
             if i > 0 {
-                app.list_state.select(Some(i - 1));
+                app.menu_state.select(Some(i - 1));
             }
         }
-        KeyCode::Enter => match app.list_state.selected() {
+        KeyCode::Enter => match app.menu_state.selected() {
             Some(0) => {
                 app.mode = Mode::Deploy;
                 if let Err(e) = app.build_plan() {
@@ -52,6 +53,7 @@ pub(super) fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
             }
             Some(2) => {
                 app.runs = store::list().unwrap_or_default();
+                history::clamp_history_selection(app);
                 app.screen = Screen::HistoryView;
             }
             Some(3) => app.should_quit = true,
@@ -70,21 +72,20 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
 
     let icon_set = icons::current();
     let area = f.area();
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(CATPPUCCIN_MOCHA.fg_dim));
-    f.render_widget(block, area);
-
+    let density = layout_density(area.width, area.height);
     let has_run = !app.runs.is_empty();
     let summary_size: u16 = if has_run { 3 } else { 2 };
+    let menu_height = match density {
+        LayoutDensity::Compact => 9,
+        LayoutDensity::Normal => 15,
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
             Constraint::Length(1),
-            Constraint::Length(15),
+            Constraint::Length(menu_height),
             Constraint::Length(summary_size),
             Constraint::Length(1),
         ])
@@ -128,8 +129,23 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
     let mut styled_items: Vec<ListItem> = Vec::new();
     let area_width = usize::from(chunks[1].width);
     for (i, &(icon, title, desc)) in menu_items.iter().enumerate() {
-        let is_sel = app.list_state.selected() == Some(i);
+        let is_sel = app.menu_state.selected() == Some(i);
         let title_text = format!("{} {}", icon, title);
+        if density == LayoutDensity::Compact {
+            let bg = is_sel.then(focus_bg);
+            let marker = if is_sel { "▎ " } else { "  " };
+            let style = span_bg_style(bg).fg(if is_sel {
+                CATPPUCCIN_MOCHA.primary
+            } else {
+                CATPPUCCIN_MOCHA.fg
+            });
+            let line = format!("{marker}{title_text}");
+            styled_items.push(ListItem::new(Line::from(Span::styled(
+                fit_to_width(&line, area_width),
+                style,
+            ))));
+            continue;
+        }
         if is_sel {
             let bg = focus_bg();
             let title_content_w = 2 + display_width(&title_text);
@@ -191,7 +207,7 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
     let list = List::new(styled_items)
         .highlight_style(Style::default())
         .highlight_symbol("");
-    f.render_stateful_widget(list, chunks[1], &mut app.list_state);
+    f.render_stateful_widget(list, chunks[1], &mut app.menu_state);
 
     // Summary
     let cfg = app.config.as_ref();
