@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::history::replay_lines;
+use crate::tui::history::{replay_help_line, replay_lines};
 use std::path::{Path, PathBuf};
 
 fn test_plan_item(name: &str) -> PlanItem {
@@ -118,6 +118,7 @@ fn plan_help_line_keeps_full_labels_when_space_allows() {
         .collect::<String>();
 
     assert!(text.contains("Navigate"));
+    assert!(text.contains("[Space]"));
     assert!(text.contains("Review"));
     assert!(text.contains("Back"));
     assert!(!text.contains("Info"));
@@ -135,10 +136,10 @@ fn plan_only_help_is_read_only_without_run_entry() {
 
 #[test]
 fn review_help_line_fits_narrow_terminal() {
-    let line = review_help_line(44);
+    let line = review_help_line(30);
     let text = line_text(&line);
 
-    assert!(line_display_width(&line) <= 44);
+    assert!(line_display_width(&line) <= 30);
     assert!(text.contains("[r]"));
     assert!(text.contains("[q]"));
     assert!(!text.contains("Enter/R"));
@@ -151,9 +152,19 @@ fn review_help_line_keeps_full_labels_when_space_allows() {
     let text = line_text(&line);
 
     assert!(text.contains("Scroll"));
+    assert!(text.contains("[r]"));
     assert!(!text.contains("Page"));
     assert!(text.contains("Run"));
     assert!(text.contains("Back"));
+}
+
+#[test]
+fn replay_help_lists_only_the_primary_toggle_key() {
+    let text = line_text(&replay_help_line(100));
+
+    assert!(text.contains("[Space]"));
+    assert!(!text.contains("Enter"));
+    assert!(text.contains("Toggle"));
 }
 
 #[test]
@@ -492,6 +503,30 @@ fn plan_vertical_navigation_stops_at_boundaries() {
 }
 
 #[test]
+fn plan_bulk_selection_only_marks_actual_changes_dirty() {
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["one", "two"]));
+
+    handle_plan(&mut app, KeyCode::Char('a')).unwrap();
+    assert!(!app.dirty);
+
+    handle_plan(&mut app, KeyCode::Char('n')).unwrap();
+    assert!(app.dirty);
+    assert!(
+        app.plan
+            .as_ref()
+            .unwrap()
+            .items
+            .iter()
+            .all(|item| !item.selected)
+    );
+
+    app.dirty = false;
+    handle_plan(&mut app, KeyCode::Char('n')).unwrap();
+    assert!(!app.dirty);
+}
+
+#[test]
 fn history_selection_handles_empty_first_and_last_delete_positions() {
     let mut app = App::new(Mode::History);
     history::clamp_history_selection(&mut app);
@@ -516,6 +551,49 @@ fn history_selection_handles_empty_first_and_last_delete_positions() {
     app.runs.clear();
     history::clamp_history_selection(&mut app);
     assert_eq!(app.history_state.selected(), None);
+}
+
+#[test]
+fn successful_history_reload_clears_stale_page_notice() {
+    let mut app = App::new(Mode::History);
+    app.status_message = "deleted run old-id".into();
+    app.status_kind = NoticeKind::Success;
+
+    app::apply_history_warnings(&mut app, &[]);
+
+    assert!(app.status_message.is_empty());
+    assert_eq!(app.status_kind, NoticeKind::Info);
+
+    app::apply_history_warnings(
+        &mut app,
+        &["failed to parse first run".into(), "second warning".into()],
+    );
+    assert_eq!(app.status_message, "failed to parse first run (+1 more)");
+    assert_eq!(app.status_kind, NoticeKind::Warning);
+}
+
+#[test]
+fn home_and_end_use_consistent_global_navigation() {
+    let mut app = App::new(Mode::History);
+    app.screen = Screen::HistoryView;
+    app.runs = vec![
+        test_run(RunStatus::Success, vec![]),
+        test_run(RunStatus::Failed, vec![]),
+        test_run(RunStatus::Aborted, vec![]),
+    ];
+    app.history_state.select(Some(1));
+
+    handle_key(&mut app, KeyCode::Home).unwrap();
+    assert_eq!(app.history_state.selected(), Some(0));
+    handle_key(&mut app, KeyCode::End).unwrap();
+    assert_eq!(app.history_state.selected(), Some(2));
+
+    app.screen = Screen::MainMenu;
+    app.menu_state.select(Some(2));
+    handle_key(&mut app, KeyCode::Home).unwrap();
+    assert_eq!(app.menu_state.selected(), Some(0));
+    handle_key(&mut app, KeyCode::End).unwrap();
+    assert_eq!(app.menu_state.selected(), Some(3));
 }
 
 #[test]
@@ -582,6 +660,34 @@ fn finished_run_progress_counts_condition_skips_as_resolved_actions() {
     assert_eq!(run_action_total(&run), 1);
     assert_eq!(run_executed_action_total(&run), 1);
     assert_eq!(app.progress, (1, 1));
+    assert_eq!(
+        final_run_summary(&run),
+        "0 changed, 0 no change, 0 failed, 1 skipped"
+    );
+}
+
+#[test]
+fn final_summary_counts_actions_instead_of_only_the_item_terminal_status() {
+    let mut item = test_run_item("multi", ActionStatus::NoChange, None);
+    item.actions = vec![
+        RunAction {
+            kind: "install".into(),
+            name: "install tool".into(),
+            status: ActionStatus::WillInstall,
+            error: None,
+            output: vec![],
+        },
+        RunAction {
+            kind: "shell".into(),
+            name: "optional setup".into(),
+            status: ActionStatus::NoChange,
+            error: None,
+            output: vec![],
+        },
+    ];
+    let run = test_run(RunStatus::Success, vec![item]);
+
+    assert_eq!(final_run_summary(&run), "1 changed, 1 no change, 0 failed");
 }
 
 #[test]
@@ -600,6 +706,27 @@ fn live_spinner_uses_current_spinner_frame() {
     let second = lines_text(&run_body_lines(&app, 80, 4));
 
     assert_ne!(first, second);
+}
+
+#[test]
+fn run_status_colors_are_shared_and_semantically_distinct() {
+    assert_eq!(
+        run_status_color(RunStatus::Running),
+        CATPPUCCIN_MOCHA.running
+    );
+    assert_eq!(
+        run_status_color(RunStatus::Success),
+        CATPPUCCIN_MOCHA.success
+    );
+    assert_eq!(run_status_color(RunStatus::Failed), CATPPUCCIN_MOCHA.danger);
+    assert_eq!(
+        run_status_color(RunStatus::Aborted),
+        CATPPUCCIN_MOCHA.warning
+    );
+    assert_ne!(
+        run_status_color(RunStatus::Running),
+        run_status_color(RunStatus::Aborted)
+    );
 }
 
 #[test]
@@ -753,6 +880,49 @@ fn replay_selected_row_has_focus_background() {
 }
 
 #[test]
+fn replay_legacy_item_shows_saved_error_when_expanded() {
+    let mut item = test_run_item("legacy", ActionStatus::WillFail, Some("exit code 7"));
+    item.actions.clear();
+    let mut app = App::new(Mode::History);
+    app.run = Some(test_run(RunStatus::Failed, vec![item]));
+    app.replay_state.select(Some(0));
+    app.replay_expanded.insert("0:0".into());
+
+    let text = lines_text(&replay_lines(&app, 80));
+
+    assert!(text.contains("error: exit code 7"));
+}
+
+#[test]
+fn replay_does_not_attach_item_error_to_a_successful_action() {
+    let mut item = test_run_item("multi", ActionStatus::WillFail, Some("second failed"));
+    item.actions = vec![
+        RunAction {
+            kind: "shell".into(),
+            name: "first".into(),
+            status: ActionStatus::Executed,
+            error: None,
+            output: vec![],
+        },
+        RunAction {
+            kind: "shell".into(),
+            name: "second".into(),
+            status: ActionStatus::WillFail,
+            error: Some("second failed".into()),
+            output: vec![],
+        },
+    ];
+    let mut app = App::new(Mode::History);
+    app.run = Some(test_run(RunStatus::Failed, vec![item]));
+    app.replay_state.select(Some(0));
+    app.replay_expanded.insert("0:0".into());
+
+    let text = lines_text(&replay_lines(&app, 80));
+
+    assert!(!text.contains("error: second failed"));
+}
+
+#[test]
 fn log_filter_current_errors_and_fold_work() {
     let mut app = App::new(Mode::Deploy);
     push_log_group(&mut app, "fish");
@@ -803,6 +973,12 @@ fn log_truncation_keeps_group_header_for_child_lines() {
         app.current_log.first().map(|line| line.text.as_str()),
         Some("big-action")
     );
+    assert_eq!(app.current_log.len(), MAX_TUI_OUTPUT_LINES);
+    assert_eq!(
+        app.current_log.last().map(|line| line.text.as_str()),
+        Some("line 1009")
+    );
+    assert_eq!(app.log_dropped_count, 11);
 }
 
 #[test]
@@ -850,6 +1026,27 @@ fn action_output_stays_in_current_action_group() {
     assert!(current.contains("neovim / install plugins"));
     assert!(current.contains("downloading"));
     assert!(current.contains("extracting"));
+}
+
+#[test]
+fn completed_run_drains_events_beyond_the_per_frame_limit() {
+    let mut app = App::new(Mode::Deploy);
+    let (tx, rx) = mpsc::channel();
+    app.run_events = Some(rx);
+    for index in 0..300 {
+        tx.send(crate::execute::ExecuteEvent::Output {
+            item: "verbose".into(),
+            stream: crate::model::OutputStream::Stdout,
+            line: format!("line-{index}"),
+        })
+        .unwrap();
+    }
+    drop(tx);
+
+    drain_all_run_events(&mut app);
+
+    assert!(app.current_log.iter().any(|line| line.text == "line-299"));
+    assert!(app.run_events.is_some());
 }
 
 #[test]
@@ -1140,6 +1337,31 @@ fn review_body_shows_scroll_markers() {
 }
 
 #[test]
+fn review_enter_obeys_the_danger_confirmation_gate() {
+    let icon_set = icons::current();
+    let mut app = App::new(Mode::Deploy);
+    app.screen = Screen::ConfirmView;
+    app.review_entries = vec![ReviewEntry {
+        order: 0,
+        item: "replace config".into(),
+        kind: "link",
+        kind_icon: icon_set.action_link,
+        severity: ReviewSeverity::Danger,
+        status: "would overwrite target".into(),
+        detail: String::new(),
+    }];
+
+    handle_confirm(&mut app, KeyCode::Enter).unwrap();
+
+    assert_eq!(app.screen, Screen::ConfirmView);
+    assert_eq!(
+        app.status_message,
+        "plan has danger items; press ! to confirm before running"
+    );
+    assert_eq!(app.status_kind, NoticeKind::Error);
+}
+
+#[test]
 fn optional_shell_that_will_run_is_not_attention() {
     let item = test_plan_item("Sync fish plugins");
     let entry = review_shell_entry(
@@ -1172,6 +1394,25 @@ fn sudo_shell_stays_attention() {
 
     assert_eq!(entry.severity, ReviewSeverity::Warning);
     assert_eq!(review_group_for(&entry), ReviewGroup::Attention);
+    assert!(entry.status.contains("sudo"));
+}
+
+#[test]
+fn sudo_does_not_downgrade_a_condition_error() {
+    let item = test_plan_item("Broken guarded command");
+    let entry = review_shell_entry(
+        &item,
+        "sudo true",
+        None,
+        false,
+        Some("dotman-command-that-does-not-exist"),
+        Path::new("."),
+        icons::current().action_shell,
+    );
+
+    assert_eq!(entry.severity, ReviewSeverity::Danger);
+    assert_eq!(review_group_for(&entry), ReviewGroup::Attention);
+    assert!(entry.status.contains("if error:"));
     assert!(entry.status.contains("sudo"));
 }
 

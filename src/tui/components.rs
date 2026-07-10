@@ -12,6 +12,15 @@ pub(super) fn focus_bg() -> Color {
     CATPPUCCIN_MOCHA.surface_active
 }
 
+pub(super) fn run_status_color(status: RunStatus) -> Color {
+    match status {
+        RunStatus::Running => CATPPUCCIN_MOCHA.running,
+        RunStatus::Success => CATPPUCCIN_MOCHA.success,
+        RunStatus::Failed => CATPPUCCIN_MOCHA.danger,
+        RunStatus::Aborted => CATPPUCCIN_MOCHA.warning,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum LayoutDensity {
     Compact,

@@ -506,6 +506,11 @@ where
                 }
             }
 
+            if last_status == ActionStatus::Aborted {
+                aborted = true;
+                emit(ExecuteEvent::Aborted);
+            }
+
             cap_output_len(&mut action_output);
             item_output.extend(action_output.clone());
             cap_output_len(&mut item_output);
@@ -1589,6 +1594,47 @@ mod tests {
             shell_item.output.iter().any(|l| l.line.contains("started")),
             "output should contain 'started' line"
         );
+    }
+
+    #[test]
+    fn install_abort_sets_run_status_and_emits_abort_event() {
+        use std::cell::Cell;
+
+        let cfg = Config {
+            path: PathBuf::from("/tmp/dotman.yaml"),
+            package_managers: crate::config::PackageManagerConfig::default(),
+            install: vec!["dotman-binary-that-does-not-exist".into()],
+            links: vec![],
+            create: vec![],
+            shell: vec![],
+            default_shell: None,
+            clean: vec![],
+            auto_install_pkg_manager: false,
+        };
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+        let abort_checks = Cell::new(0);
+        let abort_events = Cell::new(0);
+
+        let run = execute_with_events(
+            &plan,
+            &cfg,
+            |event| {
+                if matches!(event, ExecuteEvent::Aborted) {
+                    abort_events.set(abort_events.get() + 1);
+                }
+            },
+            || {
+                let check = abort_checks.get();
+                abort_checks.set(check + 1);
+                check > 1
+            },
+        )
+        .unwrap();
+
+        assert_eq!(run.status, RunStatus::Aborted);
+        assert_eq!(run.items[0].status, ActionStatus::Aborted);
+        assert_eq!(run.items[0].actions[0].status, ActionStatus::Aborted);
+        assert_eq!(abort_events.get(), 1);
     }
 
     #[test]

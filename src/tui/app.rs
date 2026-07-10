@@ -285,22 +285,32 @@ pub(super) fn load_runs(app: &mut App) {
     match store::list_detailed() {
         Ok(report) => {
             app.runs = report.runs;
-            if let Some(warning) = report.warnings.first() {
-                let suffix = if report.warnings.len() > 1 {
-                    format!(" (+{} more)", report.warnings.len() - 1)
-                } else {
-                    String::new()
-                };
-                app.status_message = format!("{warning}{suffix}");
-                app.status_kind = NoticeKind::Warning;
-            }
+            apply_history_warnings(app, &report.warnings);
         }
         Err(error) => {
             app.runs.clear();
             app.status_message = format!("failed to read history: {error}");
             app.status_kind = NoticeKind::Error;
+            app.status_is_focus_info = false;
         }
     }
+}
+
+pub(super) fn apply_history_warnings(app: &mut App, warnings: &[String]) {
+    let Some(warning) = warnings.first() else {
+        app.status_message.clear();
+        app.status_kind = NoticeKind::Info;
+        app.status_is_focus_info = false;
+        return;
+    };
+    let suffix = if warnings.len() > 1 {
+        format!(" (+{} more)", warnings.len() - 1)
+    } else {
+        String::new()
+    };
+    app.status_message = format!("{warning}{suffix}");
+    app.status_kind = NoticeKind::Warning;
+    app.status_is_focus_info = false;
 }
 
 pub(super) fn apply_saved_selection(plan: &mut Plan) -> Result<(), String> {

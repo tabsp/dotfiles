@@ -169,6 +169,7 @@ pub(super) fn render_run(f: &mut Frame, app: &mut App) {
     if let Some(handle) = &app.run_thread
         && handle.is_finished()
     {
+        drain_all_run_events(app);
         let handle = app.run_thread.take().unwrap();
         match handle.join() {
             Ok(result) => {
@@ -307,12 +308,7 @@ pub(super) fn run_border_color(app: &App, aborting: bool) -> Color {
     } else if app.run_error.is_some() {
         CATPPUCCIN_MOCHA.danger
     } else if let Some(run) = finished_run_for_view(app) {
-        match run.status {
-            RunStatus::Running => CATPPUCCIN_MOCHA.running,
-            RunStatus::Success => CATPPUCCIN_MOCHA.success,
-            RunStatus::Failed => CATPPUCCIN_MOCHA.danger,
-            RunStatus::Aborted => CATPPUCCIN_MOCHA.warning,
-        }
+        run_status_color(run.status)
     } else {
         CATPPUCCIN_MOCHA.running
     }
@@ -427,41 +423,7 @@ pub(super) fn line_to_plain_string(line: &Line<'_>) -> String {
 }
 
 pub(super) fn final_run_summary(run: &Run) -> String {
-    let mut changed = 0;
-    let mut no_change = 0;
-    let mut failed = 0;
-    let mut aborted = 0;
-    let mut not_run = 0;
-    for item in &run.items {
-        if item.actions.is_empty() {
-            match run_group_for_status(Some(item.status), false) {
-                RunGroup::Changed => changed += 1,
-                RunGroup::NoChange => no_change += 1,
-                RunGroup::Failed => failed += 1,
-                RunGroup::Aborted => aborted += 1,
-                RunGroup::NotRun => not_run += 1,
-                _ => {}
-            }
-            continue;
-        }
-        for action in &item.actions {
-            match run_group_for_status(Some(action.status), false) {
-                RunGroup::Changed => changed += 1,
-                RunGroup::NoChange => no_change += 1,
-                RunGroup::Failed => failed += 1,
-                RunGroup::Aborted => aborted += 1,
-                RunGroup::NotRun => not_run += 1,
-                _ => {}
-            }
-        }
-    }
-    if aborted > 0 || not_run > 0 {
-        format!(
-            "{changed} changed, {no_change} no change, {failed} failed, {aborted} aborted, {not_run} not run"
-        )
-    } else {
-        format!("{changed} changed, {no_change} no change, {failed} failed")
-    }
+    crate::model::RunSummary::from_run(run).display()
 }
 
 pub(super) fn current_run_item_name(app: &App) -> Option<&str> {
@@ -1044,7 +1006,7 @@ pub(super) fn drain_run_events(app: &mut App) -> bool {
                 app.progress.0 = app.progress.0.saturating_add(1).min(app.progress.1);
                 push_log_indented(
                     app,
-                    &format!("finished {action}: {status:?}"),
+                    &format!("finished {action}: {}", status.result_label()),
                     None,
                     1,
                     if matches!(status, ActionStatus::WillFail | ActionStatus::Aborted) {
@@ -1116,7 +1078,7 @@ pub(super) fn drain_run_events(app: &mut App) -> bool {
                 push_log_group(app, &name);
                 push_log_indented(
                     app,
-                    &format!("finished: {status:?}"),
+                    &format!("finished: {}", status.result_label()),
                     None,
                     1,
                     LogKind::System,
@@ -1161,6 +1123,10 @@ pub(super) fn drain_run_events(app: &mut App) -> bool {
     drained
 }
 
+pub(super) fn drain_all_run_events(app: &mut App) {
+    while drain_run_events(app) {}
+}
+
 pub(super) fn log_group_for_event(app: &App, item: &str) -> String {
     app.active_log_group
         .clone()
@@ -1201,29 +1167,38 @@ pub(super) fn push_log_indented(
         kind,
     });
     // Cap per-step TUI log at MAX_TUI_OUTPUT_LINES (1000).
-    if app.current_log.len() > MAX_TUI_OUTPUT_LINES {
-        let drop_count = app.current_log.len() - MAX_TUI_OUTPUT_LINES;
-        app.current_log.drain(0..drop_count);
-        app.log_dropped_count = app.log_dropped_count.saturating_add(drop_count);
-        app.log_scroll = app.log_scroll.saturating_sub(drop_count);
-        if let Some(first) = app.current_log.first()
-            && first.kind != LogKind::Header
-            && let Some(group) = first.group.clone()
+    while app.current_log.len() > MAX_TUI_OUTPUT_LINES {
+        let remove_index = if app.current_log.len() > 1
+            && app.current_log[0].kind == LogKind::Header
+            && app.current_log[0].group == app.current_log[1].group
         {
-            app.current_log.insert(
-                0,
-                LogLine {
-                    text: group.clone(),
-                    fg: Some(CATPPUCCIN_MOCHA.primary),
-                    indent: 0,
-                    group: Some(group),
-                    kind: LogKind::Header,
-                },
-            );
-            if app.current_log.len() > MAX_TUI_OUTPUT_LINES {
-                app.current_log.pop();
-            }
+            1
+        } else {
+            0
+        };
+        app.current_log.remove(remove_index);
+        app.log_dropped_count = app.log_dropped_count.saturating_add(1);
+        app.log_scroll = app.log_scroll.saturating_sub(1);
+    }
+    if let Some(first) = app.current_log.first()
+        && first.kind != LogKind::Header
+        && let Some(group) = first.group.clone()
+    {
+        if app.current_log.len() >= MAX_TUI_OUTPUT_LINES {
+            app.current_log.remove(0);
+            app.log_dropped_count = app.log_dropped_count.saturating_add(1);
+            app.log_scroll = app.log_scroll.saturating_sub(1);
         }
+        app.current_log.insert(
+            0,
+            LogLine {
+                text: group.clone(),
+                fg: Some(CATPPUCCIN_MOCHA.primary),
+                indent: 0,
+                group: Some(group),
+                kind: LogKind::Header,
+            },
+        );
     }
     if app.log_follow {
         app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
@@ -1463,13 +1438,5 @@ pub(super) fn sanitize_tui_log_line(line: &str) -> String {
 }
 
 pub(super) fn run_item_status_label(status: ActionStatus) -> &'static str {
-    match status {
-        ActionStatus::WillFail => "failed",
-        ActionStatus::Aborted => "aborted",
-        ActionStatus::WillSkip => "skipped",
-        ActionStatus::NotRun => "not run",
-        ActionStatus::NoChange => "no change",
-        ActionStatus::WillRun | ActionStatus::Executed => "ran",
-        _ => "changed",
-    }
+    status.result_label()
 }

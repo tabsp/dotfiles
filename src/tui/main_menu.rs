@@ -260,11 +260,7 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
             RunStatus::Aborted => icon_set.warning,
             RunStatus::Running => icon_set.running,
         };
-        let status_color = match run.status {
-            RunStatus::Success => CATPPUCCIN_MOCHA.success,
-            RunStatus::Failed => CATPPUCCIN_MOCHA.danger,
-            RunStatus::Aborted | RunStatus::Running => CATPPUCCIN_MOCHA.warning,
-        };
+        let status_color = run_status_color(run.status);
         let mode_str = format!("{:?}", run.mode).to_lowercase();
         let date_str = fmt_date(&run.started_at);
         let total = run
@@ -272,12 +268,7 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
             .iter()
             .filter(|item| !matches!(item.status, ActionStatus::WillSkip))
             .count();
-        let failed = run
-            .items
-            .iter()
-            .flat_map(|item| item.actions.iter())
-            .filter(|action| matches!(action.status, ActionStatus::WillFail))
-            .count();
+        let failed = crate::model::RunSummary::from_run(run).failed;
         summary_lines.push(Line::from(vec![
             Span::styled(
                 format!("  last run: {date_str}  "),

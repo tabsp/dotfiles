@@ -159,7 +159,9 @@ pub(super) fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
             update_plan_focus_info(app);
         }
         KeyCode::Char('a') => {
-            if let Some(plan) = &mut app.plan {
+            if let Some(plan) = &mut app.plan
+                && plan.items.iter().any(|item| !item.selected)
+            {
                 for item in plan.items.iter_mut() {
                     item.selected = true;
                 }
@@ -167,7 +169,9 @@ pub(super) fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
             }
         }
         KeyCode::Char('n') => {
-            if let Some(plan) = &mut app.plan {
+            if let Some(plan) = &mut app.plan
+                && plan.items.iter().any(|item| item.selected)
+            {
                 for item in plan.items.iter_mut() {
                     item.selected = false;
                 }

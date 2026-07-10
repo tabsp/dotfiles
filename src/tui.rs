@@ -196,6 +196,12 @@ fn handle_key(app: &mut App, key: KeyCode) -> Result<()> {
     if key == KeyCode::Char('G') {
         return jump_to_bottom(app);
     }
+    if key == KeyCode::Home {
+        return jump_to_top(app);
+    }
+    if key == KeyCode::End {
+        return jump_to_bottom(app);
+    }
     match app.screen {
         Screen::MainMenu => main_menu::handle_main_menu(app, key),
         Screen::PlanView => plan::handle_plan(app, key),

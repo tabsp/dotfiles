@@ -54,10 +54,10 @@ pub(super) fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
         KeyCode::End => app.review_scroll = usize::MAX,
         KeyCode::Char('!') if review_entries_have_danger(&app.review_entries) => {
             app.review_danger_confirmed = true;
-            app.status_message = "danger confirmed; press R/Enter to run once".into();
+            app.status_message = "danger confirmed; press r to run once".into();
             app.status_kind = NoticeKind::Warning;
         }
-        KeyCode::Char('r') => {
+        KeyCode::Char('r') | KeyCode::Enter => {
             if app.review_thread.is_some() {
                 app.status_message = "review checks are still running".into();
                 app.status_kind = NoticeKind::Info;
@@ -514,7 +514,9 @@ pub(super) fn review_shell_entry(
     }
     if shell::command_contains_sudo(command) && !matches!(severity, ReviewSeverity::Skip) {
         status = format!("{status} · sudo");
-        severity = ReviewSeverity::Warning;
+        if !matches!(severity, ReviewSeverity::Danger) {
+            severity = ReviewSeverity::Warning;
+        }
     }
     ReviewEntry {
         order: 0,

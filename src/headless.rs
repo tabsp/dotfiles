@@ -53,21 +53,42 @@ fn print_run_detail(run: &crate::model::Run) {
     println!("Run: {}", run.id);
     println!("  mode: {:?}", run.mode);
     println!("  started: {}", run.started_at);
-    println!("  status: {:?}", run.status);
+    println!("  status: {}", run.status.result_label());
     if let Some(finished) = &run.finished_at {
         println!("  finished: {finished}");
     }
     println!("  items: {}", run.items.len());
     println!();
-    for item in &run.items {
-        let status = format!("{:?}", item.status).to_lowercase();
-        let error = item
-            .error
-            .as_deref()
-            .map(|e| format!(" ({e})"))
-            .unwrap_or_default();
-        println!("  {:<24} {:<14}{}", item.name, status, error);
+    for row in run_detail_rows(run) {
+        let error = row.error.map(|e| format!(" ({e})")).unwrap_or_default();
+        println!("  {:<36} {:<14}{}", row.name, row.status, error);
     }
+}
+
+struct RunDetailRow<'a> {
+    name: String,
+    status: &'static str,
+    error: Option<&'a str>,
+}
+
+fn run_detail_rows(run: &Run) -> Vec<RunDetailRow<'_>> {
+    let mut rows = Vec::new();
+    for item in &run.items {
+        if item.actions.is_empty() {
+            rows.push(RunDetailRow {
+                name: item.name.clone(),
+                status: item.status.result_label(),
+                error: item.error.as_deref(),
+            });
+            continue;
+        }
+        rows.extend(item.actions.iter().map(|action| RunDetailRow {
+            name: format!("{} / {}", item.name, action.name),
+            status: action.status.result_label(),
+            error: action.error.as_deref(),
+        }));
+    }
+    rows
 }
 
 fn run_full(cfg: &config::Config) -> Result<(), String> {
@@ -104,7 +125,7 @@ fn run_full(cfg: &config::Config) -> Result<(), String> {
                 println!("[dotman] started {name}");
             }
             ExecuteEvent::ItemFinished { name, status, .. } => {
-                println!("[dotman] finished {name}: {status:?}");
+                println!("[dotman] finished {name}: {}", status.result_label());
             }
             ExecuteEvent::Aborted => {
                 println!("[dotman] run aborted");
@@ -124,11 +145,15 @@ fn run_full(cfg: &config::Config) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
-    let saved = store::save(&run).map_err(|e| e.to_string())?;
-    print_summary(&run, &saved);
+    print_summary(&run);
+    let saved = store::save(&run).map_err(|error| history_save_error(&run, &error))?;
+    println!("log: {}", saved.display());
     match run.status {
         crate::model::RunStatus::Success => Ok(()),
-        _ => Err(format!("run finished with status {:?}", run.status)),
+        _ => Err(format!(
+            "run finished with status {}",
+            run.status.result_label()
+        )),
     }
 }
 
@@ -140,7 +165,7 @@ fn run_history() -> Result<(), String> {
     }
     println!("{:<26}  {:<10}  {:<8}  STARTED", "ID", "MODE", "STATUS");
     for run in runs {
-        let status = format!("{:?}", run.status).to_lowercase();
+        let status = run.status.result_label();
         let mode = format!("{:?}", run.mode).to_lowercase();
         println!(
             "{:<26}  {:<10}  {:<8}  {}",
@@ -150,23 +175,17 @@ fn run_history() -> Result<(), String> {
     Ok(())
 }
 
-fn print_summary(run: &Run, saved: &std::path::Path) {
-    let ok = run
-        .items
-        .iter()
-        .filter(|i| matches!(i.status, crate::model::ActionStatus::NoChange))
-        .count();
-    let installed = run
-        .items
-        .iter()
-        .filter(|i| matches!(i.status, crate::model::ActionStatus::WillInstall))
-        .count();
-    let failed = run.items.iter().filter(|i| i.error.is_some()).count();
-    println!(
-        "run {} finished: {} ok, {} installed, {} failed",
-        run.id, ok, installed, failed,
-    );
-    println!("log: {}", saved.display());
+fn print_summary(run: &Run) {
+    let summary = crate::model::RunSummary::from_run(run);
+    println!("run {} finished: {}", run.id, summary.display());
+}
+
+fn history_save_error(run: &Run, error: &impl std::fmt::Display) -> String {
+    format!(
+        "run {} finished with status {}, but history was not saved: {error}; check disk space and dotman data directory permissions",
+        run.id,
+        run.status.result_label()
+    )
 }
 
 #[cfg(test)]
@@ -198,7 +217,79 @@ mod tests {
                 actions: vec![],
             }],
         };
-        let saved = std::path::Path::new("/tmp/test-run.json");
-        print_summary(&run, saved);
+        print_summary(&run);
+    }
+
+    #[test]
+    fn history_save_error_preserves_run_result_and_next_step() {
+        let mut run = test_run();
+        run.status = crate::model::RunStatus::Failed;
+
+        let message = history_save_error(&run, &"disk full");
+
+        assert!(message.contains("finished with status failed"));
+        assert!(message.contains("history was not saved: disk full"));
+        assert!(message.contains("check disk space"));
+    }
+
+    #[test]
+    fn run_detail_uses_action_results_and_legacy_item_fallback() {
+        let mut run = test_run();
+        run.items = vec![crate::model::RunItem {
+            id: "multi".into(),
+            name: "multi".into(),
+            status: crate::model::ActionStatus::WillFail,
+            started_at: None,
+            finished_at: None,
+            duration_ms: None,
+            attempts: 1,
+            error: Some("item error".into()),
+            output: vec![],
+            actions: vec![
+                crate::model::RunAction {
+                    kind: "create".into(),
+                    name: "create dir".into(),
+                    status: crate::model::ActionStatus::WillCreate,
+                    error: None,
+                    output: vec![],
+                },
+                crate::model::RunAction {
+                    kind: "shell".into(),
+                    name: "configure".into(),
+                    status: crate::model::ActionStatus::WillFail,
+                    error: Some("exit code 1".into()),
+                    output: vec![],
+                },
+            ],
+        }];
+
+        let rows = run_detail_rows(&run);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "multi / create dir");
+        assert_eq!(rows[0].status, "changed");
+        assert_eq!(rows[0].error, None);
+        assert_eq!(rows[1].status, "failed");
+        assert_eq!(rows[1].error, Some("exit code 1"));
+
+        run.items[0].actions.clear();
+        let legacy = run_detail_rows(&run);
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0].name, "multi");
+        assert_eq!(legacy[0].error, Some("item error"));
+    }
+
+    fn test_run() -> Run {
+        Run {
+            id: "test".into(),
+            plan_id: None,
+            mode: crate::model::Mode::Deploy,
+            started_at: "2026-01-01T00:00:00Z".into(),
+            finished_at: Some("2026-01-01T00:01:00Z".into()),
+            status: crate::model::RunStatus::Success,
+            config_hash: "abc".into(),
+            config_path: None,
+            host: None,
+            items: vec![],
+        }
     }
 }

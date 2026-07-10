@@ -119,6 +119,25 @@ pub enum ActionStatus {
     WillBackupRemove,
 }
 
+impl ActionStatus {
+    pub fn result_label(self) -> &'static str {
+        match self {
+            Self::WillFail => "failed",
+            Self::Aborted => "aborted",
+            Self::WillSkip => "skipped",
+            Self::NotRun => "not run",
+            Self::NoChange => "no change",
+            Self::WillRun | Self::Executed => "ran",
+            Self::WillInstall
+            | Self::WillCreate
+            | Self::WillLink
+            | Self::WillBackupLink
+            | Self::WillClean
+            | Self::WillBackupRemove => "changed",
+        }
+    }
+}
+
 impl PartialOrd for ActionStatus {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -170,6 +189,79 @@ pub enum RunStatus {
     Success,
     Failed,
     Aborted,
+}
+
+impl RunStatus {
+    pub fn result_label(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Success => "success",
+            Self::Failed => "failed",
+            Self::Aborted => "aborted",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RunSummary {
+    pub changed: usize,
+    pub no_change: usize,
+    pub failed: usize,
+    pub aborted: usize,
+    pub skipped: usize,
+    pub not_run: usize,
+}
+
+impl RunSummary {
+    pub fn from_run(run: &Run) -> Self {
+        let mut summary = Self::default();
+        for item in &run.items {
+            if item.actions.is_empty() {
+                summary.add(item.status);
+            } else {
+                for action in &item.actions {
+                    summary.add(action.status);
+                }
+            }
+        }
+        summary
+    }
+
+    fn add(&mut self, status: ActionStatus) {
+        match status {
+            ActionStatus::WillFail => self.failed += 1,
+            ActionStatus::Aborted => self.aborted += 1,
+            ActionStatus::WillSkip => self.skipped += 1,
+            ActionStatus::NotRun => self.not_run += 1,
+            ActionStatus::NoChange => self.no_change += 1,
+            ActionStatus::WillRun
+            | ActionStatus::Executed
+            | ActionStatus::WillInstall
+            | ActionStatus::WillCreate
+            | ActionStatus::WillLink
+            | ActionStatus::WillBackupLink
+            | ActionStatus::WillClean
+            | ActionStatus::WillBackupRemove => self.changed += 1,
+        }
+    }
+
+    pub fn display(self) -> String {
+        let mut parts = vec![
+            format!("{} changed", self.changed),
+            format!("{} no change", self.no_change),
+            format!("{} failed", self.failed),
+        ];
+        if self.aborted > 0 {
+            parts.push(format!("{} aborted", self.aborted));
+        }
+        if self.skipped > 0 {
+            parts.push(format!("{} skipped", self.skipped));
+        }
+        if self.not_run > 0 {
+            parts.push(format!("{} not run", self.not_run));
+        }
+        parts.join(", ")
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -229,4 +321,51 @@ pub struct Selection {
 
 fn default_link_backup() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ActionStatus, Mode, Run, RunItem, RunStatus, RunSummary};
+
+    #[test]
+    fn result_labels_use_terminal_user_facing_language() {
+        assert_eq!(ActionStatus::WillFail.result_label(), "failed");
+        assert_eq!(ActionStatus::WillSkip.result_label(), "skipped");
+        assert_eq!(ActionStatus::Aborted.result_label(), "aborted");
+        assert_eq!(ActionStatus::NotRun.result_label(), "not run");
+        assert_eq!(ActionStatus::NoChange.result_label(), "no change");
+        assert_eq!(ActionStatus::WillLink.result_label(), "changed");
+        assert_eq!(RunStatus::Success.result_label(), "success");
+        assert_eq!(RunStatus::Failed.result_label(), "failed");
+        assert_eq!(RunStatus::Aborted.result_label(), "aborted");
+    }
+
+    #[test]
+    fn run_summary_falls_back_to_item_status_for_legacy_history() {
+        let run = Run {
+            id: "legacy".into(),
+            plan_id: None,
+            mode: Mode::Deploy,
+            started_at: "2026-01-01T00:00:00Z".into(),
+            finished_at: Some("2026-01-01T00:00:01Z".into()),
+            status: RunStatus::Failed,
+            config_hash: "hash".into(),
+            config_path: None,
+            host: None,
+            items: vec![RunItem {
+                id: "step".into(),
+                name: "step".into(),
+                status: ActionStatus::WillFail,
+                started_at: None,
+                finished_at: None,
+                duration_ms: None,
+                attempts: 1,
+                error: Some("exit code 7".into()),
+                output: vec![],
+                actions: vec![],
+            }],
+        };
+
+        assert_eq!(RunSummary::from_run(&run).failed, 1);
+    }
 }

@@ -154,9 +154,9 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
             .enumerate()
             .map(|(idx, r)| {
                 let selected = app.history_state.selected() == Some(idx);
-                let status = format!("{:?}", r.status).to_lowercase();
+                let status = r.status.result_label();
                 let mode = format!("{:?}", r.mode).to_lowercase();
-                history_run_line(r, &mode, &status, selected, usize::from(chunks[1].width))
+                history_run_line(r, &mode, status, selected, usize::from(chunks[1].width))
             })
             .collect();
         let list = List::new(items)
@@ -224,15 +224,6 @@ fn history_run_line(
         ),
         Span::styled(fit_to_width(&right, id_width), muted_style),
     ]))
-}
-
-fn run_status_color(status: RunStatus) -> Color {
-    match status {
-        RunStatus::Running => CATPPUCCIN_MOCHA.running,
-        RunStatus::Success => CATPPUCCIN_MOCHA.success,
-        RunStatus::Failed => CATPPUCCIN_MOCHA.danger,
-        RunStatus::Aborted => CATPPUCCIN_MOCHA.warning,
-    }
 }
 
 fn history_help_line(width: usize) -> Line<'static> {
@@ -401,13 +392,13 @@ pub(super) fn render_replay(f: &mut Frame, app: &mut App) {
     f.render_widget(help, chunks[3]);
 }
 
-fn replay_help_line(width: usize) -> Line<'static> {
+pub(super) fn replay_help_line(width: usize) -> Line<'static> {
     let full = [
         ("↑↓", " Navigate  "),
         ("Space", " Toggle  "),
         ("q", " Back"),
     ];
-    let compact = [("↑↓", " "), ("Pg", " "), ("Ent", " "), ("q", "")];
+    let compact = [("↑↓", " "), ("Spc", " "), ("q", "")];
     for parts in [&full[..], &compact[..]] {
         let line = help_line_from_parts(parts);
         if line_display_width(&line) <= width {
@@ -506,7 +497,11 @@ pub(super) fn replay_lines(app: &App, width: usize) -> Vec<Line<'static>> {
             Span::styled(run::run_item_status_label(status), status_style),
         ]));
         if expanded {
-            if let Some(error) = entry.action.and_then(|action| action.error.as_ref()) {
+            let error = match entry.action {
+                Some(action) => action.error.as_ref(),
+                None => entry.item.error.as_ref(),
+            };
+            if let Some(error) = error {
                 lines.push(Line::from(Span::styled(
                     format!("    error: {error}"),
                     Style::default().fg(CATPPUCCIN_MOCHA.danger),
