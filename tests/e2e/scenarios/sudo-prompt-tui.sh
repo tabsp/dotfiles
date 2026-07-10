@@ -1,7 +1,7 @@
 #!/bin/bash
 # sudo-prompt-tui.sh — Interactive manual test for sudo password flow in TUI.
 #
-# Tests: ConfirmView → [sudo -v prompt] → RunView → ResultView
+# Tests: ConfirmView → [sudo -v prompt] → RunView final state
 # Requires: TTY + sudo that needs a password (no NOPASSWD)
 
 set -euo pipefail
