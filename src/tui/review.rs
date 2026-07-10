@@ -1,16 +1,74 @@
 use super::*;
 
+const REVIEW_PAGE_SIZE: isize = 8;
+
 // ---------------- ConfirmView ----------------
+
+pub(super) fn start_review(app: &mut App) {
+    let Some(plan) = app.plan.clone() else {
+        return;
+    };
+    let config = app.config.clone();
+    app.review_entries.clear();
+    app.review_scroll = 0;
+    app.review_danger_confirmed = false;
+    app.status_message = "checking action conditions...".into();
+    app.status_kind = NoticeKind::Info;
+    app.status_is_focus_info = false;
+    app.screen = Screen::ConfirmView;
+    app.review_thread = Some(std::thread::spawn(move || {
+        review_entries(&plan, config.as_ref())
+    }));
+}
+
+pub(super) fn poll_review_thread(app: &mut App) -> bool {
+    let Some(handle) = app.review_thread.as_ref() else {
+        return false;
+    };
+    if !handle.is_finished() {
+        return false;
+    }
+    let handle = app.review_thread.take().expect("review thread exists");
+    match handle.join() {
+        Ok(entries) => {
+            app.review_entries = entries;
+            app.status_message.clear();
+            app.status_kind = NoticeKind::Info;
+        }
+        Err(_) => {
+            app.review_entries.clear();
+            app.status_message = "review condition check panicked".into();
+            app.status_kind = NoticeKind::Error;
+        }
+    }
+    true
+}
 
 pub(super) fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
     match key {
         KeyCode::Down | KeyCode::Char('j') => scroll_review(app, 1),
         KeyCode::Up | KeyCode::Char('k') => scroll_review(app, -1),
-        KeyCode::PageDown => scroll_review(app, 8),
-        KeyCode::PageUp => scroll_review(app, -8),
+        KeyCode::PageDown => scroll_review(app, REVIEW_PAGE_SIZE),
+        KeyCode::PageUp => scroll_review(app, -REVIEW_PAGE_SIZE),
         KeyCode::Home => app.review_scroll = 0,
         KeyCode::End => app.review_scroll = usize::MAX,
-        KeyCode::Enter | KeyCode::Char('r') => {
+        KeyCode::Char('!') if review_entries_have_danger(&app.review_entries) => {
+            app.review_danger_confirmed = true;
+            app.status_message = "danger confirmed; press R/Enter to run once".into();
+            app.status_kind = NoticeKind::Warning;
+        }
+        KeyCode::Char('r') => {
+            if app.review_thread.is_some() {
+                app.status_message = "review checks are still running".into();
+                app.status_kind = NoticeKind::Info;
+                return Ok(());
+            }
+            if review_entries_have_danger(&app.review_entries) && !app.review_danger_confirmed {
+                app.status_message =
+                    "plan has danger items; press ! to confirm before running".into();
+                app.status_kind = NoticeKind::Error;
+                return Ok(());
+            }
             // Pre-cache sudo credentials before executing if the plan needs them.
             if review_entries_need_sudo(&app.review_entries) {
                 restore_terminal()?;
@@ -21,17 +79,27 @@ pub(super) fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
                 app.needs_terminal_reset = true;
                 if !ok {
                     app.status_message = "sudo authentication failed".into();
+                    app.status_kind = NoticeKind::Error;
                     return Ok(());
                 }
             }
+            app.review_danger_confirmed = false;
             run::start_run(app);
         }
-        KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('e') => {
+        KeyCode::Char('q') | KeyCode::Esc => {
             app.screen = Screen::PlanView;
         }
         _ => {}
     }
     Ok(())
+}
+
+pub(super) fn jump_review_top(app: &mut App) {
+    app.review_scroll = 0;
+}
+
+pub(super) fn jump_review_bottom(app: &mut App) {
+    app.review_scroll = usize::MAX;
 }
 
 pub(super) fn scroll_review(app: &mut App, delta: isize) {
@@ -174,13 +242,16 @@ pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
         review_help_line(usize::from(chunks[3].width))
     } else {
         Line::from(vec![
-            Span::styled("  error  ", Style::default().fg(CATPPUCCIN_MOCHA.danger)),
+            Span::styled(
+                format!("  {}  ", notice_label(app.status_kind)),
+                notice_style(app.status_kind),
+            ),
             Span::styled(
                 fit_to_width(
                     &app.status_message,
                     usize::from(chunks[3].width).saturating_sub(9),
                 ),
-                Style::default().fg(CATPPUCCIN_MOCHA.danger),
+                notice_style(app.status_kind),
             ),
         ])
     };
@@ -234,7 +305,11 @@ pub(super) struct ReviewEntry {
 
 pub(super) fn review_entries(plan: &Plan, config: Option<&config::Config>) -> Vec<ReviewEntry> {
     let icon_set = icons::current();
-    let config_dir = plan.config_path.parent().unwrap_or(Path::new("."));
+    let config_dir = plan
+        .config_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     let mut entries = Vec::new();
     for item in plan.items.iter().filter(|item| item.selected) {
         for action in &item.actions {
@@ -244,9 +319,20 @@ pub(super) fn review_entries(plan: &Plan, config: Option<&config::Config>) -> Ve
                     binary,
                     source,
                 } => review_install_entry(item, config, pkg_mgr, binary, source),
-                Action::Link { target, source } => {
-                    review_link_entry(item, config_dir, target, source, icon_set.action_link)
-                }
+                Action::Link {
+                    target,
+                    source,
+                    backup,
+                    relink,
+                } => review_link_entry(
+                    item,
+                    config_dir,
+                    target,
+                    source,
+                    *backup,
+                    *relink,
+                    icon_set.action_link,
+                ),
                 Action::Create { target } => {
                     review_create_entry(item, target, icon_set.action_create)
                 }
@@ -261,6 +347,7 @@ pub(super) fn review_entries(plan: &Plan, config: Option<&config::Config>) -> Ve
                     description.as_deref(),
                     *optional,
                     if_condition.as_deref(),
+                    config_dir,
                     icon_set.action_shell,
                 ),
                 Action::Clean { target, force } => {
@@ -341,6 +428,8 @@ pub(super) fn review_link_entry(
     config_dir: &Path,
     target: &Path,
     source: &Path,
+    backup: bool,
+    relink: bool,
     kind_icon: &'static str,
 ) -> ReviewEntry {
     let (severity, status) = match link::plan_link(
@@ -350,8 +439,8 @@ pub(super) fn review_link_entry(
         LinkSettings {
             create: true,
             relative: true,
-            backup: true,
-            relink: false,
+            backup,
+            relink,
         },
     ) {
         Ok(link_plan) => describe_link_review(&link_plan.action),
@@ -397,6 +486,7 @@ pub(super) fn review_shell_entry(
     description: Option<&str>,
     optional: bool,
     if_condition: Option<&str>,
+    config_dir: &Path,
     kind_icon: &'static str,
 ) -> ReviewEntry {
     let mut status = if optional {
@@ -406,15 +496,19 @@ pub(super) fn review_shell_entry(
     };
     let mut severity = ReviewSeverity::Run;
     if let Some(cond) = if_condition {
-        match shell::condition_matches(cond) {
-            Ok(true) => status = format!("if ok · {status}"),
-            Ok(false) => {
+        match shell::condition_matches(cond, config_dir) {
+            Ok(shell::ConditionResult::Matched) => status = format!("if ok · {status}"),
+            Ok(shell::ConditionResult::NotMatched) => {
                 status = "if skip".into();
                 severity = ReviewSeverity::Skip;
             }
-            Err(_) => {
-                status = "if unknown".into();
-                severity = ReviewSeverity::Warning;
+            Ok(shell::ConditionResult::Error(error)) => {
+                status = format!("if error: {error}");
+                severity = ReviewSeverity::Danger;
+            }
+            Err(error) => {
+                status = format!("if error: {error}");
+                severity = ReviewSeverity::Danger;
             }
         }
     }
@@ -637,6 +731,12 @@ pub(super) fn review_entry_detail(entry: &ReviewEntry) -> Option<&str> {
 
 pub(super) fn review_entries_need_sudo(entries: &[ReviewEntry]) -> bool {
     entries.iter().any(review_entry_needs_sudo)
+}
+
+pub(super) fn review_entries_have_danger(entries: &[ReviewEntry]) -> bool {
+    entries
+        .iter()
+        .any(|entry| matches!(entry.severity, ReviewSeverity::Danger))
 }
 
 pub(super) fn review_entry_needs_sudo(entry: &ReviewEntry) -> bool {

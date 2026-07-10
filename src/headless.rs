@@ -97,6 +97,9 @@ fn run_full(cfg: &config::Config) -> Result<(), String> {
             ExecuteEvent::ActionMessage { item, message } => {
                 println!("[{item} action] {message}");
             }
+            ExecuteEvent::ActionError { item, message } => {
+                eprintln!("[{item} error] {message}");
+            }
             ExecuteEvent::ItemStarted { name, .. } => {
                 println!("[dotman] started {name}");
             }
@@ -174,11 +177,14 @@ mod tests {
     fn print_summary_does_not_panic() {
         let run = Run {
             id: "test".into(),
+            plan_id: None,
             mode: crate::model::Mode::Deploy,
             started_at: "2026-01-01T00:00:00Z".into(),
             finished_at: Some("2026-01-01T00:01:00Z".into()),
             status: crate::model::RunStatus::Success,
             config_hash: "abc".into(),
+            config_path: None,
+            host: None,
             items: vec![crate::model::RunItem {
                 id: "1".into(),
                 name: "fish".into(),

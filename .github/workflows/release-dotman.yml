@@ -10,7 +10,20 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - run: make ci
+
   build:
+    needs: test
     strategy:
       fail-fast: false
       # Keep this target list in sync with scripts/build-site.sh manifest generation.

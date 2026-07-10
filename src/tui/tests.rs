@@ -1,5 +1,6 @@
 use super::*;
-use std::path::PathBuf;
+use crate::tui::history::replay_lines;
+use std::path::{Path, PathBuf};
 
 fn test_plan_item(name: &str) -> PlanItem {
     PlanItem {
@@ -74,11 +75,14 @@ fn test_run_item(name: &str, status: ActionStatus, error: Option<&str>) -> RunIt
 fn test_run(status: RunStatus, items: Vec<RunItem>) -> Run {
     Run {
         id: "test-run".into(),
+        plan_id: None,
         mode: PlanMode::Deploy,
         started_at: "2026-01-01T00:00:00Z".into(),
         finished_at: Some("2026-01-01T00:00:01Z".into()),
         status,
         config_hash: "hash".into(),
+        config_path: None,
+        host: None,
         items,
     }
 }
@@ -99,8 +103,8 @@ fn plan_help_line_fits_narrow_terminal() {
         .collect::<String>();
 
     assert!(line_display_width(&line) <= 78);
-    assert!(text.contains("[R]"));
-    assert!(text.contains("[Q]"));
+    assert!(text.contains("[r]"));
+    assert!(text.contains("[q]"));
     assert!(!text.contains("Info"));
 }
 
@@ -135,8 +139,10 @@ fn review_help_line_fits_narrow_terminal() {
     let text = line_text(&line);
 
     assert!(line_display_width(&line) <= 44);
-    assert!(text.contains("[R]") || text.contains("[Enter/R]"));
-    assert!(text.contains("[E/Q]"));
+    assert!(text.contains("[r]"));
+    assert!(text.contains("[q]"));
+    assert!(!text.contains("Enter/R"));
+    assert!(!text.contains("E/Q"));
 }
 
 #[test]
@@ -145,9 +151,9 @@ fn review_help_line_keeps_full_labels_when_space_allows() {
     let text = line_text(&line);
 
     assert!(text.contains("Scroll"));
-    assert!(text.contains("Page"));
+    assert!(!text.contains("Page"));
     assert!(text.contains("Run"));
-    assert!(text.contains("Edit"));
+    assert!(text.contains("Back"));
 }
 
 #[test]
@@ -224,6 +230,45 @@ fn run_help_line_switches_to_stopping() {
     assert!(finished.contains("Back"));
     assert!(paused.contains("Follow"));
     assert!(line_display_width(&run_help_line(8, true, false, true)) <= 8);
+}
+
+#[test]
+fn run_help_uses_terminal_state_for_errors_and_running() {
+    let mut app = App::new(Mode::Deploy);
+    app.run_error = Some("run failed: command error".into());
+    let error_help = line_text(&run_help_line(100, false, run_is_terminal(&app), true));
+    assert!(error_help.contains("Back"));
+    assert!(!error_help.contains("Abort"));
+
+    let running_help = line_text(&run_help_line(
+        100,
+        false,
+        run_is_terminal(&App::new(Mode::Deploy)),
+        true,
+    ));
+    assert!(running_help.contains("Abort"));
+
+    let mut aborting = App::new(Mode::Deploy);
+    aborting.abort_flag = Some(Arc::new(AtomicBool::new(true)));
+    let stopping = line_text(&run_help_line(
+        100,
+        run_is_aborting(&aborting),
+        run_is_terminal(&aborting),
+        true,
+    ));
+    assert!(stopping.contains("Stopping"));
+
+    let mut saved_with_warning = App::new(Mode::Deploy);
+    saved_with_warning.run = Some(test_run(RunStatus::Success, Vec::new()));
+    saved_with_warning.run_save_warning = Some("history save failed".into());
+    let warning_help = line_text(&run_help_line(
+        100,
+        false,
+        run_is_terminal(&saved_with_warning),
+        true,
+    ));
+    assert!(warning_help.contains("Back"));
+    assert!(!warning_help.contains("Abort"));
 }
 
 #[test]
@@ -403,6 +448,50 @@ fn page_selection_states_are_independent_and_clamped() {
 }
 
 #[test]
+fn plan_focus_restores_same_item_after_column_change() {
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["one", "two", "three", "four"]));
+    app.plan_columns = 1;
+    let rows = build_plan_rows(
+        app.plan.as_ref().unwrap(),
+        &app.collapsed_layers,
+        app.plan_columns,
+    );
+    let row = rows
+        .iter()
+        .position(|row| matches!(row, PlanRow::Item(2)))
+        .unwrap();
+    select_plan_row(&mut app.plan_state, row, true);
+    let focus = current_plan_focus(&app);
+
+    app.plan_columns = 3;
+    restore_plan_focus(&mut app, focus);
+
+    assert_eq!(focused_plan_item_info(&app).as_deref(), Some("three"));
+}
+
+#[test]
+fn plan_vertical_navigation_stops_at_boundaries() {
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["one", "two"]));
+    let rows = build_plan_rows(
+        app.plan.as_ref().unwrap(),
+        &app.collapsed_layers,
+        app.plan_columns,
+    );
+    let first = rows.iter().position(is_selectable_plan_row).unwrap();
+    let last = rows.iter().rposition(is_selectable_plan_row).unwrap();
+
+    select_plan_row(&mut app.plan_state, first, true);
+    handle_plan(&mut app, KeyCode::Char('k')).unwrap();
+    assert_eq!(app.plan_state.selected(), Some(first));
+
+    select_plan_row(&mut app.plan_state, last, true);
+    handle_plan(&mut app, KeyCode::Char('j')).unwrap();
+    assert_eq!(app.plan_state.selected(), Some(last));
+}
+
+#[test]
 fn history_selection_handles_empty_first_and_last_delete_positions() {
     let mut app = App::new(Mode::History);
     history::clamp_history_selection(&mut app);
@@ -480,6 +569,22 @@ fn finished_run_progress_keeps_not_run_actions_in_total() {
 }
 
 #[test]
+fn finished_run_progress_counts_condition_skips_as_resolved_actions() {
+    let run = test_run(
+        RunStatus::Success,
+        vec![test_run_item("guarded", ActionStatus::WillSkip, None)],
+    );
+    let mut app = App::new(Mode::Deploy);
+    app.progress = (1, 1);
+
+    sync_finished_run_state(&mut app, &run);
+
+    assert_eq!(run_action_total(&run), 1);
+    assert_eq!(run_executed_action_total(&run), 1);
+    assert_eq!(app.progress, (1, 1));
+}
+
+#[test]
 fn live_spinner_uses_current_spinner_frame() {
     let mut app = App::new(Mode::Deploy);
     let mut item = test_plan_item("ghostty");
@@ -500,6 +605,7 @@ fn live_spinner_uses_current_spinner_frame() {
 #[test]
 fn log_follow_manual_scroll_and_resume_work() {
     let mut app = App::new(Mode::Deploy);
+    app.log_viewport_height = 5;
     for idx in 0..20 {
         push_log(&mut app, &format!("line {idx}"), None);
     }
@@ -509,7 +615,7 @@ fn log_follow_manual_scroll_and_resume_work() {
 
     scroll_run_log(&mut app, -1);
     assert!(!app.log_follow);
-    assert!(app.log_scroll < usize::from(bottom));
+    assert_eq!(app.log_scroll, usize::from(bottom) - 5);
     let paused_offset = log_scroll_offset(&app, 5);
     assert_eq!(paused_offset as usize, app.log_scroll);
 
@@ -521,6 +627,7 @@ fn log_follow_manual_scroll_and_resume_work() {
 #[test]
 fn log_home_end_and_page_keys_use_absolute_scroll() {
     let mut app = App::new(Mode::Deploy);
+    app.log_viewport_height = 5;
     for idx in 0..30 {
         push_log(&mut app, &format!("line {idx}"), None);
     }
@@ -531,11 +638,14 @@ fn log_home_end_and_page_keys_use_absolute_scroll() {
 
     handle_run(&mut app, KeyCode::PageDown).unwrap();
     assert!(!app.log_follow);
-    assert!(log_scroll_offset(&app, 5) > 0);
+    assert_eq!(log_scroll_offset(&app, 5), 5);
 
     let after_down = app.log_scroll;
     handle_run(&mut app, KeyCode::PageUp).unwrap();
-    assert!(app.log_scroll < after_down);
+    assert_eq!(app.log_scroll, after_down - 5);
+
+    handle_run(&mut app, KeyCode::PageUp).unwrap();
+    assert_eq!(app.log_scroll, 0);
 
     handle_run(&mut app, KeyCode::End).unwrap();
     assert!(app.log_follow);
@@ -543,6 +653,103 @@ fn log_home_end_and_page_keys_use_absolute_scroll() {
         log_scroll_offset(&app, 5),
         log_bottom_scroll(&app, 5) as u16
     );
+
+    handle_run(&mut app, KeyCode::Home).unwrap();
+    handle_run(&mut app, KeyCode::Char('f')).unwrap();
+    assert!(app.log_follow);
+    assert_eq!(
+        log_scroll_offset(&app, 5),
+        log_bottom_scroll(&app, 5) as u16
+    );
+}
+
+#[test]
+fn first_page_up_uses_current_log_viewport_height() {
+    for viewport_height in [5usize, 9] {
+        let mut app = App::new(Mode::Deploy);
+        app.log_viewport_height = viewport_height;
+        for idx in 0..30 {
+            push_log(&mut app, &format!("line {idx}"), None);
+        }
+        let bottom = log_bottom_scroll(&app, viewport_height);
+
+        handle_run(&mut app, KeyCode::PageUp).unwrap();
+
+        assert!(!app.log_follow);
+        assert_eq!(app.log_scroll, bottom - viewport_height);
+    }
+}
+
+#[test]
+fn page_down_clamps_to_bottom_after_manual_scroll() {
+    let mut app = App::new(Mode::Deploy);
+    app.log_viewport_height = 7;
+    for idx in 0..18 {
+        push_log(&mut app, &format!("line {idx}"), None);
+    }
+    let bottom = log_bottom_scroll(&app, 7);
+
+    handle_run(&mut app, KeyCode::Home).unwrap();
+    handle_run(&mut app, KeyCode::PageDown).unwrap();
+    assert_eq!(app.log_scroll, 7);
+
+    handle_run(&mut app, KeyCode::PageDown).unwrap();
+    assert_eq!(app.log_scroll, bottom);
+
+    handle_run(&mut app, KeyCode::PageDown).unwrap();
+    assert_eq!(app.log_scroll, bottom);
+}
+
+#[test]
+fn vim_log_keys_scroll_one_line_and_pause_follow() {
+    let mut app = App::new(Mode::Deploy);
+    app.log_viewport_height = 5;
+    for index in 0..20 {
+        push_log(&mut app, &format!("line {index}"), None);
+    }
+
+    handle_run(&mut app, KeyCode::Char('k')).unwrap();
+    assert!(!app.log_follow);
+    let after_up = app.log_scroll;
+    handle_run(&mut app, KeyCode::Char('j')).unwrap();
+    assert_eq!(app.log_scroll, after_up + 1);
+}
+
+#[test]
+fn run_arrow_keys_scroll_and_switch_filters() {
+    let mut app = App::new(Mode::Deploy);
+    app.log_viewport_height = 5;
+    for index in 0..20 {
+        push_log(&mut app, &format!("line {index}"), None);
+    }
+
+    handle_run(&mut app, KeyCode::Up).unwrap();
+    assert!(!app.log_follow);
+    let after_up = app.log_scroll;
+    handle_run(&mut app, KeyCode::Down).unwrap();
+    assert_eq!(app.log_scroll, after_up + 1);
+
+    assert_eq!(app.log_filter, LogFilter::All);
+    handle_run(&mut app, KeyCode::Left).unwrap();
+    assert_eq!(app.log_filter, LogFilter::Errors);
+    handle_run(&mut app, KeyCode::Right).unwrap();
+    assert_eq!(app.log_filter, LogFilter::All);
+}
+
+#[test]
+fn replay_selected_row_has_focus_background() {
+    let mut app = App::new(Mode::History);
+    app.run = Some(test_run(
+        RunStatus::Success,
+        vec![test_run_item("fish", ActionStatus::NoChange, None)],
+    ));
+    app.replay_state.select(Some(0));
+
+    let lines = replay_lines(&app, 80);
+
+    assert_eq!(lines[0].spans[0].style.bg, Some(focus_bg()));
+    assert_eq!(lines[0].spans[1].style.bg, Some(focus_bg()));
+    assert_eq!(lines[0].spans[3].style.bg, Some(focus_bg()));
 }
 
 #[test]
@@ -578,6 +785,24 @@ fn log_filter_current_errors_and_fold_work() {
     assert!(folded.contains("neovim"));
     assert!(folded.contains("collapsed"));
     assert!(!folded.contains("downloading package"));
+}
+
+#[test]
+fn log_truncation_keeps_group_header_for_child_lines() {
+    let mut app = App::new(Mode::Deploy);
+    push_log_group(&mut app, "big-action");
+    for idx in 0..(MAX_TUI_OUTPUT_LINES + 10) {
+        push_log_indented(&mut app, &format!("line {idx}"), None, 1, LogKind::Stdout);
+    }
+
+    assert_eq!(
+        app.current_log.first().map(|line| line.kind),
+        Some(LogKind::Header)
+    );
+    assert_eq!(
+        app.current_log.first().map(|line| line.text.as_str()),
+        Some("big-action")
+    );
 }
 
 #[test]
@@ -923,6 +1148,7 @@ fn optional_shell_that_will_run_is_not_attention() {
         Some("Sync fish plugins"),
         true,
         Some("true"),
+        Path::new("."),
         icons::current().action_shell,
     );
 
@@ -940,6 +1166,7 @@ fn sudo_shell_stays_attention() {
         Some("Set default shell to fish"),
         false,
         None,
+        Path::new("."),
         icons::current().action_shell,
     );
 
@@ -957,10 +1184,28 @@ fn shell_with_false_condition_is_skipped() {
         None,
         true,
         Some("false"),
+        Path::new("."),
         icons::current().action_shell,
     );
 
     assert_eq!(entry.severity, ReviewSeverity::Skip);
     assert_eq!(review_group_for(&entry), ReviewGroup::Skipped);
     assert_eq!(entry.status, "if skip");
+}
+
+#[test]
+fn review_relative_config_path_uses_current_directory_for_conditions() {
+    let mut plan = test_plan_with_items(&["Skip shell"]);
+    plan.items[0].actions.push(Action::Shell {
+        command: "echo skipped".into(),
+        description: None,
+        optional: true,
+        if_condition: Some("false".into()),
+    });
+
+    let entries = review_entries(&plan, None);
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].severity, ReviewSeverity::Skip);
+    assert_eq!(entries[0].status, "if skip");
 }

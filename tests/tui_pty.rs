@@ -5,16 +5,13 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn history_tui_starts_and_exits_under_pty() {
-    if std::env::var_os("DOTMAN_RUN_TUI_PTY").is_none() {
-        return;
-    }
-    if Command::new("sh")
-        .args(["-c", "command -v script >/dev/null 2>&1"])
-        .status()
-        .map_or(true, |status| !status.success())
-    {
-        return;
-    }
+    assert!(
+        !Command::new("sh")
+            .args(["-c", "command -v script >/dev/null 2>&1"])
+            .status()
+            .map_or(true, |status| !status.success()),
+        "PTY test requires the `script` command"
+    );
 
     let temp = tempfile::tempdir().unwrap();
     let data_home = temp.path().join("data");

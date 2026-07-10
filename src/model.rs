@@ -58,6 +58,10 @@ pub enum Action {
     Link {
         target: PathBuf,
         source: PathBuf,
+        #[serde(default = "default_link_backup")]
+        backup: bool,
+        #[serde(default)]
+        relink: bool,
     },
     Create {
         target: PathBuf,
@@ -78,7 +82,7 @@ impl Action {
     pub fn describe(&self) -> String {
         match self {
             Action::Install { binary, .. } => format!("install {binary}"),
-            Action::Link { target, source } => {
+            Action::Link { target, source, .. } => {
                 format!("link {} -> {}", target.display(), source.display())
             }
             Action::Create { target } => format!("create {}", target.display()),
@@ -101,8 +105,10 @@ impl Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionStatus {
     WillRun,
+    Executed,
     WillSkip,
     NotRun,
+    Aborted,
     WillFail,
     NoChange,
     WillInstall,
@@ -124,9 +130,10 @@ impl Ord for ActionStatus {
         fn rank(s: &ActionStatus) -> u8 {
             match s {
                 ActionStatus::NoChange => 0,
-                ActionStatus::WillRun => 1,
+                ActionStatus::WillRun | ActionStatus::Executed => 1,
                 ActionStatus::WillSkip => 1,
                 ActionStatus::NotRun => 1,
+                ActionStatus::Aborted => 4,
                 ActionStatus::WillLink => 2,
                 ActionStatus::WillCreate => 2,
                 ActionStatus::WillInstall => 2,
@@ -143,11 +150,17 @@ impl Ord for ActionStatus {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Run {
     pub id: RunId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_id: Option<RunId>,
     pub mode: Mode,
     pub started_at: String,
     pub finished_at: Option<String>,
     pub status: RunStatus,
     pub config_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<HostInfo>,
     pub items: Vec<RunItem>,
 }
 
@@ -212,4 +225,8 @@ pub const MAX_HISTORY_OUTPUT_LINES: usize = 500;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Selection {
     pub items: BTreeMap<StepId, bool>,
+}
+
+fn default_link_backup() -> bool {
+    true
 }

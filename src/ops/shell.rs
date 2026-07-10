@@ -11,6 +11,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::thread;
+use std::time::{Duration, Instant};
+
+const CONDITION_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct ShellOutput {
@@ -24,6 +27,13 @@ pub struct ShellOutput {
 pub struct StreamLine {
     pub stream: OutputStream,
     pub line: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConditionResult {
+    Matched,
+    NotMatched,
+    Error(String),
 }
 
 /// Run a shell command and collect all output at once (non-streaming, for conditions).
@@ -45,17 +55,53 @@ pub fn run_shell(command: &str, config_dir: &Path) -> Result<ShellOutput> {
     })
 }
 
-pub fn condition_matches(cond: &str) -> Result<bool> {
+pub fn condition_matches(cond: &str, config_dir: &Path) -> Result<ConditionResult> {
+    condition_matches_with_timeout(cond, config_dir, CONDITION_TIMEOUT)
+}
+
+fn condition_matches_with_timeout(
+    cond: &str,
+    config_dir: &Path,
+    timeout: Duration,
+) -> Result<ConditionResult> {
     let mut cmd = command_with_dotman_env();
-    let status = cmd
-        .arg("-c")
+    cmd.arg("-c")
         .arg(cond)
+        .current_dir(config_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd
+        .spawn()
         .with_context(|| format!("failed to evaluate condition '{cond}'"))?;
-    Ok(status.success())
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if started.elapsed() >= timeout {
+            kill_process_tree(&mut child);
+            return Ok(ConditionResult::Error(format!(
+                "condition timed out after {}s: {cond}",
+                timeout.as_secs()
+            )));
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    if status.success() {
+        Ok(ConditionResult::Matched)
+    } else if matches!(status.code(), Some(126 | 127) | None) {
+        Ok(ConditionResult::Error(format!(
+            "condition failed to execute: {cond}"
+        )))
+    } else {
+        Ok(ConditionResult::NotMatched)
+    }
 }
 
 /// Run a shell command with streaming output.
@@ -212,7 +258,48 @@ fn kill_process_tree(child: &mut std::process::Child) {
 ///
 /// Used to detect commands that may need a TTY for password input.
 pub fn command_contains_sudo(cmd: &str) -> bool {
-    cmd.split_whitespace().any(|w| w == "sudo")
+    shell_words(cmd)
+        .into_iter()
+        .any(|word| word == "sudo" || word.ends_with("/sudo"))
+}
+
+fn shell_words(cmd: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in cmd.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            ' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')' => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
 }
 
 /// Run `sudo -v` to cache credentials for subsequent sudo commands.
@@ -280,12 +367,48 @@ mod tests {
 
     #[test]
     fn condition_true_when_command_succeeds() {
-        assert!(condition_matches("true").unwrap());
+        assert_eq!(
+            condition_matches("true", Path::new(".")).unwrap(),
+            ConditionResult::Matched
+        );
     }
 
     #[test]
     fn condition_false_when_command_fails() {
-        assert!(!condition_matches("false").unwrap());
+        assert_eq!(
+            condition_matches("false", Path::new(".")).unwrap(),
+            ConditionResult::NotMatched
+        );
+    }
+
+    #[test]
+    fn condition_runs_in_config_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("marker"), "").unwrap();
+
+        assert_eq!(
+            condition_matches("test -f marker", dir.path()).unwrap(),
+            ConditionResult::Matched
+        );
+    }
+
+    #[test]
+    fn condition_command_not_found_is_error() {
+        assert!(matches!(
+            condition_matches("definitely-not-a-dotman-command", Path::new(".")).unwrap(),
+            ConditionResult::Error(_)
+        ));
+    }
+
+    #[test]
+    fn condition_timeout_returns_error_without_waiting_for_command() {
+        let started = Instant::now();
+        let result =
+            condition_matches_with_timeout("sleep 1", Path::new("."), Duration::from_millis(20))
+                .unwrap();
+
+        assert!(matches!(result, ConditionResult::Error(message) if message.contains("timed out")));
+        assert!(started.elapsed() < Duration::from_millis(500));
     }
 
     #[test]
@@ -375,6 +498,14 @@ mod tests {
         // "sudo" must be a whole word, not a substring.
         assert!(!command_contains_sudo("pseudocode_here"));
         assert!(command_contains_sudo("echo sudo echo")); // word match
+    }
+
+    #[test]
+    fn command_contains_sudo_handles_paths_separators_and_quotes() {
+        assert!(command_contains_sudo("echo ok; /usr/bin/sudo true"));
+        assert!(command_contains_sudo("true && sudo echo ok"));
+        assert!(!command_contains_sudo("echo 'sudo is text'"));
+        assert!(!command_contains_sudo("echo /tmp/sudoers"));
     }
 
     #[test]

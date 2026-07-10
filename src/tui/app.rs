@@ -19,15 +19,24 @@ pub struct App {
     pub runs: Vec<Run>,
     pub(super) review_entries: Vec<review::ReviewEntry>,
     pub(super) review_scroll: usize,
+    pub(super) review_danger_confirmed: bool,
+    pub(super) review_thread: Option<std::thread::JoinHandle<Vec<review::ReviewEntry>>>,
     pub menu_state: ListState,
     pub plan_state: ListState,
     pub history_state: ListState,
+    pub replay_state: ListState,
+    pub replay_scroll: usize,
+    pub replay_follow_selection: bool,
+    pub replay_expanded: BTreeSet<String>,
     pub grid_col: usize,
     pub plan_columns: usize,
+    pub plan_exit_pending: bool,
     pub collapsed_layers: BTreeSet<String>,
     pub status_message: String,
+    pub status_kind: NoticeKind,
     pub status_is_focus_info: bool,
     pub should_quit: bool,
+    pub vim_pending_g: bool,
     pub dirty: bool,
     // For RunView
     pub spinner_frame: usize,
@@ -37,6 +46,7 @@ pub struct App {
     pub progress: (usize, usize), // (done, total)
     pub current_log: Vec<LogLine>,
     pub log_scroll: usize,
+    pub log_viewport_height: usize,
     pub log_follow: bool,
     pub log_dropped_count: usize,
     pub log_group: Option<String>,
@@ -105,6 +115,14 @@ impl LogFilter {
             Self::Errors => "errors",
         }
     }
+
+    pub fn previous(self) -> Self {
+        match self {
+            Self::All => Self::Errors,
+            Self::Current => Self::All,
+            Self::Errors => Self::Current,
+        }
+    }
 }
 
 impl App {
@@ -124,15 +142,24 @@ impl App {
             runs: Vec::new(),
             review_entries: Vec::new(),
             review_scroll: 0,
+            review_danger_confirmed: false,
+            review_thread: None,
             menu_state: list_state,
             plan_state,
             history_state,
+            replay_state: ListState::default(),
+            replay_scroll: 0,
+            replay_follow_selection: false,
+            replay_expanded: BTreeSet::new(),
             grid_col: 0,
             plan_columns: plan::GRID_COLUMNS,
+            plan_exit_pending: false,
             collapsed_layers: BTreeSet::new(),
             status_message: String::new(),
+            status_kind: NoticeKind::Info,
             status_is_focus_info: false,
             should_quit: false,
+            vim_pending_g: false,
             dirty: false,
             spinner_frame: 0,
             run_thread: None,
@@ -141,6 +168,7 @@ impl App {
             progress: (0, 0),
             current_log: Vec::new(),
             log_scroll: 0,
+            log_viewport_height: 8,
             log_follow: true,
             log_dropped_count: 0,
             log_group: None,
@@ -186,11 +214,17 @@ impl App {
             _ => PlanMode::Deploy,
         };
         let mut plan = crate::plan::build(cfg, plan_mode).map_err(|e| e.to_string())?;
-        apply_saved_selection(&mut plan)?;
+        if let Err(error) = apply_saved_selection(&mut plan) {
+            self.status_message = format!("selection ignored: {error}");
+            self.status_kind = NoticeKind::Warning;
+        }
         plan.sync_auto_steps();
         self.plan = Some(plan);
         self.review_entries.clear();
+        self.review_thread = None;
         self.review_scroll = 0;
+        self.review_danger_confirmed = false;
+        self.plan_exit_pending = false;
         plan::select_first_plan_row(
             &mut self.plan_state,
             self.plan.as_ref(),
@@ -206,20 +240,29 @@ impl App {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeKind {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
 pub(super) fn initialize_screen(app: &mut App) {
     match app.mode.clone() {
         Mode::Menu => {
-            app.runs = store::list().unwrap_or_default();
+            load_runs(app);
             history::clamp_menu_selection(app);
         }
         Mode::Deploy | Mode::Plan => {
             if let Err(e) = app.build_plan() {
                 app.status_message = e;
+                app.status_kind = NoticeKind::Error;
             }
             app.screen = Screen::PlanView;
         }
         Mode::History => {
-            app.runs = store::list().unwrap_or_default();
+            load_runs(app);
             history::clamp_history_selection(app);
             app.screen = Screen::HistoryView;
         }
@@ -229,15 +272,40 @@ pub(super) fn initialize_screen(app: &mut App) {
                 app.screen = Screen::RunReplay;
             }
             Err(e) => {
+                load_runs(app);
                 app.status_message = e.to_string();
+                app.status_kind = NoticeKind::Error;
                 app.screen = Screen::HistoryView;
             }
         },
     }
 }
 
+pub(super) fn load_runs(app: &mut App) {
+    match store::list_detailed() {
+        Ok(report) => {
+            app.runs = report.runs;
+            if let Some(warning) = report.warnings.first() {
+                let suffix = if report.warnings.len() > 1 {
+                    format!(" (+{} more)", report.warnings.len() - 1)
+                } else {
+                    String::new()
+                };
+                app.status_message = format!("{warning}{suffix}");
+                app.status_kind = NoticeKind::Warning;
+            }
+        }
+        Err(error) => {
+            app.runs.clear();
+            app.status_message = format!("failed to read history: {error}");
+            app.status_kind = NoticeKind::Error;
+        }
+    }
+}
+
 pub(super) fn apply_saved_selection(plan: &mut Plan) -> Result<(), String> {
-    let selection = store::load_selection().map_err(|e| e.to_string())?;
+    let selection = store::load_selection_scoped(&plan.config_path, &plan.config_hash)
+        .map_err(|e| e.to_string())?;
     for item in &mut plan.items {
         if let Some(selected) = selection.items.get(&item.id) {
             item.selected = *selected;
@@ -255,9 +323,11 @@ pub(super) fn save_current_selection(app: &mut App) -> Result<(), String> {
             .map(|item| (item.id.clone(), item.selected))
             .collect(),
     };
-    let path = store::save_selection(&selection).map_err(|e| e.to_string())?;
+    let path = store::save_selection_scoped(&plan.config_path, &plan.config_hash, &selection)
+        .map_err(|e| e.to_string())?;
     app.dirty = false;
     app.status_message = format!("saved selection to {}", path.display());
+    app.status_kind = NoticeKind::Success;
     app.status_is_focus_info = false;
     Ok(())
 }

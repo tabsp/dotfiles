@@ -30,6 +30,24 @@ pub(super) fn divider_style() -> Style {
     Style::default().fg(CATPPUCCIN_MOCHA.divider)
 }
 
+pub(super) fn notice_style(kind: NoticeKind) -> Style {
+    Style::default().fg(match kind {
+        NoticeKind::Info => CATPPUCCIN_MOCHA.text_muted,
+        NoticeKind::Success => CATPPUCCIN_MOCHA.success,
+        NoticeKind::Warning => CATPPUCCIN_MOCHA.warning,
+        NoticeKind::Error => CATPPUCCIN_MOCHA.danger,
+    })
+}
+
+pub(super) fn notice_label(kind: NoticeKind) -> &'static str {
+    match kind {
+        NoticeKind::Info => "info",
+        NoticeKind::Success => "saved",
+        NoticeKind::Warning => "warning",
+        NoticeKind::Error => "error",
+    }
+}
+
 pub(super) fn display_width(value: &str) -> usize {
     UnicodeWidthStr::width(value)
 }
@@ -79,46 +97,32 @@ pub(super) fn plan_help_line(width: usize, read_only: bool) -> Line<'static> {
     let readonly_full = [
         ("↑↓", " Navigate  "),
         ("Space", " Toggle  "),
-        ("Enter", " Expand  "),
-        ("S", " Save  "),
-        ("Q", " Back  "),
+        ("s", " Save  "),
+        ("q", " Back  "),
         ("read-only", ""),
     ];
     let readonly_compact = [
         ("↑↓", " "),
         ("Spc", " "),
-        ("Ent", " "),
-        ("S", " "),
-        ("Q", " "),
+        ("s", " "),
+        ("q", " "),
         ("read-only", ""),
     ];
     let full = [
         ("↑↓", " Navigate  "),
         ("Space", " Toggle  "),
-        ("Enter", " Expand  "),
-        ("1-6", " Jump  "),
-        ("S", " Save  "),
-        ("R", " Review  "),
-        ("Q", " Back"),
+        ("s", " Save  "),
+        ("r", " Review  "),
+        ("q", " Back"),
     ];
     let short = [
         ("↑↓", " "),
         ("Space", " "),
-        ("Enter", " "),
-        ("1-6", " "),
-        ("S", " "),
-        ("R", " "),
-        ("Q", ""),
+        ("s", " "),
+        ("r", " "),
+        ("q", ""),
     ];
-    let compact = [
-        ("↑↓", " "),
-        ("Spc", " "),
-        ("Ent", " "),
-        ("1-6", " "),
-        ("S", " "),
-        ("R", " "),
-        ("Q", ""),
-    ];
+    let compact = [("↑↓", " "), ("Spc", " "), ("s", " "), ("r", " "), ("q", "")];
 
     let candidates: Vec<&[(&'static str, &'static str)]> = if read_only {
         vec![&readonly_full[..], &readonly_compact[..]]
@@ -132,18 +136,13 @@ pub(super) fn plan_help_line(width: usize, read_only: bool) -> Line<'static> {
         }
     }
 
-    help_line_from_parts(&[("Q", "")])
+    help_line_from_parts(&[("q", "")])
 }
 
 pub(super) fn review_help_line(width: usize) -> Line<'static> {
-    let full = [
-        ("↑↓/j/k", " Scroll  "),
-        ("Pg", " Page  "),
-        ("Enter/R", " Run  "),
-        ("E/Q", " Edit"),
-    ];
-    let short = [("↑↓/jk", " "), ("Pg", " "), ("Enter/R", " "), ("E/Q", "")];
-    let compact = [("↑↓", " "), ("Pg", " "), ("R", " "), ("E/Q", "")];
+    let full = [("↑↓", " Scroll  "), ("r", " Run  "), ("q", " Back")];
+    let short = [("↑↓", " "), ("r", " "), ("q", "")];
+    let compact = [("↑↓", " "), ("r", " "), ("q", "")];
 
     for parts in [&full[..], &short[..], &compact[..]] {
         let line = help_line_from_parts(parts);
@@ -152,7 +151,7 @@ pub(super) fn review_help_line(width: usize) -> Line<'static> {
         }
     }
 
-    help_line_from_parts(&[("Q", "")])
+    help_line_from_parts(&[("q", "")])
 }
 
 pub(super) fn run_help_line(
@@ -162,38 +161,38 @@ pub(super) fn run_help_line(
     log_follow: bool,
 ) -> Line<'static> {
     if aborting {
-        let full = [("Q/Esc", " Stopping")];
-        let compact = [("Q", "")];
+        let full = [("q", " Stopping")];
+        let compact = [("q", "")];
         for parts in [&full[..], &compact[..]] {
             let line = help_line_from_parts(parts);
             if line_display_width(&line) <= width {
                 return line;
             }
         }
-        return help_line_from_parts(&[("Q", "")]);
+        return help_line_from_parts(&[("q", "")]);
     }
 
     const PAUSED_FULL: &[(&str, &str)] = &[
-        ("Pg/Home/End", " Log  "),
+        ("↑↓", " Scroll  "),
         ("Tab", " Filter  "),
         ("Enter", " Fold  "),
-        ("F", " Follow  "),
-        ("Q/Esc", " Back"),
+        ("f", " Follow  "),
+        ("q", " Abort"),
     ];
     const FINISHED_FULL: &[(&str, &str)] = &[
-        ("Pg/Home/End", " Log  "),
+        ("↑↓", " Scroll  "),
         ("Tab", " Filter  "),
         ("Enter", " Fold  "),
-        ("Q/Esc", " Back"),
+        ("q", " Back"),
     ];
     const RUNNING_FULL: &[(&str, &str)] = &[
-        ("Pg/Home/End", " Log  "),
+        ("↑↓", " Scroll  "),
         ("Tab", " Filter  "),
         ("Enter", " Fold  "),
-        ("Q/Esc", " Abort"),
+        ("q", " Abort"),
     ];
-    const PAUSED_COMPACT: &[(&str, &str)] = &[("Pg", " "), ("F", " "), ("Q", "")];
-    const COMPACT: &[(&str, &str)] = &[("Pg", " "), ("Q", "")];
+    const PAUSED_COMPACT: &[(&str, &str)] = &[("↑↓", " "), ("f", " "), ("q", "")];
+    const COMPACT: &[(&str, &str)] = &[("↑↓", " "), ("q", "")];
     let full = if !log_follow {
         PAUSED_FULL
     } else if finished {
@@ -208,7 +207,7 @@ pub(super) fn run_help_line(
             return line;
         }
     }
-    help_line_from_parts(&[("Q", "")])
+    help_line_from_parts(&[("q", "")])
 }
 
 pub(super) fn help_line_from_parts(parts: &[(&'static str, &'static str)]) -> Line<'static> {

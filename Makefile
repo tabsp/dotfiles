@@ -61,6 +61,7 @@ test:
 	cargo test
 
 ci: lint test
+	cargo test --test tui_pty -- --nocapture
 
 clean:
 	cargo clean

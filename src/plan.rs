@@ -80,6 +80,8 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
         let action = Action::Link {
             target: link.target.clone(),
             source: link.source.clone(),
+            backup: link.backup.unwrap_or(true),
+            relink: link.relink.unwrap_or(false),
         };
         if let Some(item) = owner {
             item.actions.push(action);
@@ -536,6 +538,51 @@ mod tests {
         assert_eq!(fish.actions.len(), 2);
         assert!(matches!(fish.actions[0], Action::Install { .. }));
         assert!(matches!(fish.actions[1], Action::Link { .. }));
+    }
+
+    #[test]
+    fn plan_preserves_link_backup_and_relink_settings() {
+        let cfg = Config {
+            install: vec![],
+            links: vec![
+                LinkEntry {
+                    target: PathBuf::from("/tmp/home/a"),
+                    source: PathBuf::from("a"),
+                    backup: Some(false),
+                    relink: Some(true),
+                },
+                LinkEntry {
+                    target: PathBuf::from("/tmp/home/b"),
+                    source: PathBuf::from("b"),
+                    backup: None,
+                    relink: None,
+                },
+            ],
+            ..sample_config()
+        };
+        let plan = build(&cfg, Mode::Deploy).unwrap();
+
+        let links = plan
+            .items
+            .iter()
+            .flat_map(|item| item.actions.iter())
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            links.first(),
+            Some(Action::Link {
+                backup: false,
+                relink: true,
+                ..
+            })
+        ));
+        assert!(matches!(
+            links.get(1),
+            Some(Action::Link {
+                backup: true,
+                relink: false,
+                ..
+            })
+        ));
     }
 
     #[test]

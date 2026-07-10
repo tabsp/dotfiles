@@ -1,5 +1,8 @@
 use super::*;
 
+const REPLAY_PAGE_SIZE: usize = 8;
+const REPLAY_OUTPUT_PREVIEW_LINES: usize = 12;
+
 // ---------------- HistoryView ----------------
 
 pub(super) fn handle_history(app: &mut App, key: KeyCode) -> Result<()> {
@@ -25,11 +28,34 @@ pub(super) fn handle_history(app: &mut App, key: KeyCode) -> Result<()> {
             app.history_state
                 .select((!app.runs.is_empty()).then_some(prev));
         }
+        KeyCode::PageDown => {
+            let next = app
+                .history_state
+                .selected()
+                .unwrap_or(0)
+                .saturating_add(REPLAY_PAGE_SIZE)
+                .min(app.runs.len().saturating_sub(1));
+            app.history_state
+                .select((!app.runs.is_empty()).then_some(next));
+        }
+        KeyCode::PageUp => {
+            let prev = app
+                .history_state
+                .selected()
+                .unwrap_or(0)
+                .saturating_sub(REPLAY_PAGE_SIZE);
+            app.history_state
+                .select((!app.runs.is_empty()).then_some(prev));
+        }
         KeyCode::Enter => {
             if let Some(idx) = app.history_state.selected()
                 && let Some(run) = app.runs.get(idx)
             {
                 app.run = Some(run.clone());
+                app.replay_state
+                    .select((!run.items.is_empty()).then_some(0));
+                app.replay_scroll = 0;
+                app.replay_expanded.clear();
                 app.screen = Screen::RunReplay;
             }
         }
@@ -38,15 +64,33 @@ pub(super) fn handle_history(app: &mut App, key: KeyCode) -> Result<()> {
                 && let Some(run) = app.runs.get(idx)
             {
                 let id = run.id.clone();
-                if store::delete(&id).is_ok() {
-                    app.runs.remove(idx);
-                    clamp_history_selection(app);
+                match store::delete(&id) {
+                    Ok(()) => {
+                        app.runs.remove(idx);
+                        clamp_history_selection(app);
+                        app.status_message = format!("deleted run {id}");
+                        app.status_kind = NoticeKind::Success;
+                    }
+                    Err(error) => {
+                        app.status_message = format!("failed to delete run {id}: {error}");
+                        app.status_kind = NoticeKind::Error;
+                    }
                 }
             }
         }
         _ => {}
     }
     Ok(())
+}
+
+pub(super) fn jump_history_top(app: &mut App) {
+    app.history_state
+        .select((!app.runs.is_empty()).then_some(0));
+}
+
+pub(super) fn jump_history_bottom(app: &mut App) {
+    app.history_state
+        .select((!app.runs.is_empty()).then_some(app.runs.len().saturating_sub(1)));
 }
 
 pub(super) fn render_history(f: &mut Frame, app: &mut App) {
@@ -81,6 +125,15 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
         ),
     ]));
     f.render_widget(title, chunks[0]);
+
+    if !app.status_message.is_empty() {
+        let line = Paragraph::new(Line::from(Span::styled(
+            fit_to_width(&app.status_message, usize::from(chunks[1].width)),
+            notice_style(app.status_kind),
+        )));
+        let banner = Rect::new(chunks[1].x, chunks[1].y, chunks[1].width, 1);
+        f.render_widget(line, banner);
+    }
 
     if app.runs.is_empty() {
         f.render_widget(
@@ -151,7 +204,14 @@ fn history_run_line(
     let status_style = span_bg_style(bg).fg(run_status_color(run.status));
     let text_style = span_bg_style(bg).fg(CATPPUCCIN_MOCHA.fg);
     let muted_style = span_bg_style(bg).fg(CATPPUCCIN_MOCHA.fg_dim);
-    let left = format!("{}  {}  ", run.started_at, mode);
+    let config_label = run
+        .config_path
+        .as_ref()
+        .and_then(|path| path.parent())
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown-config");
+    let left = format!("{}  {}  {}  ", run.started_at, mode, config_label);
     let right = format!("  {}", run.id);
     let fixed = display_width(marker) + display_width(&left) + display_width(status);
     let id_width = width.saturating_sub(fixed);
@@ -177,31 +237,84 @@ fn run_status_color(status: RunStatus) -> Color {
 
 fn history_help_line(width: usize) -> Line<'static> {
     let full = [
-        ("↑↓/j/k", " Navigate  "),
-        ("Enter", " View  "),
-        ("D", " Delete  "),
-        ("Q", " Back"),
+        ("↑↓", " Navigate  "),
+        ("Enter", " Open  "),
+        ("d", " Delete  "),
+        ("q", " Back"),
     ];
-    let compact = [("↑↓", " "), ("Enter", " "), ("D", " "), ("Q", "")];
+    let compact = [("↑↓", " "), ("Ent", " "), ("d", " "), ("q", "")];
     for parts in [&full[..], &compact[..]] {
         let line = help_line_from_parts(parts);
         if line_display_width(&line) <= width {
             return line;
         }
     }
-    help_line_from_parts(&[("Q", "")])
+    help_line_from_parts(&[("q", "")])
 }
 
 // ---------------- RunReplay ----------------
 
 pub(super) fn handle_replay(app: &mut App, key: KeyCode) -> Result<()> {
+    let len = replay_action_count(app.run.as_ref());
     match key {
         KeyCode::Char('q') | KeyCode::Esc => {
             app.screen = Screen::HistoryView;
         }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let next = app
+                .replay_state
+                .selected()
+                .unwrap_or(0)
+                .saturating_add(1)
+                .min(len.saturating_sub(1));
+            app.replay_state.select((len > 0).then_some(next));
+            app.replay_follow_selection = true;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let prev = app.replay_state.selected().unwrap_or(0).saturating_sub(1);
+            app.replay_state.select((len > 0).then_some(prev));
+            app.replay_follow_selection = true;
+        }
+        KeyCode::PageDown => {
+            app.replay_scroll = app.replay_scroll.saturating_add(REPLAY_PAGE_SIZE);
+        }
+        KeyCode::PageUp => {
+            app.replay_scroll = app.replay_scroll.saturating_sub(REPLAY_PAGE_SIZE);
+        }
+        KeyCode::Home => {
+            app.replay_scroll = 0;
+            app.replay_state.select((len > 0).then_some(0));
+        }
+        KeyCode::End => {
+            app.replay_state
+                .select((len > 0).then_some(len.saturating_sub(1)));
+            app.replay_scroll = usize::MAX;
+        }
+        KeyCode::Enter | KeyCode::Char(' ') => {
+            if let Some(key) = selected_replay_key(app)
+                && !app.replay_expanded.insert(key.clone())
+            {
+                app.replay_expanded.remove(&key);
+            }
+        }
         _ => {}
     }
     Ok(())
+}
+
+pub(super) fn jump_replay_top(app: &mut App) {
+    let len = replay_action_count(app.run.as_ref());
+    app.replay_state.select((len > 0).then_some(0));
+    app.replay_scroll = 0;
+    app.replay_follow_selection = true;
+}
+
+pub(super) fn jump_replay_bottom(app: &mut App) {
+    let len = replay_action_count(app.run.as_ref());
+    app.replay_state
+        .select((len > 0).then_some(len.saturating_sub(1)));
+    app.replay_scroll = usize::MAX;
+    app.replay_follow_selection = true;
 }
 
 pub(super) fn render_replay(f: &mut Frame, app: &mut App) {
@@ -259,11 +372,25 @@ pub(super) fn render_replay(f: &mut Frame, app: &mut App) {
         chunks[1],
     );
 
-    let lines = run::grouped_run_lines(
-        run::finished_run_display_lines(run, usize::from(chunks[2].width)),
-        usize::from(chunks[2].width),
-        usize::from(chunks[2].height),
-    );
+    let mut lines = replay_lines(app, usize::from(chunks[2].width));
+    let viewport_height = usize::from(chunks[2].height).max(1);
+    if app.replay_follow_selection {
+        if let Some(selected_line) = selected_replay_line_index(&lines) {
+            if selected_line < app.replay_scroll {
+                app.replay_scroll = selected_line;
+            } else if selected_line >= app.replay_scroll.saturating_add(viewport_height) {
+                app.replay_scroll = selected_line + 1 - viewport_height;
+            }
+        }
+        app.replay_follow_selection = false;
+    }
+    let max_scroll = lines.len().saturating_sub(viewport_height);
+    app.replay_scroll = app.replay_scroll.min(max_scroll);
+    lines = lines
+        .into_iter()
+        .skip(app.replay_scroll)
+        .take(usize::from(chunks[2].height))
+        .collect();
 
     f.render_widget(
         Paragraph::new(lines).block(Block::default().borders(Borders::NONE)),
@@ -275,13 +402,160 @@ pub(super) fn render_replay(f: &mut Frame, app: &mut App) {
 }
 
 fn replay_help_line(width: usize) -> Line<'static> {
-    let full = [("Q/Esc", " Back")];
-    let compact = [("Q", "")];
+    let full = [
+        ("↑↓", " Navigate  "),
+        ("Space", " Toggle  "),
+        ("q", " Back"),
+    ];
+    let compact = [("↑↓", " "), ("Pg", " "), ("Ent", " "), ("q", "")];
     for parts in [&full[..], &compact[..]] {
         let line = help_line_from_parts(parts);
         if line_display_width(&line) <= width {
             return line;
         }
     }
-    help_line_from_parts(&[("Q", "")])
+    help_line_from_parts(&[("q", "")])
+}
+
+fn replay_action_count(run: Option<&Run>) -> usize {
+    run.map(|run| run.items.iter().map(|item| item.actions.len().max(1)).sum())
+        .unwrap_or(0)
+}
+
+fn selected_replay_key(app: &App) -> Option<String> {
+    let run = app.run.as_ref()?;
+    let selected = app.replay_state.selected()?;
+    replay_entries(run)
+        .get(selected)
+        .map(|entry| replay_key(entry.item_index, entry.action_index))
+}
+
+fn replay_key(item_index: usize, action_index: usize) -> String {
+    format!("{item_index}:{action_index}")
+}
+
+struct ReplayEntry<'a> {
+    item_index: usize,
+    action_index: usize,
+    item: &'a RunItem,
+    action: Option<&'a RunAction>,
+}
+
+fn replay_entries(run: &Run) -> Vec<ReplayEntry<'_>> {
+    let mut entries = Vec::new();
+    for (item_index, item) in run.items.iter().enumerate() {
+        if item.actions.is_empty() {
+            entries.push(ReplayEntry {
+                item_index,
+                action_index: 0,
+                item,
+                action: None,
+            });
+        } else {
+            for (action_index, action) in item.actions.iter().enumerate() {
+                entries.push(ReplayEntry {
+                    item_index,
+                    action_index,
+                    item,
+                    action: Some(action),
+                });
+            }
+        }
+    }
+    entries
+}
+
+pub(super) fn replay_lines(app: &App, width: usize) -> Vec<Line<'static>> {
+    let Some(run) = app.run.as_ref() else {
+        return vec![Line::from("no run loaded")];
+    };
+    let selected = app.replay_state.selected();
+    let mut lines = Vec::new();
+    for (idx, entry) in replay_entries(run).iter().enumerate() {
+        let selected_row = selected == Some(idx);
+        let key = replay_key(entry.item_index, entry.action_index);
+        let expanded = app.replay_expanded.contains(&key);
+        let status = entry
+            .action
+            .map(|action| action.status)
+            .unwrap_or(entry.item.status);
+        let name = entry
+            .action
+            .map(|action| format!("{} / {}", entry.item.name, action.name))
+            .unwrap_or_else(|| entry.item.name.clone());
+        let row_bg = selected_row.then(focus_bg);
+        let marker = if selected_row { "▎ " } else { "  " };
+        let status_style = run::run_status_style(Some(status), false);
+        let status_style = row_bg.map_or(status_style, |bg| status_style.bg(bg));
+        let prefix = if expanded { "▾" } else { "▸" };
+        lines.push(Line::from(vec![
+            Span::styled(
+                marker,
+                span_bg_style(row_bg).fg(if selected_row {
+                    CATPPUCCIN_MOCHA.focus_marker
+                } else {
+                    CATPPUCCIN_MOCHA.fg_dim
+                }),
+            ),
+            Span::styled(prefix, span_bg_style(row_bg).fg(CATPPUCCIN_MOCHA.fg_dim)),
+            Span::styled(" ", span_bg_style(row_bg)),
+            Span::styled(
+                fit_to_width(&name, width.saturating_sub(16)),
+                span_bg_style(row_bg).fg(CATPPUCCIN_MOCHA.fg),
+            ),
+            Span::styled(run::run_item_status_label(status), status_style),
+        ]));
+        if expanded {
+            if let Some(error) = entry.action.and_then(|action| action.error.as_ref()) {
+                lines.push(Line::from(Span::styled(
+                    format!("    error: {error}"),
+                    Style::default().fg(CATPPUCCIN_MOCHA.danger),
+                )));
+            }
+            let output = entry
+                .action
+                .map(|action| action.output.as_slice())
+                .unwrap_or(entry.item.output.as_slice());
+            if output.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "    no saved output",
+                    Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+                )));
+            } else {
+                for line in output.iter().take(REPLAY_OUTPUT_PREVIEW_LINES) {
+                    let stream = match line.stream {
+                        OutputStream::Stdout => "stdout",
+                        OutputStream::Stderr => "stderr",
+                        OutputStream::Action => "action",
+                    };
+                    lines.push(Line::from(Span::styled(
+                        fit_to_width(&format!("    {stream}: {}", line.line), width),
+                        Style::default().fg(match line.stream {
+                            OutputStream::Stderr => CATPPUCCIN_MOCHA.warning,
+                            OutputStream::Stdout => CATPPUCCIN_MOCHA.fg_dim,
+                            OutputStream::Action => CATPPUCCIN_MOCHA.primary,
+                        }),
+                    )));
+                }
+                if output.len() > REPLAY_OUTPUT_PREVIEW_LINES {
+                    lines.push(Line::from(Span::styled(
+                        format!(
+                            "    ... {} more saved output lines",
+                            output.len() - REPLAY_OUTPUT_PREVIEW_LINES
+                        ),
+                        Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+                    )));
+                }
+            }
+        }
+    }
+    lines
+}
+
+fn selected_replay_line_index(lines: &[Line<'static>]) -> Option<usize> {
+    lines.iter().position(|line| {
+        line.spans
+            .first()
+            .is_some_and(|span| span.content.as_ref() == "▎ ")
+    })
 }

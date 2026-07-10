@@ -14,6 +14,13 @@ pub(super) enum PlanRow {
 }
 
 pub(super) const GRID_COLUMNS: usize = 3;
+const PLAN_PAGE_SIZE: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PlanFocus {
+    Layer(String),
+    Item(String),
+}
 
 // ---------------- PlanView ----------------
 
@@ -23,13 +30,50 @@ pub(super) fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
         .as_ref()
         .map(|plan| build_plan_rows(plan, &app.collapsed_layers, app.plan_columns))
         .unwrap_or_default();
+    if app.plan_exit_pending {
+        match key {
+            KeyCode::Char('s') => {
+                if let Err(e) = app::save_current_selection(app) {
+                    app.status_message = e;
+                    app.status_kind = NoticeKind::Error;
+                    app.status_is_focus_info = false;
+                } else {
+                    app.plan_exit_pending = false;
+                    app::load_runs(app);
+                    app.screen = Screen::MainMenu;
+                }
+            }
+            KeyCode::Char('d') => {
+                app.plan_exit_pending = false;
+                app.dirty = false;
+                app::load_runs(app);
+                app.screen = Screen::MainMenu;
+            }
+            KeyCode::Esc => {
+                app.plan_exit_pending = false;
+                app.status_message.clear();
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
     match key {
         KeyCode::Char('q') | KeyCode::Esc => {
-            app.screen = Screen::MainMenu;
+            if app.dirty {
+                app.plan_exit_pending = true;
+                app.status_message =
+                    "Unsaved selection changes  [S] Save  [D] Discard  [Esc] Cancel".into();
+                app.status_kind = NoticeKind::Warning;
+                app.status_is_focus_info = false;
+            } else {
+                app::load_runs(app);
+                app.screen = Screen::MainMenu;
+            }
         }
         KeyCode::Char('s') => {
             if let Err(e) = app::save_current_selection(app) {
                 app.status_message = e;
+                app.status_kind = NoticeKind::Error;
                 app.status_is_focus_info = false;
             }
         }
@@ -39,6 +83,18 @@ pub(super) fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
         }
         KeyCode::Char('k') | KeyCode::Up => {
             select_prev_plan_row(app, &rows);
+            update_plan_focus_info(app);
+        }
+        KeyCode::PageDown => {
+            for _ in 0..PLAN_PAGE_SIZE {
+                select_next_plan_row(app, &rows);
+            }
+            update_plan_focus_info(app);
+        }
+        KeyCode::PageUp => {
+            for _ in 0..PLAN_PAGE_SIZE {
+                select_prev_plan_row(app, &rows);
+            }
             update_plan_focus_info(app);
         }
         KeyCode::Char('h') | KeyCode::Left => {
@@ -121,23 +177,43 @@ pub(super) fn handle_plan(app: &mut App, key: KeyCode) -> Result<()> {
         KeyCode::Char('r') => {
             if matches!(app.mode, Mode::Plan) {
                 app.status_message = "plan mode is read-only; choose deploy to run".into();
+                app.status_kind = NoticeKind::Info;
                 app.status_is_focus_info = false;
             } else if review::selected_item_count(app.plan.as_ref()) == 0 {
                 app.status_message = "nothing selected".into();
+                app.status_kind = NoticeKind::Warning;
                 app.status_is_focus_info = false;
             } else {
-                app.review_entries = if let Some(plan) = app.plan.as_ref() {
-                    review::review_entries(plan, app.config.as_ref())
-                } else {
-                    Vec::new()
-                };
-                app.review_scroll = 0;
-                app.screen = Screen::ConfirmView;
+                review::start_review(app);
             }
         }
         _ => {}
     }
     Ok(())
+}
+
+pub(super) fn jump_plan_top(app: &mut App) {
+    let rows = app
+        .plan
+        .as_ref()
+        .map(|plan| build_plan_rows(plan, &app.collapsed_layers, app.plan_columns))
+        .unwrap_or_default();
+    let first = rows.iter().position(is_selectable_plan_row).unwrap_or(0);
+    select_plan_row(&mut app.plan_state, first, true);
+    app.grid_col = 0;
+    update_plan_focus_info(app);
+}
+
+pub(super) fn jump_plan_bottom(app: &mut App) {
+    let rows = app
+        .plan
+        .as_ref()
+        .map(|plan| build_plan_rows(plan, &app.collapsed_layers, app.plan_columns))
+        .unwrap_or_default();
+    let last = rows.iter().rposition(is_selectable_plan_row).unwrap_or(0);
+    select_plan_row(&mut app.plan_state, last, true);
+    app.grid_col = 0;
+    update_plan_focus_info(app);
 }
 
 pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
@@ -153,7 +229,14 @@ pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
         ])
         .split(area);
 
-    app.plan_columns = plan_grid_columns(usize::from(chunks[1].width));
+    let focus = current_plan_focus(app);
+    let next_columns = plan_grid_columns(usize::from(chunks[1].width));
+    if next_columns != app.plan_columns {
+        app.plan_columns = next_columns;
+        restore_plan_focus(app, focus);
+    } else {
+        app.plan_columns = next_columns;
+    }
     app.grid_col = clamped_grid_col_for_selection(app);
 
     let plan = match &app.plan {
@@ -269,10 +352,7 @@ pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
     } else {
         Line::from(vec![
             Span::raw("  "),
-            Span::styled(
-                &app.status_message,
-                Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
-            ),
+            Span::styled(&app.status_message, notice_style(app.status_kind)),
         ])
     };
     let help = Paragraph::new(vec![
@@ -428,8 +508,7 @@ pub(super) fn select_next_plan_row(app: &mut App, rows: &[PlanRow]) {
     let start = app.plan_state.selected().unwrap_or(0).saturating_add(1);
     let next = (start..rows.len())
         .find(|idx| is_selectable_plan_row(&rows[*idx]))
-        .or_else(|| rows.iter().position(is_selectable_plan_row))
-        .unwrap_or(0);
+        .unwrap_or(current.min(rows.len().saturating_sub(1)));
     clamp_grid_col(app, rows.get(next));
     select_plan_row(&mut app.plan_state, next, next < current);
 }
@@ -452,8 +531,7 @@ pub(super) fn select_prev_plan_row(app: &mut App, rows: &[PlanRow]) {
     let prev = (0..start)
         .rev()
         .find(|idx| is_selectable_plan_row(&rows[*idx]))
-        .or_else(|| rows.iter().rposition(is_selectable_plan_row))
-        .unwrap_or(0);
+        .unwrap_or(current.min(rows.len().saturating_sub(1)));
     clamp_grid_col(app, rows.get(prev));
     select_plan_row(&mut app.plan_state, prev, prev > current);
 }
@@ -556,6 +634,7 @@ pub(super) fn keep_selection_in_range(app: &mut App) {
 pub(super) fn update_plan_focus_info(app: &mut App) {
     if let Some(info) = focused_plan_item_info(app) {
         app.status_message = info;
+        app.status_kind = NoticeKind::Info;
         app.status_is_focus_info = true;
     } else {
         clear_focus_info(app);
@@ -577,6 +656,70 @@ pub(super) fn focused_plan_item_info(app: &App) -> Option<String> {
         }
         PlanRow::Header { .. } | PlanRow::Divider => None,
     }
+}
+
+pub(super) fn current_plan_focus(app: &App) -> Option<PlanFocus> {
+    let plan = app.plan.as_ref()?;
+    let row_idx = app.plan_state.selected()?;
+    let rows = build_plan_rows(plan, &app.collapsed_layers, app.plan_columns);
+    match rows.get(row_idx)? {
+        PlanRow::Header { layer, .. } => Some(PlanFocus::Layer(layer.clone())),
+        PlanRow::Item(item_idx) => plan
+            .items
+            .get(*item_idx)
+            .map(|item| PlanFocus::Item(item.id.clone())),
+        PlanRow::InlineItems(item_indices) => {
+            let col = app.grid_col.min(item_indices.len().saturating_sub(1));
+            item_indices
+                .get(col)
+                .and_then(|item_idx| plan.items.get(*item_idx))
+                .map(|item| PlanFocus::Item(item.id.clone()))
+        }
+        PlanRow::Divider => None,
+    }
+}
+
+pub(super) fn restore_plan_focus(app: &mut App, focus: Option<PlanFocus>) {
+    let Some(plan) = app.plan.as_ref() else {
+        return;
+    };
+    let rows = build_plan_rows(plan, &app.collapsed_layers, app.plan_columns);
+    let Some(focus) = focus else {
+        keep_selection_in_range(app);
+        return;
+    };
+    for (row_idx, row) in rows.iter().enumerate() {
+        match (row, &focus) {
+            (PlanRow::Header { layer, .. }, PlanFocus::Layer(wanted)) if layer == wanted => {
+                select_plan_row(&mut app.plan_state, row_idx, true);
+                app.grid_col = 0;
+                return;
+            }
+            (PlanRow::Item(item_idx), PlanFocus::Item(wanted))
+                if plan
+                    .items
+                    .get(*item_idx)
+                    .is_some_and(|item| &item.id == wanted) =>
+            {
+                select_plan_row(&mut app.plan_state, row_idx, true);
+                app.grid_col = 0;
+                return;
+            }
+            (PlanRow::InlineItems(item_indices), PlanFocus::Item(wanted)) => {
+                if let Some((col, _)) = item_indices.iter().enumerate().find(|(_, item_idx)| {
+                    plan.items
+                        .get(**item_idx)
+                        .is_some_and(|item| &item.id == wanted)
+                }) {
+                    select_plan_row(&mut app.plan_state, row_idx, true);
+                    app.grid_col = col;
+                    return;
+                }
+            }
+            _ => {}
+        }
+    }
+    keep_selection_in_range(app);
 }
 
 pub(super) fn clear_focus_info(app: &mut App) {

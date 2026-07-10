@@ -9,6 +9,7 @@ pub(super) fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
             app.mode = Mode::Deploy;
             if let Err(e) = app.build_plan() {
                 app.status_message = e;
+                app.status_kind = NoticeKind::Error;
             }
             app.screen = Screen::PlanView;
         }
@@ -16,11 +17,12 @@ pub(super) fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
             app.mode = Mode::Plan;
             if let Err(e) = app.build_plan() {
                 app.status_message = e;
+                app.status_kind = NoticeKind::Error;
             }
             app.screen = Screen::PlanView;
         }
         KeyCode::Char('h') => {
-            app.runs = store::list().unwrap_or_default();
+            app::load_runs(app);
             history::clamp_history_selection(app);
             app.screen = Screen::HistoryView;
         }
@@ -36,11 +38,20 @@ pub(super) fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
                 app.menu_state.select(Some(i - 1));
             }
         }
+        KeyCode::PageDown => {
+            let i = app.menu_state.selected().unwrap_or(0);
+            app.menu_state.select(Some((i + 3).min(3)));
+        }
+        KeyCode::PageUp => {
+            let i = app.menu_state.selected().unwrap_or(0);
+            app.menu_state.select(Some(i.saturating_sub(3)));
+        }
         KeyCode::Enter => match app.menu_state.selected() {
             Some(0) => {
                 app.mode = Mode::Deploy;
                 if let Err(e) = app.build_plan() {
                     app.status_message = e;
+                    app.status_kind = NoticeKind::Error;
                 }
                 app.screen = Screen::PlanView;
             }
@@ -48,11 +59,12 @@ pub(super) fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
                 app.mode = Mode::Plan;
                 if let Err(e) = app.build_plan() {
                     app.status_message = e;
+                    app.status_kind = NoticeKind::Error;
                 }
                 app.screen = Screen::PlanView;
             }
             Some(2) => {
-                app.runs = store::list().unwrap_or_default();
+                app::load_runs(app);
                 history::clamp_history_selection(app);
                 app.screen = Screen::HistoryView;
             }
@@ -255,8 +267,17 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
         };
         let mode_str = format!("{:?}", run.mode).to_lowercase();
         let date_str = fmt_date(&run.started_at);
-        let total = run.items.len();
-        let failed = run.items.iter().filter(|i| i.error.is_some()).count();
+        let total = run
+            .items
+            .iter()
+            .filter(|item| !matches!(item.status, ActionStatus::WillSkip))
+            .count();
+        let failed = run
+            .items
+            .iter()
+            .flat_map(|item| item.actions.iter())
+            .filter(|action| matches!(action.status, ActionStatus::WillFail))
+            .count();
         summary_lines.push(Line::from(vec![
             Span::styled(
                 format!("  last run: {date_str}  "),
@@ -272,19 +293,32 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
 
     f.render_widget(Paragraph::new(summary_lines), chunks[2]);
 
-    let help = Paragraph::new(Line::from(vec![
-        keycap("↑↓"),
-        hint(" move  "),
-        keycap("enter"),
-        hint(" select  "),
-        keycap("d"),
-        hint(" deploy  "),
-        keycap("p"),
-        hint(" plan  "),
-        keycap("h"),
-        hint(" history  "),
-        keycap("q"),
-        hint(" quit"),
-    ]));
+    let help = Paragraph::new(main_menu_help_line(usize::from(chunks[3].width)));
     f.render_widget(help, chunks[3]);
+}
+
+fn main_menu_help_line(width: usize) -> Line<'static> {
+    let full = [
+        ("↑↓", " Navigate  "),
+        ("Enter", " Open  "),
+        ("d", " Deploy  "),
+        ("p", " Plan  "),
+        ("h", " History  "),
+        ("q", " Quit"),
+    ];
+    let compact = [
+        ("↑↓", " "),
+        ("Ent", " "),
+        ("d", " "),
+        ("p", " "),
+        ("h", " "),
+        ("q", ""),
+    ];
+    for parts in [&full[..], &compact[..]] {
+        let line = help_line_from_parts(parts);
+        if line_display_width(&line) <= width {
+            return line;
+        }
+    }
+    help_line_from_parts(&[("q", "")])
 }

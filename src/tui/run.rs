@@ -1,39 +1,58 @@
 use super::*;
 
+const RUN_EVENT_CHANNEL_CAPACITY: usize = 1024;
+const MAX_RUN_EVENTS_PER_FRAME: usize = 256;
+const MOUSE_SCROLL_LINES: isize = 3;
+
 // ---------------- RunView ----------------
 
 pub(super) fn handle_run(app: &mut App, key: KeyCode) -> Result<()> {
     match key {
         KeyCode::PageUp => scroll_run_log(app, -1),
         KeyCode::PageDown => scroll_run_log(app, 1),
+        KeyCode::Up => scroll_run_log_lines(app, -1),
+        KeyCode::Down => scroll_run_log_lines(app, 1),
+        KeyCode::Char('k') => scroll_run_log_lines(app, -1),
+        KeyCode::Char('j') => scroll_run_log_lines(app, 1),
+        KeyCode::Left => {
+            app.log_filter = app.log_filter.previous();
+            app.log_follow = true;
+            app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
+        }
+        KeyCode::Right => {
+            app.log_filter = app.log_filter.next();
+            app.log_follow = true;
+            app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
+        }
         KeyCode::Home => {
             app.log_follow = false;
             app.log_scroll = 0;
         }
-        KeyCode::End | KeyCode::Char('f') => {
+        KeyCode::End | KeyCode::Char('f') | KeyCode::Char('F') => {
             app.log_follow = true;
-            app.log_scroll = log_bottom_scroll(app, 0);
+            app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
         }
         KeyCode::Tab => {
             app.log_filter = app.log_filter.next();
             app.log_follow = true;
-            app.log_scroll = log_bottom_scroll(app, 0);
+            app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
         }
         KeyCode::Char('c') => {
             app.log_filter = LogFilter::Current;
             app.log_follow = true;
-            app.log_scroll = log_bottom_scroll(app, 0);
+            app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
         }
         KeyCode::Char('e') => {
             app.log_filter = LogFilter::Errors;
             app.log_follow = true;
-            app.log_scroll = log_bottom_scroll(app, 0);
+            app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
         }
         KeyCode::Enter => toggle_current_log_group(app),
         KeyCode::Char('q') | KeyCode::Esc => {
             if let Some(flag) = &app.abort_flag {
                 flag.store(true, Ordering::SeqCst);
                 app.status_message = "abort requested; waiting for current action".into();
+                app.status_kind = NoticeKind::Warning;
                 push_log(app, "abort requested; waiting for current action", None);
             } else if app.plan.is_some() {
                 app.screen = Screen::PlanView;
@@ -44,6 +63,28 @@ pub(super) fn handle_run(app: &mut App, key: KeyCode) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+pub(super) fn handle_run_mouse(app: &mut App, kind: crossterm::event::MouseEventKind) {
+    match kind {
+        crossterm::event::MouseEventKind::ScrollUp => {
+            scroll_run_log_lines(app, -MOUSE_SCROLL_LINES)
+        }
+        crossterm::event::MouseEventKind::ScrollDown => {
+            scroll_run_log_lines(app, MOUSE_SCROLL_LINES)
+        }
+        _ => {}
+    }
+}
+
+pub(super) fn jump_run_top(app: &mut App) {
+    app.log_follow = false;
+    app.log_scroll = 0;
+}
+
+pub(super) fn jump_run_bottom(app: &mut App) {
+    app.log_follow = true;
+    app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
 }
 
 pub(super) fn start_run(app: &mut App) {
@@ -77,7 +118,7 @@ pub(super) fn start_run(app: &mut App) {
         .collect();
     app.screen = Screen::RunView;
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(RUN_EVENT_CHANNEL_CAPACITY);
     let sudo_tx = tx.clone();
     let abort_flag = Arc::new(AtomicBool::new(false));
     let thread_abort_flag = Arc::clone(&abort_flag);
@@ -123,7 +164,6 @@ pub(super) fn start_run(app: &mut App) {
 
 pub(super) fn render_run(f: &mut Frame, app: &mut App) {
     let area = f.area();
-    drain_run_events(app);
 
     // Try to join the run thread (non-blocking).
     if let Some(handle) = &app.run_thread
@@ -138,6 +178,7 @@ pub(super) fn render_run(f: &mut Frame, app: &mut App) {
             }
             Err(_) => {
                 app.run_error = Some("run thread panicked".into());
+                clear_active_run_state(app);
                 push_log(app, "run thread panicked", Some(CATPPUCCIN_MOCHA.danger));
                 app.abort_flag = None;
                 app.run_events = None;
@@ -146,7 +187,7 @@ pub(super) fn render_run(f: &mut Frame, app: &mut App) {
     }
 
     let aborting = run_is_aborting(app);
-    let finished = finished_run_for_view(app).is_some();
+    let finished = run_is_terminal(app);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -174,8 +215,11 @@ pub(super) fn render_run(f: &mut Frame, app: &mut App) {
         chunks[2],
     );
 
-    let log_lines = visible_log_lines(app, chunks[3].height.saturating_sub(2) as usize);
-    let log_scroll = log_scroll_offset(app, chunks[3].height.saturating_sub(2) as usize);
+    let log_viewport_height = chunks[3].height.saturating_sub(2).max(1) as usize;
+    app.log_viewport_height = log_viewport_height;
+    clamp_log_scroll(app, log_viewport_height);
+    let log_lines = visible_log_lines(app, log_viewport_height);
+    let log_scroll = log_scroll_offset(app, log_viewport_height);
     f.render_widget(
         Paragraph::new(log_lines)
             .block(
@@ -209,8 +253,15 @@ pub(super) fn apply_run_thread_result(app: &mut App, result: RunThreadResult) {
     if let Some(error) = result.error {
         let message = format!("run failed: {error}");
         app.run_error = Some(message.clone());
+        clear_active_run_state(app);
         push_log(app, &message, Some(CATPPUCCIN_MOCHA.danger));
     }
+}
+
+fn clear_active_run_state(app: &mut App) {
+    app.current_item = None;
+    app.current_action = None;
+    app.active_log_group = None;
 }
 
 pub(super) fn sync_finished_run_state(app: &mut App, run: &Run) {
@@ -238,6 +289,10 @@ pub(super) fn finished_run_for_view(app: &App) -> Option<&Run> {
     } else {
         None
     }
+}
+
+pub(super) fn run_is_terminal(app: &App) -> bool {
+    app.run_thread.is_none() && (app.run_error.is_some() || app.run.is_some())
 }
 
 pub(super) fn run_is_aborting(app: &App) -> bool {
@@ -375,6 +430,7 @@ pub(super) fn final_run_summary(run: &Run) -> String {
     let mut changed = 0;
     let mut no_change = 0;
     let mut failed = 0;
+    let mut aborted = 0;
     let mut not_run = 0;
     for item in &run.items {
         if item.actions.is_empty() {
@@ -382,6 +438,7 @@ pub(super) fn final_run_summary(run: &Run) -> String {
                 RunGroup::Changed => changed += 1,
                 RunGroup::NoChange => no_change += 1,
                 RunGroup::Failed => failed += 1,
+                RunGroup::Aborted => aborted += 1,
                 RunGroup::NotRun => not_run += 1,
                 _ => {}
             }
@@ -392,13 +449,16 @@ pub(super) fn final_run_summary(run: &Run) -> String {
                 RunGroup::Changed => changed += 1,
                 RunGroup::NoChange => no_change += 1,
                 RunGroup::Failed => failed += 1,
+                RunGroup::Aborted => aborted += 1,
                 RunGroup::NotRun => not_run += 1,
                 _ => {}
             }
         }
     }
-    if not_run > 0 {
-        format!("{changed} changed, {no_change} no change, {failed} failed, {not_run} not run")
+    if aborted > 0 || not_run > 0 {
+        format!(
+            "{changed} changed, {no_change} no change, {failed} failed, {aborted} aborted, {not_run} not run"
+        )
     } else {
         format!("{changed} changed, {no_change} no change, {failed} failed")
     }
@@ -432,7 +492,7 @@ pub(super) fn selected_run_action_total(plan: &Plan) -> usize {
 pub(super) fn run_action_total(run: &Run) -> usize {
     run.items
         .iter()
-        .filter(|item| item.error.as_deref() != Some("skipped (not selected)"))
+        .filter(|item| !run_item_was_unselected(item))
         .map(|item| item.actions.len().max(usize::from(item.actions.is_empty())))
         .sum()
 }
@@ -440,7 +500,7 @@ pub(super) fn run_action_total(run: &Run) -> usize {
 pub(super) fn run_executed_action_total(run: &Run) -> usize {
     run.items
         .iter()
-        .filter(|item| item.error.as_deref() != Some("skipped (not selected)"))
+        .filter(|item| !run_item_was_unselected(item))
         .map(|item| {
             if item.actions.is_empty() {
                 usize::from(item.status != ActionStatus::NotRun)
@@ -452,6 +512,10 @@ pub(super) fn run_executed_action_total(run: &Run) -> usize {
             }
         })
         .sum()
+}
+
+fn run_item_was_unselected(item: &RunItem) -> bool {
+    item.status == ActionStatus::WillSkip && item.started_at.is_none()
 }
 
 pub(super) fn run_progress_bar(done: usize, total: usize, width: usize) -> String {
@@ -479,6 +543,7 @@ pub(super) fn run_log_panel_height(total_height: u16) -> u16 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RunGroup {
     Failed,
+    Aborted,
     Running,
     Changed,
     NoChange,
@@ -616,6 +681,7 @@ pub(super) fn grouped_run_lines(
     let mut active_line = None;
     for group in [
         RunGroup::Failed,
+        RunGroup::Aborted,
         RunGroup::Running,
         RunGroup::Changed,
         RunGroup::NoChange,
@@ -674,6 +740,10 @@ pub(super) fn ordered_run_lines(
     width: usize,
     height: usize,
 ) -> Vec<Line<'static>> {
+    let focus = display_lines
+        .iter()
+        .position(|display_line| display_line.active)
+        .unwrap_or_else(|| display_lines.len().saturating_sub(1));
     let all_lines = display_lines
         .into_iter()
         .map(|display_line| display_line.line)
@@ -681,10 +751,6 @@ pub(super) fn ordered_run_lines(
     if all_lines.len() <= height {
         return all_lines;
     }
-    let focus = all_lines
-        .iter()
-        .position(|line| line_text_contains(line, "running"))
-        .unwrap_or_else(|| all_lines.len().saturating_sub(1));
     let mut start = focus.saturating_sub(height / 2);
     if start + height > all_lines.len() {
         start = all_lines.len() - height;
@@ -711,18 +777,13 @@ pub(super) fn ordered_run_lines(
     visible
 }
 
-pub(super) fn line_text_contains(line: &Line<'_>, needle: &str) -> bool {
-    line.spans
-        .iter()
-        .any(|span| span.content.as_ref().contains(needle))
-}
-
 pub(super) fn run_group_for_status(status: Option<ActionStatus>, active: bool) -> RunGroup {
     if active {
         return RunGroup::Running;
     }
     match status {
         Some(ActionStatus::WillFail) => RunGroup::Failed,
+        Some(ActionStatus::Aborted) => RunGroup::Aborted,
         Some(ActionStatus::NoChange) => RunGroup::NoChange,
         Some(ActionStatus::NotRun) => RunGroup::NotRun,
         Some(ActionStatus::WillSkip) => RunGroup::Skipped,
@@ -738,6 +799,11 @@ pub(super) fn run_group_header_line(group: RunGroup, count: usize, width: usize)
             icon_set.failed,
             "Failed",
             Style::default().fg(CATPPUCCIN_MOCHA.danger),
+        ),
+        RunGroup::Aborted => (
+            icon_set.warning,
+            "Aborted",
+            Style::default().fg(CATPPUCCIN_MOCHA.warning),
         ),
         RunGroup::Running => (
             icon_set.running,
@@ -866,6 +932,10 @@ pub(super) fn run_status_icon(status: Option<ActionStatus>) -> Span<'static> {
             icon_set.failed,
             Style::default().fg(CATPPUCCIN_MOCHA.danger),
         ),
+        Some(ActionStatus::Aborted) => Span::styled(
+            icon_set.warning,
+            Style::default().fg(CATPPUCCIN_MOCHA.warning),
+        ),
         Some(ActionStatus::WillSkip) => Span::styled(
             icon_set.skipped,
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
@@ -895,6 +965,7 @@ pub(super) fn run_status_style(status: Option<ActionStatus>, active: bool) -> St
     } else {
         match status {
             Some(ActionStatus::WillFail) => CATPPUCCIN_MOCHA.danger,
+            Some(ActionStatus::Aborted) => CATPPUCCIN_MOCHA.warning,
             Some(ActionStatus::WillSkip) => CATPPUCCIN_MOCHA.fg_dim,
             Some(ActionStatus::NotRun) => CATPPUCCIN_MOCHA.fg_dim,
             Some(ActionStatus::NoChange) => CATPPUCCIN_MOCHA.text_muted,
@@ -926,11 +997,16 @@ pub(super) fn run_action_kind_icon(kind: &str) -> &'static str {
     }
 }
 
-pub(super) fn drain_run_events(app: &mut App) {
+pub(super) fn drain_run_events(app: &mut App) -> bool {
     let Some(rx) = app.run_events.take() else {
-        return;
+        return false;
     };
-    while let Ok(event) = rx.try_recv() {
+    let mut drained = false;
+    for _ in 0..MAX_RUN_EVENTS_PER_FRAME {
+        let Ok(event) = rx.try_recv() else {
+            break;
+        };
+        drained = true;
         match event {
             crate::execute::ExecuteEvent::ItemStarted { index, name } => {
                 app.current_item = Some(index);
@@ -971,7 +1047,7 @@ pub(super) fn drain_run_events(app: &mut App) {
                     &format!("finished {action}: {status:?}"),
                     None,
                     1,
-                    if status == ActionStatus::WillFail {
+                    if matches!(status, ActionStatus::WillFail | ActionStatus::Aborted) {
                         LogKind::Stderr
                     } else {
                         LogKind::System
@@ -1004,6 +1080,17 @@ pub(super) fn drain_run_events(app: &mut App) {
                     Some(CATPPUCCIN_MOCHA.primary),
                     1,
                     LogKind::Action,
+                );
+            }
+            crate::execute::ExecuteEvent::ActionError { item, message } => {
+                let group = log_group_for_event(app, &item);
+                push_log_group(app, &group);
+                push_log_indented(
+                    app,
+                    &message,
+                    Some(CATPPUCCIN_MOCHA.danger),
+                    1,
+                    LogKind::Stderr,
                 );
             }
             crate::execute::ExecuteEvent::ItemFinished {
@@ -1071,6 +1158,7 @@ pub(super) fn drain_run_events(app: &mut App) {
         }
     }
     app.run_events = Some(rx);
+    drained
 }
 
 pub(super) fn log_group_for_event(app: &App, item: &str) -> String {
@@ -1118,28 +1206,47 @@ pub(super) fn push_log_indented(
         app.current_log.drain(0..drop_count);
         app.log_dropped_count = app.log_dropped_count.saturating_add(drop_count);
         app.log_scroll = app.log_scroll.saturating_sub(drop_count);
+        if let Some(first) = app.current_log.first()
+            && first.kind != LogKind::Header
+            && let Some(group) = first.group.clone()
+        {
+            app.current_log.insert(
+                0,
+                LogLine {
+                    text: group.clone(),
+                    fg: Some(CATPPUCCIN_MOCHA.primary),
+                    indent: 0,
+                    group: Some(group),
+                    kind: LogKind::Header,
+                },
+            );
+            if app.current_log.len() > MAX_TUI_OUTPUT_LINES {
+                app.current_log.pop();
+            }
+        }
     }
     if app.log_follow {
-        app.log_scroll = log_bottom_scroll(app, 0);
+        app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
     }
 }
 
 pub(super) fn scroll_run_log(app: &mut App, pages: isize) {
-    let step = 8usize;
+    let viewport_height = app.log_viewport_height.max(1);
+    scroll_run_log_lines(app, pages.saturating_mul(viewport_height as isize));
+}
+
+pub(super) fn scroll_run_log_lines(app: &mut App, lines: isize) {
+    let viewport_height = app.log_viewport_height.max(1);
     if app.log_follow {
-        app.log_scroll = log_bottom_scroll(app, 0);
+        app.log_scroll = log_bottom_scroll(app, viewport_height);
     }
     app.log_follow = false;
-    if pages.is_negative() {
-        app.log_scroll = app
-            .log_scroll
-            .saturating_sub(step.saturating_mul(pages.unsigned_abs()));
+    if lines.is_negative() {
+        app.log_scroll = app.log_scroll.saturating_sub(lines.unsigned_abs());
     } else {
-        app.log_scroll = app
-            .log_scroll
-            .saturating_add(step.saturating_mul(pages as usize));
+        app.log_scroll = app.log_scroll.saturating_add(lines as usize);
     }
-    clamp_log_scroll(app, 0);
+    clamp_log_scroll(app, viewport_height);
 }
 
 pub(super) fn log_scroll_offset(app: &App, viewport_height: usize) -> u16 {
@@ -1275,8 +1382,7 @@ pub(super) fn log_entry_matches_filter(
 }
 
 pub(super) fn is_error_log_entry(entry: &LogLine) -> bool {
-    let text = entry.text.to_ascii_lowercase();
-    entry.kind == LogKind::Stderr || text.contains("failed") || text.contains("aborted")
+    entry.kind == LogKind::Stderr
 }
 
 pub(super) fn log_line_for_view(entry: &LogLine) -> Line<'static> {
@@ -1359,10 +1465,11 @@ pub(super) fn sanitize_tui_log_line(line: &str) -> String {
 pub(super) fn run_item_status_label(status: ActionStatus) -> &'static str {
     match status {
         ActionStatus::WillFail => "failed",
+        ActionStatus::Aborted => "aborted",
         ActionStatus::WillSkip => "skipped",
         ActionStatus::NotRun => "not run",
         ActionStatus::NoChange => "no change",
-        ActionStatus::WillRun => "ran",
+        ActionStatus::WillRun | ActionStatus::Executed => "ran",
         _ => "changed",
     }
 }
