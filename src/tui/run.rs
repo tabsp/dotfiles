@@ -507,6 +507,7 @@ pub(super) enum RunGroup {
     Failed,
     Aborted,
     Running,
+    Ran,
     Changed,
     NoChange,
     NotRun,
@@ -645,6 +646,7 @@ pub(super) fn grouped_run_lines(
         RunGroup::Failed,
         RunGroup::Aborted,
         RunGroup::Running,
+        RunGroup::Ran,
         RunGroup::Changed,
         RunGroup::NoChange,
         RunGroup::NotRun,
@@ -749,6 +751,7 @@ pub(super) fn run_group_for_status(status: Option<ActionStatus>, active: bool) -
         Some(ActionStatus::NoChange) => RunGroup::NoChange,
         Some(ActionStatus::NotRun) => RunGroup::NotRun,
         Some(ActionStatus::WillSkip) => RunGroup::Skipped,
+        Some(ActionStatus::WillRun | ActionStatus::Executed) => RunGroup::Ran,
         Some(_) => RunGroup::Changed,
         None => RunGroup::Pending,
     }
@@ -771,6 +774,11 @@ pub(super) fn run_group_header_line(group: RunGroup, count: usize, width: usize)
             icon_set.running,
             "Running",
             Style::default().fg(CATPPUCCIN_MOCHA.running),
+        ),
+        RunGroup::Ran => (
+            icon_set.success,
+            "Ran",
+            Style::default().fg(CATPPUCCIN_MOCHA.success),
         ),
         RunGroup::Changed => (
             icon_set.success,

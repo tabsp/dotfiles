@@ -636,6 +636,12 @@ pub(super) fn keep_selection_in_range(app: &mut App) {
 }
 
 pub(super) fn update_plan_focus_info(app: &mut App) {
+    if !app.status_message.is_empty()
+        && !app.status_is_focus_info
+        && matches!(app.status_kind, NoticeKind::Error | NoticeKind::Warning)
+    {
+        return;
+    }
     if let Some(info) = focused_plan_item_info(app) {
         app.status_message = info;
         app.status_kind = NoticeKind::Info;

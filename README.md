@@ -4,7 +4,7 @@
 
 dotman is a tiny Rust-based TUI dotfiles deployer for my personal macOS/Linux environment.
 It uses a flat YAML config to install software, link config files, create directories,
-clean old paths, and run setup commands — all in a Plan -> Confirm -> Run flow with
+clean old paths, and run setup commands — all in a Plan -> Review -> Run flow with
 per-machine state and persistent run history.
 
 ## Preview
@@ -32,7 +32,9 @@ curl -fsSL "https://github.com/tabsp/dotfiles/releases/latest/download/dotman-${
   tar -xz -C ~/.local/bin dotman
 ```
 
-Then run it. On first launch, dotman auto-initializes the default dotfiles profile:
+Then run it. On first launch, dotman initializes the default dotfiles profile and
+opens the main menu. Choose Deploy, adjust the Plan, then review the selected
+actions before starting the Run:
 
 ```sh
 dotman
@@ -47,6 +49,10 @@ For unattended setup (CI, scripted setup):
 dotman deploy --headless
 ```
 
+Headless mode uses the same execution and result model as the TUI, prints live
+action output and a final `ran / changed / no change / failed` summary, saves the
+run to history, and exits non-zero for failed or aborted runs.
+
 To initialize this repository explicitly:
 
 ```sh
@@ -58,7 +64,7 @@ dotman deploy
 
 ```sh
 dotman                       # TUI main menu (auto-inits on first run)
-dotman deploy                # TUI: sync → plan → confirm → run
+dotman deploy                # TUI: sync → plan → review → run
 dotman plan                  # TUI: show plan only, no execution
 dotman init [repo]           # initialize a dotfiles profile
 dotman sync                  # git pull current profile
@@ -85,16 +91,26 @@ Global options:
 
 ## TUI Keys
 
-| Key | Action |
+The footer shows only the primary keys for the current screen:
+
+| Screen | Primary keys |
 | --- | --- |
-| `↑↓` or `j k` | Navigate |
-| `space` | Toggle current step |
-| `a` / `n` | Select all / none |
-| `1-6` | Fold/unfold layer |
-| `s` | Save selection to state |
-| `r` | Run |
-| `e` | Back to plan view (from result) |
-| `q` or `Esc` | Back / quit |
+| Main menu | `↑↓` navigate, `Enter` open, `q` quit |
+| Plan | `↑↓` navigate, `Space` toggle, `s` save, `r` review, `q` back |
+| Review | `↑↓` scroll, `r` run, `q` back |
+| Run / Result | `↑↓` scroll, `Tab` filter, `Enter` fold, `f` follow when paused, `q` abort/back |
+| History | `↑↓` navigate, `Enter` open, `d` delete, `q` back |
+| Run replay | `↑↓` navigate, `Space` fold, `q` back |
+
+Direct main-menu keys (`d` deploy, `p` plan, `h` history), Vim navigation
+(`j/k`, `gg`, `G`), `Home/End`, `PageUp/PageDown`, arrow-key filter switching,
+and equivalent `Enter`/`Space` actions remain available as unlisted convenience
+keys.
+
+Result labels are intentional: **Ran** means a shell command completed;
+**Changed** means dotman installed, created, linked, backed up, or cleaned
+something. Errors are shown before warnings, while the final run result remains
+visible if saving history fails.
 
 ## Configuration
 
@@ -154,9 +170,11 @@ Profile configuration (repo URL, branch, checkout path, auto-sync) lives at
 `~/.config/dotman/config.toml`. dotman manages this automatically — you
 don't need to create or edit it by hand.
 
-State (per-machine selection) lives at
-`~/.local/share/dotman/state.toml` — first-run defaults are applied
-automatically based on layer strategy.
+Per-machine selections are stored under
+`~/.local/share/dotman/selection/`, scoped by the normalized `dotman.yaml` path.
+Small config edits therefore keep existing choices; newly added item IDs use
+their plan defaults. Legacy hash-scoped and `state.toml` selections are still
+read for compatibility.
 
 Run logs are at `~/.local/share/dotman/runs/<ulid>.json` and can be
 browsed with `dotman history` or `dotman run <id>`.
@@ -166,40 +184,16 @@ browsed with `dotman history` or `dotman run <id>`.
 The deployment pipeline is:
 
 ```
-resolve profile → sync repo (git pull) → load dotman.yaml → build plan → confirm → execute → save history
+resolve profile → sync repo (git pull) → load dotman.yaml → build plan → review → execute → save history
 ```
 
 dotman's profile system manages the dotfiles repo itself (URL, branch, clone
 path, auto-sync). The deployment config (`dotman.yaml`) only describes *what*
 to deploy — installs, links, creates, shell commands.
 
-Auto-init triggers automatically when no profile or config is found. In
-headless mode all defaults are used; in interactive mode you're prompted to
-confirm.
-
-## 0.2 Release Notes
-
-The 0.2 line is the first profile-based release. Notable changes:
-
-- First-run auto-init: clone repo, write profile config, load `dotman.yaml`
-- Profile management: `init`, `sync`, `status`, `profile list/add/remove`
-- Headless deployment for scripts, CI, and remote bootstrap
-- `--bootstrap-git` for installing git before profile setup when needed
-- `--config <path>` for direct config testing without profiles
-- TUI main menu, plan, confirm, run, result, history, and run replay views
-- Plan selections persisted in `~/.local/share/dotman/state.toml`
-- Persistent run history in `~/.local/share/dotman/runs/<ulid>.json`
-- Live stdout/stderr streaming during execution, with abort support
-- Step-level install retry with 5s/10s/20s backoff
-- Link map/list config formats with backup/relink support
-- `clean` actions for removing stale symlinks or backed-up paths
-- `new-link <target> <source>` helper for updating `dotman.yaml`
-- Embedded tool DB with 25 named tools plus default package templates
-- E2E scenarios for profile lifecycle, repo sync, runtime deploy, history,
-  failure behavior, sudo prompt, new-link, and install branches
-- 113 tests pass (`cargo test`)
-- `cargo build --release` produces a small static-feeling CLI binary
-- `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` clean
+Auto-init triggers automatically when no profile or config is found. Headless
+mode uses non-interactive defaults. In the TUI, deployment changes are shown in
+Plan and Review before Run starts.
 
 ## Local Overrides
 

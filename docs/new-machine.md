@@ -16,7 +16,7 @@
 
 - `curl`
 - CA certificates
-- `git`（如果缺失，可以在 headless 部署时用 `--bootstrap-git` 让 dotman 先安装）
+- `git`（可选；缺失时必须在 headless 部署中加入 `--bootstrap-git`）
 
 macOS 先安装 Xcode Command Line Tools：
 
@@ -60,6 +60,8 @@ dotman
 这会使用默认 dotfiles 仓库 (`https://github.com/tabsp/dotfiles.git`)，
 clone 到 `~/.local/share/dotman/repos/main`，写入
 `~/.config/dotman/config.toml`，加载其中的 `dotman.yaml`，然后进入 TUI 主菜单。
+在主菜单选择 Deploy，调整 Plan 中的选择，在 Review 中检查实际 action，再按 `r`
+开始 Run。完成后确认最终的 Ran、Changed、No Change、Skipped 和 Failed 统计。
 
 ### 无交互部署
 
@@ -68,6 +70,9 @@ clone 到 `~/.local/share/dotman/repos/main`，写入
 ```sh
 dotman deploy --headless
 ```
+
+Headless 会输出实时 action 日志和最终统计，将结果写入 History，并在执行失败或中止时
+返回非零退出码。历史保存失败也会返回非零，并明确提示检查磁盘空间和数据目录权限。
 
 如果 git 不存在：
 
@@ -94,8 +99,8 @@ dotman init https://github.com/tabsp/dotfiles.git --branch main --profile main
 dotman deploy
 ```
 
-init 会 clone 仓库、写入 profile 配置，然后展示 plan 预览。确认后用 `dotman deploy`
-执行部署。之后可以用：
+`init` 会 clone 仓库、验证配置、写入 profile，并打印可部署步骤摘要；它不会执行部署。
+随后运行 `dotman deploy` 进入 Plan -> Review -> Run。之后可以用：
 
 ```sh
 dotman profile list
@@ -121,12 +126,25 @@ Linux：
 exec /home/linuxbrew/.linuxbrew/bin/fish -l
 ```
 
-如果默认 shell 没有生效：
+如果默认 shell 没有生效，先确认 fish 路径和当前 shell：
 
 ```sh
 command -v fish
-getent passwd "$USER" | cut -d: -f7
 echo "$SHELL"
+```
+
+再检查账号记录中的登录 shell。
+
+macOS：
+
+```sh
+dscl . -read "/Users/$USER" UserShell
+```
+
+Linux：
+
+```sh
+getent passwd "$USER" | cut -d: -f7
 ```
 
 ## 6. 恢复私有配置
@@ -155,6 +173,10 @@ dotman status
 dotman doctor
 dotman history
 ```
+
+`dotman history` 应显示刚完成的运行；打开记录后可逐 action 查看状态、错误和已保存输出。
+Plan 选择保存在 `~/.local/share/dotman/selection/`，同一配置文件的小幅修改不会清空
+已有选择。
 
 检查 Maple Mono 字体：
 

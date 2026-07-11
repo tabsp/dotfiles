@@ -289,22 +289,8 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
 }
 
 fn main_menu_help_line(width: usize) -> Line<'static> {
-    let full = [
-        ("↑↓", " Navigate  "),
-        ("Enter", " Open  "),
-        ("d", " Deploy  "),
-        ("p", " Plan  "),
-        ("h", " History  "),
-        ("q", " Quit"),
-    ];
-    let compact = [
-        ("↑↓", " "),
-        ("Ent", " "),
-        ("d", " "),
-        ("p", " "),
-        ("h", " "),
-        ("q", ""),
-    ];
+    let full = [("↑↓", " Navigate  "), ("Enter", " Open  "), ("q", " Quit")];
+    let compact = [("↑↓", " "), ("Ent", " "), ("q", "")];
     for parts in [&full[..], &compact[..]] {
         let line = help_line_from_parts(parts);
         if line_display_width(&line) <= width {

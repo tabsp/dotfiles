@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::history::{replay_help_line, replay_lines};
+use crate::tui::history::{history_content_area, replay_help_line, replay_lines};
 use std::path::{Path, PathBuf};
 
 fn test_plan_item(name: &str) -> PlanItem {
@@ -482,6 +482,29 @@ fn plan_focus_restores_same_item_after_column_change() {
 }
 
 #[test]
+fn plan_focus_info_does_not_overwrite_errors_or_warnings() {
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["one"]));
+    plan::select_first_plan_row(
+        &mut app.plan_state,
+        app.plan.as_ref(),
+        &app.collapsed_layers,
+        app.plan_columns,
+    );
+    app.status_message = "selection save failed: disk full".into();
+    app.status_kind = NoticeKind::Error;
+    app.status_is_focus_info = false;
+
+    update_plan_focus_info(&mut app);
+    assert_eq!(app.status_message, "selection save failed: disk full");
+
+    app.status_message = "nothing selected".into();
+    app.status_kind = NoticeKind::Warning;
+    update_plan_focus_info(&mut app);
+    assert_eq!(app.status_message, "nothing selected");
+}
+
+#[test]
 fn plan_vertical_navigation_stops_at_boundaries() {
     let mut app = App::new(Mode::Deploy);
     app.plan = Some(test_plan_with_items(&["one", "two"]));
@@ -570,6 +593,18 @@ fn successful_history_reload_clears_stale_page_notice() {
     );
     assert_eq!(app.status_message, "failed to parse first run (+1 more)");
     assert_eq!(app.status_kind, NoticeKind::Warning);
+}
+
+#[test]
+fn history_notice_reserves_a_row_above_content() {
+    let area = Rect::new(2, 4, 80, 10);
+
+    assert_eq!(history_content_area(area, false), area);
+    assert_eq!(history_content_area(area, true), Rect::new(2, 5, 80, 9));
+    assert_eq!(
+        history_content_area(Rect::new(0, 0, 20, 0), true),
+        Rect::new(0, 1, 20, 0)
+    );
 }
 
 #[test]
@@ -662,7 +697,7 @@ fn finished_run_progress_counts_condition_skips_as_resolved_actions() {
     assert_eq!(app.progress, (1, 1));
     assert_eq!(
         final_run_summary(&run),
-        "0 changed, 0 no change, 0 failed, 1 skipped"
+        "0 ran, 0 changed, 0 no change, 0 failed, 1 skipped"
     );
 }
 
@@ -687,7 +722,10 @@ fn final_summary_counts_actions_instead_of_only_the_item_terminal_status() {
     ];
     let run = test_run(RunStatus::Success, vec![item]);
 
-    assert_eq!(final_run_summary(&run), "1 changed, 1 no change, 0 failed");
+    assert_eq!(
+        final_run_summary(&run),
+        "0 ran, 1 changed, 1 no change, 0 failed"
+    );
 }
 
 #[test]
@@ -727,6 +765,20 @@ fn run_status_colors_are_shared_and_semantically_distinct() {
         run_status_color(RunStatus::Running),
         run_status_color(RunStatus::Aborted)
     );
+}
+
+#[test]
+fn executed_shells_are_ran_not_changed() {
+    assert_eq!(
+        run_group_for_status(Some(ActionStatus::Executed), false),
+        RunGroup::Ran
+    );
+    assert_eq!(
+        run_group_for_status(Some(ActionStatus::WillLink), false),
+        RunGroup::Changed
+    );
+    let ran_header = line_text(&run_group_header_line(RunGroup::Ran, 2, 80));
+    assert!(ran_header.contains("Ran (2)"));
 }
 
 #[test]

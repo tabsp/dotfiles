@@ -126,14 +126,17 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
     ]));
     f.render_widget(title, chunks[0]);
 
-    if !app.status_message.is_empty() {
+    let content_area = if !app.status_message.is_empty() {
         let line = Paragraph::new(Line::from(Span::styled(
             fit_to_width(&app.status_message, usize::from(chunks[1].width)),
             notice_style(app.status_kind),
         )));
         let banner = Rect::new(chunks[1].x, chunks[1].y, chunks[1].width, 1);
         f.render_widget(line, banner);
-    }
+        history_content_area(chunks[1], true)
+    } else {
+        chunks[1]
+    };
 
     if app.runs.is_empty() {
         f.render_widget(
@@ -145,7 +148,7 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
                 )),
             ])
             .alignment(Alignment::Center),
-            chunks[1],
+            content_area,
         );
     } else {
         let items: Vec<ListItem> = app
@@ -156,17 +159,29 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
                 let selected = app.history_state.selected() == Some(idx);
                 let status = r.status.result_label();
                 let mode = format!("{:?}", r.mode).to_lowercase();
-                history_run_line(r, &mode, status, selected, usize::from(chunks[1].width))
+                history_run_line(r, &mode, status, selected, usize::from(content_area.width))
             })
             .collect();
         let list = List::new(items)
             .highlight_style(Style::default())
             .highlight_symbol("");
-        f.render_stateful_widget(list, chunks[1], &mut app.history_state);
+        f.render_stateful_widget(list, content_area, &mut app.history_state);
     }
 
     let help = Paragraph::new(history_help_line(usize::from(chunks[2].width)));
     f.render_widget(help, chunks[2]);
+}
+
+pub(super) fn history_content_area(area: Rect, has_notice: bool) -> Rect {
+    if !has_notice {
+        return area;
+    }
+    Rect::new(
+        area.x,
+        area.y.saturating_add(1),
+        area.width,
+        area.height.saturating_sub(1),
+    )
 }
 
 pub(super) fn clamp_history_selection(app: &mut App) {

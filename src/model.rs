@@ -204,6 +204,7 @@ impl RunStatus {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RunSummary {
+    pub ran: usize,
     pub changed: usize,
     pub no_change: usize,
     pub failed: usize,
@@ -234,9 +235,8 @@ impl RunSummary {
             ActionStatus::WillSkip => self.skipped += 1,
             ActionStatus::NotRun => self.not_run += 1,
             ActionStatus::NoChange => self.no_change += 1,
-            ActionStatus::WillRun
-            | ActionStatus::Executed
-            | ActionStatus::WillInstall
+            ActionStatus::WillRun | ActionStatus::Executed => self.ran += 1,
+            ActionStatus::WillInstall
             | ActionStatus::WillCreate
             | ActionStatus::WillLink
             | ActionStatus::WillBackupLink
@@ -247,6 +247,7 @@ impl RunSummary {
 
     pub fn display(self) -> String {
         let mut parts = vec![
+            format!("{} ran", self.ran),
             format!("{} changed", self.changed),
             format!("{} no change", self.no_change),
             format!("{} failed", self.failed),
