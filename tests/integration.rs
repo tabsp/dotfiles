@@ -36,29 +36,6 @@ fn profile_config_roundtrip() {
     assert!(p.auto_sync);
 }
 
-// ---- Config error message for removed fields ----
-
-#[test]
-fn config_errors_on_removed_auto_clone_repo() {
-    let yaml = r#"
-install: []
-auto_clone_repo:
-  url: https://github.com/user/dotfiles.git
-  target: ~/dotfiles
-"#;
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("dotman.yaml");
-    std::fs::write(&path, yaml).unwrap();
-
-    let result = dotman::config::load(&path);
-    assert!(result.is_err());
-    let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("auto_clone_repo"),
-        "error should mention auto_clone_repo: {err}"
-    );
-}
-
 // ---- Bootstrap git detection ----
 
 #[test]
@@ -177,24 +154,6 @@ fn plan_serialization_roundtrip() {
     assert_eq!(deserialized.id, plan.id);
     assert_eq!(deserialized.items.len(), 1);
     assert_eq!(deserialized.items[0].name, "fish");
-}
-
-// ---- Run serialization backward compat ----
-
-#[test]
-fn run_deserializes_old_format() {
-    let json = r#"{
-        "id": "test-run",
-        "mode": "Deploy",
-        "started_at": "2026-01-01T00:00:00Z",
-        "finished_at": null,
-        "status": "Success",
-        "config_hash": "abc",
-        "items": []
-    }"#;
-    let run: dotman::model::Run = serde_json::from_str(json).unwrap();
-    assert_eq!(run.id, "test-run");
-    assert_eq!(run.mode, dotman::model::Mode::Deploy);
 }
 
 // ---- Default profile config ----

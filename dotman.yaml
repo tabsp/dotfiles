@@ -1,5 +1,5 @@
-# dotman v2 config — sync tool, source of truth for this machine.
-# Plan/Confirm/Run flow in TUI; per-machine selection in ~/.local/share/dotman/state.toml.
+# dotman config — sync tool, source of truth for this machine.
+# Plan/Review/Run flow in TUI; selection lives under ~/.local/share/dotman/selection/.
 #
 # Profile management (repo URL, clone, sync) is handled by dotman's own profile
 # system (~/.config/dotman/config.toml), not by this file.

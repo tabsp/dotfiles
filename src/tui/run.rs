@@ -373,7 +373,7 @@ pub(super) fn run_status_line(app: &App, width: usize) -> Line<'static> {
             .unwrap_or_else(|| "run finished".into());
         (
             "  result   ",
-            format!("warning: {warning} · {summary}"),
+            format!("{summary} · warning: {warning}"),
             Style::default().fg(CATPPUCCIN_MOCHA.warning),
         )
     } else if let Some(run) = finished_run_for_view(app) {

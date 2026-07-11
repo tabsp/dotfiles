@@ -314,8 +314,7 @@ pub(super) fn apply_history_warnings(app: &mut App, warnings: &[String]) {
 }
 
 pub(super) fn apply_saved_selection(plan: &mut Plan) -> Result<(), String> {
-    let selection = store::load_selection_scoped(&plan.config_path, &plan.config_hash)
-        .map_err(|e| e.to_string())?;
+    let selection = store::load_selection(&plan.config_path).map_err(|e| e.to_string())?;
     for item in &mut plan.items {
         if let Some(selected) = selection.items.get(&item.id) {
             item.selected = *selected;
@@ -333,8 +332,7 @@ pub(super) fn save_current_selection(app: &mut App) -> Result<(), String> {
             .map(|item| (item.id.clone(), item.selected))
             .collect(),
     };
-    let path = store::save_selection_scoped(&plan.config_path, &plan.config_hash, &selection)
-        .map_err(|e| e.to_string())?;
+    let path = store::save_selection(&plan.config_path, &selection).map_err(|e| e.to_string())?;
     app.dirty = false;
     app.status_message = format!("saved selection to {}", path.display());
     app.status_kind = NoticeKind::Success;

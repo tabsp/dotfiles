@@ -2,9 +2,6 @@
 //!
 //! Manages `~/.config/dotman/config.toml` which stores named profiles.
 //! Each profile holds a dotfiles repo URL, branch, checkout path, and config file name.
-//!
-//! This replaces the old `auto_clone_repo` in dotman.yaml — repo management is
-//! dotman's own concern, not a deployment config concern.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

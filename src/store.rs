@@ -25,28 +25,11 @@ pub fn runs_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Return the per-machine selection state path.
-pub fn selection_path() -> Result<PathBuf> {
-    Ok(dotman_data_dir()?.join("state.toml"))
-}
-
-pub fn scoped_selection_path(config_path: &Path, _config_hash: &str) -> Result<PathBuf> {
-    selection_path_for_identity(config_path, None)
-}
-
-fn legacy_scoped_selection_path(config_path: &Path, config_hash: &str) -> Result<PathBuf> {
-    selection_path_for_identity(config_path, Some(config_hash))
-}
-
-fn selection_path_for_identity(config_path: &Path, config_hash: Option<&str>) -> Result<PathBuf> {
+pub fn selection_path(config_path: &Path) -> Result<PathBuf> {
     let canonical =
         std::fs::canonicalize(config_path).unwrap_or_else(|_| config_path.to_path_buf());
     let mut hasher = Sha256::new();
     hasher.update(canonical.to_string_lossy().as_bytes());
-    if let Some(config_hash) = config_hash {
-        hasher.update(b"\0");
-        hasher.update(config_hash.as_bytes());
-    }
     let id = format!("{:x}", hasher.finalize());
     Ok(dotman_data_dir()?
         .join("selection")
@@ -54,29 +37,8 @@ fn selection_path_for_identity(config_path: &Path, config_hash: Option<&str>) ->
 }
 
 /// Load per-machine selection state, returning defaults when no state exists yet.
-pub fn load_selection() -> Result<Selection> {
-    let path = selection_path()?;
-    if !path.exists() {
-        return Ok(Selection::default());
-    }
-    let raw = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read selection state {}", path.display()))?;
-    toml::from_str(&raw)
-        .with_context(|| format!("failed to parse selection state {}", path.display()))
-}
-
-pub fn load_selection_scoped(config_path: &Path, config_hash: &str) -> Result<Selection> {
-    let scoped = scoped_selection_path(config_path, config_hash)?;
-    if let Some(selection) = load_selection_file(&scoped)? {
-        return Ok(selection);
-    }
-    let legacy_scoped = legacy_scoped_selection_path(config_path, config_hash)?;
-    if let Some(selection) = load_selection_file(&legacy_scoped)? {
-        save_selection_scoped(config_path, config_hash, &selection)
-            .context("failed to migrate legacy selection state")?;
-        return Ok(selection);
-    }
-    load_selection()
+pub fn load_selection(config_path: &Path) -> Result<Selection> {
+    Ok(load_selection_file(&selection_path(config_path)?)?.unwrap_or_default())
 }
 
 fn load_selection_file(path: &Path) -> Result<Option<Selection>> {
@@ -91,24 +53,8 @@ fn load_selection_file(path: &Path) -> Result<Option<Selection>> {
 }
 
 /// Save per-machine selection state.
-pub fn save_selection(selection: &Selection) -> Result<PathBuf> {
-    let path = selection_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create state dir {}", parent.display()))?;
-    }
-    let raw = toml::to_string_pretty(selection).context("failed to serialize selection state")?;
-    atomic_write(&path, raw.as_bytes())
-        .with_context(|| format!("failed to write selection state {}", path.display()))?;
-    Ok(path)
-}
-
-pub fn save_selection_scoped(
-    config_path: &Path,
-    config_hash: &str,
-    selection: &Selection,
-) -> Result<PathBuf> {
-    let path = scoped_selection_path(config_path, config_hash)?;
+pub fn save_selection(config_path: &Path, selection: &Selection) -> Result<PathBuf> {
+    let path = selection_path(config_path)?;
     let raw = toml::to_string_pretty(selection).context("failed to serialize selection state")?;
     atomic_write(&path, raw.as_bytes())
         .with_context(|| format!("failed to write selection state {}", path.display()))?;
@@ -361,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn scoped_selection_isolated_by_config_identity() {
+    fn selection_isolated_by_config_path() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let _env = EnvGuard::new(&["XDG_DATA_HOME", "HOME"]);
@@ -378,68 +324,16 @@ mod tests {
         let mut selection = Selection::default();
         selection.items.insert("fish".into(), true);
 
-        save_selection_scoped(&config_a, "hash-a", &selection).unwrap();
+        save_selection(&config_a, &selection).unwrap();
 
         assert_eq!(
-            load_selection_scoped(&config_a, "hash-a")
-                .unwrap()
-                .items
-                .get("fish"),
+            load_selection(&config_a).unwrap().items.get("fish"),
             Some(&true)
         );
-        assert!(
-            load_selection_scoped(&config_b, "hash-b")
-                .unwrap()
-                .items
-                .is_empty()
-        );
+        assert!(load_selection(&config_b).unwrap().items.is_empty());
         assert_eq!(
-            scoped_selection_path(&config_a, "hash-a").unwrap(),
-            scoped_selection_path(&config_a, "hash-after-small-edit").unwrap()
-        );
-        assert_eq!(
-            load_selection_scoped(&config_a, "hash-after-small-edit")
-                .unwrap()
-                .items
-                .get("fish"),
+            load_selection(&config_a).unwrap().items.get("fish"),
             Some(&true)
-        );
-    }
-
-    #[test]
-    fn scoped_selection_reads_legacy_hash_key() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let dir = tempfile::tempdir().unwrap();
-        let _env = EnvGuard::new(&["XDG_DATA_HOME", "HOME"]);
-        unsafe {
-            std::env::set_var("XDG_DATA_HOME", dir.path());
-            std::env::set_var("HOME", dir.path());
-        }
-        let config = dir.path().join("repo").join("dotman.yaml");
-        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-        std::fs::write(&config, "").unwrap();
-        let legacy = legacy_scoped_selection_path(&config, "old-hash").unwrap();
-        let mut selection = Selection::default();
-        selection.items.insert("fish".into(), false);
-        let raw = toml::to_string_pretty(&selection).unwrap();
-        atomic_write(&legacy, raw.as_bytes()).unwrap();
-
-        assert_eq!(
-            load_selection_scoped(&config, "old-hash")
-                .unwrap()
-                .items
-                .get("fish"),
-            Some(&false)
-        );
-        let stable = scoped_selection_path(&config, "old-hash").unwrap();
-        assert!(stable.exists());
-        std::fs::remove_file(legacy).unwrap();
-        assert_eq!(
-            load_selection_scoped(&config, "new-hash-after-config-edit")
-                .unwrap()
-                .items
-                .get("fish"),
-            Some(&false)
         );
     }
 

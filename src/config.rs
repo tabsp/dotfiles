@@ -3,9 +3,7 @@
 //! Parses dotman.yaml into Config. This is the deployment config from the
 //! user's dotfiles repo — it describes what to install, link, create, etc.
 //!
-//! Profile management (repo URL, clone, sync) is handled by `profile.rs`,
-//! not here. `auto_clone_repo` has been removed from this layer to the
-//! profile system. `auto_install_pkg_manager` stays as a deployment concern.
+//! Profile management (repo URL, clone, sync) is handled by `profile.rs`.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -161,19 +159,7 @@ pub fn load(path: &Path) -> Result<Config> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
     let raw: RawConfig = serde_yaml::from_str(&raw)
-        .map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("auto_clone_repo") {
-                anyhow::anyhow!(
-                    "{}: 'auto_clone_repo' is no longer supported in dotman.yaml. \
-                     Repository management is now handled via profiles in ~/.config/dotman/config.toml. \
-                     Run `dotman init` or `dotman profile add` to set up your repository.",
-                    msg
-                )
-            } else {
-                anyhow::anyhow!("failed to parse {}: {msg}", path.display())
-            }
-        })?;
+        .with_context(|| format!("failed to parse {}", path.display()))?;
     let config = normalize(raw, path);
     Ok(config)
 }

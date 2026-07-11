@@ -173,8 +173,7 @@ don't need to create or edit it by hand.
 Per-machine selections are stored under
 `~/.local/share/dotman/selection/`, scoped by the normalized `dotman.yaml` path.
 Small config edits therefore keep existing choices; newly added item IDs use
-their plan defaults. Legacy hash-scoped and `state.toml` selections are still
-read for compatibility.
+their plan defaults.
 
 Run logs are at `~/.local/share/dotman/runs/<ulid>.json` and can be
 browsed with `dotman history` or `dotman run <id>`.

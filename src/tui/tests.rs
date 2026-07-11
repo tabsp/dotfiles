@@ -439,7 +439,9 @@ fn run_save_warning_keeps_finished_run_result_visible() {
 
     assert!(finished_run_for_view(&app).is_some());
     assert!(run_title(&app, 80).contains("Success"));
-    assert!(line_text(&run_status_line(&app, 80)).contains("history save failed"));
+    assert!(
+        line_text(&run_status_line(&app, 80)).contains("0 ran, 0 changed, 1 no change, 0 failed")
+    );
     let status = line_text(&run_status_line(&app, 160));
     assert!(status.contains("0 ran, 0 changed, 1 no change, 0 failed"));
     assert!(status.contains("warning: history save failed: disk full"));
@@ -932,20 +934,6 @@ fn replay_selected_row_has_focus_background() {
     assert_eq!(lines[0].spans[0].style.bg, Some(focus_bg()));
     assert_eq!(lines[0].spans[1].style.bg, Some(focus_bg()));
     assert_eq!(lines[0].spans[3].style.bg, Some(focus_bg()));
-}
-
-#[test]
-fn replay_legacy_item_shows_saved_error_when_expanded() {
-    let mut item = test_run_item("legacy", ActionStatus::WillFail, Some("exit code 7"));
-    item.actions.clear();
-    let mut app = App::new(Mode::History);
-    app.run = Some(test_run(RunStatus::Failed, vec![item]));
-    app.replay_state.select(Some(0));
-    app.replay_expanded.insert("0:0".into());
-
-    let text = lines_text(&replay_lines(&app, 80));
-
-    assert!(text.contains("error: exit code 7"));
 }
 
 #[test]

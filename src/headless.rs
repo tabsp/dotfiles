@@ -74,14 +74,6 @@ struct RunDetailRow<'a> {
 fn run_detail_rows(run: &Run) -> Vec<RunDetailRow<'_>> {
     let mut rows = Vec::new();
     for item in &run.items {
-        if item.actions.is_empty() {
-            rows.push(RunDetailRow {
-                name: item.name.clone(),
-                status: item.status.result_label(),
-                error: item.error.as_deref(),
-            });
-            continue;
-        }
         rows.extend(item.actions.iter().map(|action| RunDetailRow {
             name: format!("{} / {}", item.name, action.name),
             status: action.status.result_label(),
@@ -233,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn run_detail_uses_action_results_and_legacy_item_fallback() {
+    fn run_detail_uses_action_results() {
         let mut run = test_run();
         run.items = vec![crate::model::RunItem {
             id: "multi".into(),
@@ -270,12 +262,6 @@ mod tests {
         assert_eq!(rows[0].error, None);
         assert_eq!(rows[1].status, "failed");
         assert_eq!(rows[1].error, Some("exit code 1"));
-
-        run.items[0].actions.clear();
-        let legacy = run_detail_rows(&run);
-        assert_eq!(legacy.len(), 1);
-        assert_eq!(legacy[0].name, "multi");
-        assert_eq!(legacy[0].error, Some("item error"));
     }
 
     fn test_run() -> Run {

@@ -169,16 +169,13 @@ impl Ord for ActionStatus {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Run {
     pub id: RunId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_id: Option<RunId>,
     pub mode: Mode,
     pub started_at: String,
     pub finished_at: Option<String>,
     pub status: RunStatus,
     pub config_hash: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_path: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<HostInfo>,
     pub items: Vec<RunItem>,
 }
@@ -217,12 +214,8 @@ impl RunSummary {
     pub fn from_run(run: &Run) -> Self {
         let mut summary = Self::default();
         for item in &run.items {
-            if item.actions.is_empty() {
-                summary.add(item.status);
-            } else {
-                for action in &item.actions {
-                    summary.add(action.status);
-                }
+            for action in &item.actions {
+                summary.add(action.status);
             }
         }
         summary
@@ -276,10 +269,8 @@ pub struct RunItem {
     pub attempts: u32,
     pub error: Option<String>,
     /// Per-action output lines, capped at MAX_HISTORY_OUTPUT_LINES (500 by default).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub output: Vec<OutputLine>,
-    /// Per-action execution results. Older history entries may not have this.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Per-action execution results.
     pub actions: Vec<RunAction>,
 }
 
@@ -289,7 +280,6 @@ pub struct RunAction {
     pub name: String,
     pub status: ActionStatus,
     pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub output: Vec<OutputLine>,
 }
 
@@ -326,7 +316,7 @@ fn default_link_backup() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionStatus, Mode, Run, RunItem, RunStatus, RunSummary};
+    use super::{ActionStatus, RunStatus};
 
     #[test]
     fn result_labels_use_terminal_user_facing_language() {
@@ -339,34 +329,5 @@ mod tests {
         assert_eq!(RunStatus::Success.result_label(), "success");
         assert_eq!(RunStatus::Failed.result_label(), "failed");
         assert_eq!(RunStatus::Aborted.result_label(), "aborted");
-    }
-
-    #[test]
-    fn run_summary_falls_back_to_item_status_for_legacy_history() {
-        let run = Run {
-            id: "legacy".into(),
-            plan_id: None,
-            mode: Mode::Deploy,
-            started_at: "2026-01-01T00:00:00Z".into(),
-            finished_at: Some("2026-01-01T00:00:01Z".into()),
-            status: RunStatus::Failed,
-            config_hash: "hash".into(),
-            config_path: None,
-            host: None,
-            items: vec![RunItem {
-                id: "step".into(),
-                name: "step".into(),
-                status: ActionStatus::WillFail,
-                started_at: None,
-                finished_at: None,
-                duration_ms: None,
-                attempts: 1,
-                error: Some("exit code 7".into()),
-                output: vec![],
-                actions: vec![],
-            }],
-        };
-
-        assert_eq!(RunSummary::from_run(&run).failed, 1);
     }
 }

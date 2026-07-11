@@ -444,28 +444,19 @@ struct ReplayEntry<'a> {
     item_index: usize,
     action_index: usize,
     item: &'a RunItem,
-    action: Option<&'a RunAction>,
+    action: &'a RunAction,
 }
 
 fn replay_entries(run: &Run) -> Vec<ReplayEntry<'_>> {
     let mut entries = Vec::new();
     for (item_index, item) in run.items.iter().enumerate() {
-        if item.actions.is_empty() {
+        for (action_index, action) in item.actions.iter().enumerate() {
             entries.push(ReplayEntry {
                 item_index,
-                action_index: 0,
+                action_index,
                 item,
-                action: None,
+                action,
             });
-        } else {
-            for (action_index, action) in item.actions.iter().enumerate() {
-                entries.push(ReplayEntry {
-                    item_index,
-                    action_index,
-                    item,
-                    action: Some(action),
-                });
-            }
         }
     }
     entries
@@ -481,14 +472,8 @@ pub(super) fn replay_lines(app: &App, width: usize) -> Vec<Line<'static>> {
         let selected_row = selected == Some(idx);
         let key = replay_key(entry.item_index, entry.action_index);
         let expanded = app.replay_expanded.contains(&key);
-        let status = entry
-            .action
-            .map(|action| action.status)
-            .unwrap_or(entry.item.status);
-        let name = entry
-            .action
-            .map(|action| format!("{} / {}", entry.item.name, action.name))
-            .unwrap_or_else(|| entry.item.name.clone());
+        let status = entry.action.status;
+        let name = format!("{} / {}", entry.item.name, entry.action.name);
         let row_bg = selected_row.then(focus_bg);
         let marker = if selected_row { "▎ " } else { "  " };
         let status_style = run::run_status_style(Some(status), false);
@@ -512,20 +497,13 @@ pub(super) fn replay_lines(app: &App, width: usize) -> Vec<Line<'static>> {
             Span::styled(run::run_item_status_label(status), status_style),
         ]));
         if expanded {
-            let error = match entry.action {
-                Some(action) => action.error.as_ref(),
-                None => entry.item.error.as_ref(),
-            };
-            if let Some(error) = error {
+            if let Some(error) = &entry.action.error {
                 lines.push(Line::from(Span::styled(
                     format!("    error: {error}"),
                     Style::default().fg(CATPPUCCIN_MOCHA.danger),
                 )));
             }
-            let output = entry
-                .action
-                .map(|action| action.output.as_slice())
-                .unwrap_or(entry.item.output.as_slice());
+            let output = &entry.action.output;
             if output.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "    no saved output",
