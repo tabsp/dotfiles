@@ -142,9 +142,8 @@ fn run_init(
     let repo = repo.unwrap_or(profile::DEFAULT_REPO);
     let branch = branch.unwrap_or(profile::DEFAULT_BRANCH);
     let profile_name = profile_name.unwrap_or(profile::DEFAULT_PROFILE_NAME);
-    let path_str = path
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| format!("~/.local/share/dotman/repos/{profile_name}"));
+    let mut profile_cfg = profile::load().map_err(|e| e.to_string())?;
+    let path_str = profile::resolve_checkout_path(path, profile_cfg.as_ref(), profile_name);
 
     init::ensure_git(cli).map_err(|e| e.to_string())?;
     let checkout =
@@ -157,9 +156,7 @@ fn run_init(
     let plan = plan::build(&cfg, model::Mode::Deploy).map_err(|e| e.to_string())?;
 
     // Only save profile config AFTER clone + config validation both succeed.
-    let mut profile_cfg = profile::load()
-        .map_err(|e| e.to_string())?
-        .unwrap_or_else(profile::default_config);
+    let mut profile_cfg = profile_cfg.take().unwrap_or_else(profile::default_config);
     profile_cfg.default_profile = profile_name.to_string();
     profile_cfg.profiles.insert(
         profile_name.to_string(),
@@ -215,12 +212,13 @@ fn run_profile(action: &ProfileAction) -> Result<(), String> {
             if cfg.profiles.contains_key(name) {
                 return Err(format!("profile '{name}' already exists"));
             }
+            let path = profile::resolve_checkout_path(None, Some(&cfg), name);
             cfg.profiles.insert(
                 name.clone(),
                 profile::Profile {
                     repo: repo.clone(),
                     branch: profile::DEFAULT_BRANCH.to_string(),
-                    path: format!("~/.local/share/dotman/repos/{name}"),
+                    path,
                     config: profile::DEFAULT_CONFIG_FILE.to_string(),
                     auto_sync: true,
                 },

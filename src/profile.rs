@@ -72,7 +72,7 @@ pub fn default_config() -> ProfileConfig {
         Profile {
             repo: DEFAULT_REPO.to_string(),
             branch: DEFAULT_BRANCH.to_string(),
-            path: default_checkout_path(DEFAULT_PROFILE_NAME),
+            path: resolve_checkout_path(None, None, DEFAULT_PROFILE_NAME),
             config: DEFAULT_CONFIG_FILE.to_string(),
             auto_sync: true,
         },
@@ -85,6 +85,23 @@ pub fn default_config() -> ProfileConfig {
 
 fn default_checkout_path(profile_name: &str) -> String {
     format!("~/.local/share/dotman/repos/{profile_name}")
+}
+
+/// Resolve a checkout path from an explicit init override, an existing profile,
+/// or the default location for a new profile.
+pub fn resolve_checkout_path(
+    explicit_path: Option<&std::path::Path>,
+    profile_cfg: Option<&ProfileConfig>,
+    profile_name: &str,
+) -> String {
+    explicit_path
+        .map(|path| path.to_string_lossy().into_owned())
+        .or_else(|| {
+            profile_cfg
+                .and_then(|cfg| cfg.profiles.get(profile_name))
+                .map(|profile| profile.path.clone())
+        })
+        .unwrap_or_else(|| default_checkout_path(profile_name))
 }
 
 // ---- Profile methods ----
@@ -183,6 +200,16 @@ mod tests {
         assert_eq!(profile.branch, "main");
         assert_eq!(profile.config, "dotman.yaml");
         assert!(profile.auto_sync);
+    }
+
+    #[test]
+    fn default_profile_and_init_use_the_same_checkout_path() {
+        let cfg = default_config();
+
+        assert_eq!(
+            cfg.profiles.get(DEFAULT_PROFILE_NAME).unwrap().path,
+            resolve_checkout_path(None, None, DEFAULT_PROFILE_NAME)
+        );
     }
 
     #[test]

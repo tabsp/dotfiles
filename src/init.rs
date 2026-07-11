@@ -167,12 +167,7 @@ pub fn clone_or_reuse_checkout(
         }
         let remote =
             git_remote_url(&checkout).context("failed to get remote URL for existing checkout")?;
-        let expected = repo.trim_end_matches(".git");
-        if remote != expected {
-            anyhow::bail!(
-                "existing checkout remote '{remote}' does not match target repo '{expected}'"
-            );
-        }
+        ensure_matching_repo(&remote, repo)?;
         eprintln!("Reusing existing checkout at {}", checkout.display());
         let status = Command::new("git")
             .args([
@@ -206,7 +201,8 @@ pub fn auto_init(cli: &cli::Cli) -> anyhow::Result<()> {
     let repo = profile::DEFAULT_REPO;
     let branch = profile::DEFAULT_BRANCH;
     let profile_name = profile::DEFAULT_PROFILE_NAME;
-    let path = format!("~/.local/share/dotman/repos/{profile_name}");
+    let profile_cfg = profile::load()?;
+    let path = profile::resolve_checkout_path(None, profile_cfg.as_ref(), profile_name);
 
     if !cli.headless {
         eprintln!("dotman has not been initialized yet.");
@@ -335,8 +331,46 @@ fn git_remote_url(checkout: &std::path::Path) -> anyhow::Result<String> {
         anyhow::bail!("no git remote 'origin' configured");
     }
 
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(url.trim_end_matches(".git").to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn canonical_repo_identity(url: &str) -> String {
+    let url = url.trim();
+    let (host, path) = if let Some((_, rest)) = url.split_once("://") {
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        (
+            authority
+                .rsplit_once('@')
+                .map_or(authority, |(_, host)| host),
+            path,
+        )
+    } else if let Some((authority, path)) = url.split_once(':') {
+        if authority.contains('@') {
+            (
+                authority
+                    .rsplit_once('@')
+                    .map_or(authority, |(_, host)| host),
+                path,
+            )
+        } else {
+            ("", url)
+        }
+    } else {
+        ("", url)
+    };
+    let path = path.trim_matches('/').trim_end_matches(".git");
+    if host.is_empty() {
+        path.to_string()
+    } else {
+        format!("{}/{path}", host.to_ascii_lowercase())
+    }
+}
+
+fn ensure_matching_repo(remote: &str, target: &str) -> anyhow::Result<()> {
+    if canonical_repo_identity(remote) != canonical_repo_identity(target) {
+        anyhow::bail!("existing checkout remote '{remote}' does not match target repo '{target}'");
+    }
+    Ok(())
 }
 
 /// Core clone operation. Assumes git is available and checkout does not exist.
@@ -537,4 +571,106 @@ pub fn show_status() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{canonical_repo_identity, ensure_matching_repo};
+    use crate::profile::{self, Profile, ProfileConfig};
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    fn config_with_profile(name: &str, path: &str) -> ProfileConfig {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            name.to_string(),
+            Profile {
+                repo: profile::DEFAULT_REPO.to_string(),
+                branch: profile::DEFAULT_BRANCH.to_string(),
+                path: path.to_string(),
+                config: profile::DEFAULT_CONFIG_FILE.to_string(),
+                auto_sync: true,
+            },
+        );
+        ProfileConfig {
+            default_profile: name.to_string(),
+            profiles,
+        }
+    }
+
+    #[test]
+    fn init_reuses_existing_profile_checkout_path() {
+        let config = config_with_profile("main", "~/Workspace/dotfiles");
+
+        assert_eq!(
+            profile::resolve_checkout_path(None, Some(&config), "main"),
+            "~/Workspace/dotfiles"
+        );
+    }
+
+    #[test]
+    fn explicit_init_path_overrides_existing_profile_path() {
+        let config = config_with_profile("main", "~/Workspace/dotfiles");
+
+        assert_eq!(
+            profile::resolve_checkout_path(
+                Some(Path::new("/tmp/explicit-dotfiles")),
+                Some(&config),
+                "main"
+            ),
+            "/tmp/explicit-dotfiles"
+        );
+    }
+
+    #[test]
+    fn first_init_uses_default_checkout_path() {
+        assert_eq!(
+            profile::resolve_checkout_path(None, None, "work"),
+            "~/.local/share/dotman/repos/work"
+        );
+    }
+
+    #[test]
+    fn ssh_remote_matches_https_target() {
+        assert_eq!(
+            canonical_repo_identity("git@github.com:tabsp/dotfiles.git"),
+            "github.com/tabsp/dotfiles"
+        );
+        assert!(
+            ensure_matching_repo(
+                "git@github.com:tabsp/dotfiles.git",
+                "https://github.com/tabsp/dotfiles.git"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn git_suffix_does_not_change_repo_identity() {
+        assert!(
+            ensure_matching_repo(
+                "https://github.com/tabsp/dotfiles.git",
+                "https://github.com/tabsp/dotfiles"
+            )
+            .is_ok()
+        );
+        assert!(
+            ensure_matching_repo(
+                "git@github.com:tabsp/dotfiles",
+                "https://github.com/tabsp/dotfiles.git"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn different_repo_identity_is_rejected() {
+        let error = ensure_matching_repo(
+            "git@github.com:other/dotfiles.git",
+            "https://github.com/tabsp/dotfiles",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("does not match target repo"));
+    }
 }
