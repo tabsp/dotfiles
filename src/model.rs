@@ -314,7 +314,7 @@ pub enum OutputStream {
 /// Maximum output lines stored per step in run history (default 500).
 pub const MAX_HISTORY_OUTPUT_LINES: usize = 500;
 
-/// Per-machine selection state (read/written to ~/.local/share/dotman/state.toml).
+/// Per-machine selection state stored under ~/.local/share/dotman/selection/.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Selection {
     pub items: BTreeMap<StepId, bool>,

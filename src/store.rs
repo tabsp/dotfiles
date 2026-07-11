@@ -72,6 +72,8 @@ pub fn load_selection_scoped(config_path: &Path, config_hash: &str) -> Result<Se
     }
     let legacy_scoped = legacy_scoped_selection_path(config_path, config_hash)?;
     if let Some(selection) = load_selection_file(&legacy_scoped)? {
+        save_selection_scoped(config_path, config_hash, &selection)
+            .context("failed to migrate legacy selection state")?;
         return Ok(selection);
     }
     load_selection()
@@ -424,6 +426,16 @@ mod tests {
 
         assert_eq!(
             load_selection_scoped(&config, "old-hash")
+                .unwrap()
+                .items
+                .get("fish"),
+            Some(&false)
+        );
+        let stable = scoped_selection_path(&config, "old-hash").unwrap();
+        assert!(stable.exists());
+        std::fs::remove_file(legacy).unwrap();
+        assert_eq!(
+            load_selection_scoped(&config, "new-hash-after-config-edit")
                 .unwrap()
                 .items
                 .get("fish"),

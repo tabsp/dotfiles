@@ -440,6 +440,9 @@ fn run_save_warning_keeps_finished_run_result_visible() {
     assert!(finished_run_for_view(&app).is_some());
     assert!(run_title(&app, 80).contains("Success"));
     assert!(line_text(&run_status_line(&app, 80)).contains("history save failed"));
+    let status = line_text(&run_status_line(&app, 160));
+    assert!(status.contains("0 ran, 0 changed, 1 no change, 0 failed"));
+    assert!(status.contains("warning: history save failed: disk full"));
 }
 
 #[test]

@@ -143,7 +143,7 @@ pub(super) fn render_history(f: &mut Frame, app: &mut App) {
             Paragraph::new(vec![
                 Line::from("no runs yet"),
                 Line::from(Span::styled(
-                    "Q back - start deploy from the main menu",
+                    "q back - start deploy from the main menu",
                     Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
                 )),
             ])

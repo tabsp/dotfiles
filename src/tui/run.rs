@@ -368,9 +368,12 @@ pub(super) fn run_status_line(app: &App, width: usize) -> Line<'static> {
             Style::default().fg(CATPPUCCIN_MOCHA.danger),
         )
     } else if let Some(warning) = &app.run_save_warning {
+        let summary = finished_run_for_view(app)
+            .map(final_run_summary)
+            .unwrap_or_else(|| "run finished".into());
         (
-            "  warning  ",
-            warning.clone(),
+            "  result   ",
+            format!("warning: {warning} · {summary}"),
             Style::default().fg(CATPPUCCIN_MOCHA.warning),
         )
     } else if let Some(run) = finished_run_for_view(app) {
