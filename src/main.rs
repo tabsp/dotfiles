@@ -1,5 +1,5 @@
 use clap::Parser;
-use dotman::cli::{Cli, Command, ProfileAction};
+use dotman::cli::{Cli, Command, ProfileAction, SelfAction};
 use dotman::config;
 use dotman::init;
 use dotman::model;
@@ -26,6 +26,9 @@ fn run() -> Result<(), String> {
         Some(Command::Sync) => run_sync(&cli),
         Some(Command::Status) => run_status(),
         Some(Command::Doctor) => run_doctor(),
+        Some(Command::Self_ {
+            action: SelfAction::Update,
+        }) => dotman::self_update::run(),
         Some(Command::Init {
             repo,
             branch,

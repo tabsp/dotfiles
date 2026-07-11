@@ -31,6 +31,12 @@ curl -fsSL "https://github.com/tabsp/dotfiles/releases/latest/download/dotman-${
   tar -xz -C ~/.local/bin dotman
 ```
 
+原地更新已有安装（下载并校验当前平台对应的 GitHub Release 产物）：
+
+```bash
+dotman self update
+```
+
 然后直接运行。首次启动时，dotman 会初始化默认 dotfiles profile 并进入主菜单；
 选择 Deploy、调整 Plan，再查看 Review 后开始 Run：
 

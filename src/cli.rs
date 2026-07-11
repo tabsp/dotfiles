@@ -75,6 +75,12 @@ pub enum Command {
     /// Check system readiness (git, config, etc.)
     Doctor,
 
+    /// Manage the dotman executable
+    Self_ {
+        #[command(subcommand)]
+        action: SelfAction,
+    },
+
     /// Manage named profiles
     Profile {
         #[command(subcommand)]
@@ -99,6 +105,12 @@ pub enum Command {
         #[arg(value_hint = ValueHint::FilePath)]
         source: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SelfAction {
+    /// Update dotman to the latest GitHub Release
+    Update,
 }
 
 #[derive(Debug, Subcommand)]

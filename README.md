@@ -32,6 +32,12 @@ curl -fsSL "https://github.com/tabsp/dotfiles/releases/latest/download/dotman-${
   tar -xz -C ~/.local/bin dotman
 ```
 
+Update an existing installation in place (downloads and verifies the matching GitHub Release asset):
+
+```bash
+dotman self update
+```
+
 Then run it. On first launch, dotman initializes the default dotfiles profile and
 opens the main menu. Choose Deploy, adjust the Plan, then review the selected
 actions before starting the Run:

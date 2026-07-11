@@ -16,6 +16,7 @@ pub mod package_managers;
 pub mod path;
 pub mod plan;
 pub mod profile;
+pub mod self_update;
 pub mod store;
 pub mod theme;
 pub mod tui;
