@@ -57,7 +57,7 @@ shell-lint:
 	shellcheck bin/tmux-status tests/e2e/*.sh tests/e2e/scenarios/*.sh
 
 fish-check:
-	fish -n config/fish/config.fish
+	fish -n config/fish/config.fish config/fish/conf.d/*.fish config/fish/functions/*.fish
 	@tmp="$$(mktemp -d /private/tmp/dotfiles-fish-check.XXXXXX)"; \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	mkdir -p "$$tmp/home/.local/bin" "$$tmp/home/.cargo/bin" "$$tmp/config/fish"; \
