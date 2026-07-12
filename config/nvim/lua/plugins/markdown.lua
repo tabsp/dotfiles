@@ -1,4 +1,18 @@
 return {
+  -- Disable spell checking for markdown (LazyVim enables it by default)
+  {
+    "LazyVim/LazyVim",
+    optional = true,
+    init = function()
+      vim.api.nvim_create_autocmd("FileType", {
+        group = vim.api.nvim_create_augroup("user_markdown", { clear = true }),
+        pattern = "markdown",
+        callback = function()
+          vim.opt_local.spell = false
+        end,
+      })
+    end,
+  },
   {
     "stevearc/conform.nvim",
     optional = true,
