@@ -1,6 +1,4 @@
 local function project_dirs()
-  pcall(require("lazy").load, { plugins = { "project.nvim" } })
-
   local projects = {}
   local seen = {}
 
@@ -18,13 +16,6 @@ local function project_dirs()
       add(line)
     end
     file:close()
-  end
-
-  local ok, history = pcall(require, "project_nvim.utils.history")
-  if ok then
-    for _, dir in ipairs(history.session_projects or {}) do
-      add(dir)
-    end
   end
 
   return projects

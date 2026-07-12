@@ -31,10 +31,14 @@ require("lazy").setup {
     enabled = true,
     notify = false,
   },
+  rocks = {
+    enabled = false,
+  },
   performance = {
     rtp = {
       disabled_plugins = {
         "gzip",
+        "netrwPlugin",
         "tarPlugin",
         "tohtml",
         "tutor",

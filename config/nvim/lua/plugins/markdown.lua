@@ -1,5 +1,27 @@
 return {
   {
+    "stevearc/conform.nvim",
+    optional = true,
+    opts = {
+      formatters = {
+        ["markdownlint-cli2"] = {
+          prepend_args = { "--config", vim.fn.expand("~/.markdownlint-cli2.yaml") },
+        },
+      },
+    },
+  },
+  {
+    "mfussenegger/nvim-lint",
+    optional = true,
+    opts = {
+      linters = {
+        ["markdownlint-cli2"] = {
+          args = { "--config", vim.fn.expand("~/.markdownlint-cli2.yaml"), "-" },
+        },
+      },
+    },
+  },
+  {
     "MeanderingProgrammer/render-markdown.nvim",
     dependencies = {
       "nvim-treesitter/nvim-treesitter",

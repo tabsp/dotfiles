@@ -67,6 +67,7 @@ links:
   ~/.config/fastfetch:      config/fastfetch
   # 5. Enhancement
   ~/.config/starship.toml:  config/starship.toml
+  ~/.markdownlint-cli2.yaml: config/markdownlint-cli2.yaml
   ~/.config/tealdeer:       config/tealdeer
   ~/.config/mise/config.toml: config/mise/config.toml
 

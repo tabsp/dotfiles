@@ -188,7 +188,7 @@ browsed with `dotman history` or `dotman run <id>`.
 
 The deployment pipeline is:
 
-```
+```text
 resolve profile → sync repo (git pull) → load dotman.yaml → build plan → review → execute → save history
 ```
 
