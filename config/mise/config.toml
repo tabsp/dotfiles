@@ -1,0 +1,9 @@
+[tools]
+node = "lts"
+ruby = "latest"
+
+[settings]
+idiomatic_version_file_enable_tools = ["node", "ruby"]
+always_keep_download = true
+activate_aggressive = true
+jobs = 4

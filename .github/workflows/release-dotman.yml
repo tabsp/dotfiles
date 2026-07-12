@@ -20,6 +20,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install lint tools
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
+          brew install fish shellcheck hadolint actionlint jq
+
       - run: make ci
 
   build:

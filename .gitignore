@@ -11,9 +11,6 @@ target/
 dist/
 public/
 
-# Generated tool state
-lazy-lock.json
-
 # Fish runtime/plugin outputs. Keep config/fish/fish_plugins tracked.
 config/fish/fish_variables
 config/fish/completions/

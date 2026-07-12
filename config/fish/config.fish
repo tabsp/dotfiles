@@ -54,18 +54,12 @@ end
 
 set -l local_bin "$HOME/.local/bin"
 if test -d $local_bin
-    fish_add_path $local_bin
+    fish_add_path --global $local_bin
 end
 
 set -l cargo_bin "$HOME/.cargo/bin"
 if test -d $cargo_bin
-    fish_add_path $cargo_bin
-end
-
-set -gx GEM_HOME "$HOME/.local/share/gem"
-set -l gem_bin "$GEM_HOME/bin"
-if test -d $gem_bin
-    fish_add_path $gem_bin
+    fish_add_path --global $cargo_bin
 end
 
 set -l dotfiles_dir (__dotfiles_dir)
@@ -147,12 +141,16 @@ if type -q zoxide
     zoxide init fish --cmd cd | source
 end
 
-if type -q direnv
-    direnv hook fish | source
+if test -f "$HOME/.config/mise/config.toml"
+    set -gx MISE_TRUSTED_CONFIG_PATHS "$HOME/.config/mise/config.toml"
 end
 
 if type -q mise
     mise activate fish | source
+end
+
+if type -q direnv
+    direnv hook fish | source
 end
 
 if type -q fzf

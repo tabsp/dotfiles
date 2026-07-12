@@ -48,7 +48,6 @@ install:
   - dua-cli
   - fzf
   - gum
-  - ruby
   - zoxide
   - font-maple-mono-nf-cn
 
@@ -69,6 +68,7 @@ links:
   # 5. Enhancement
   ~/.config/starship.toml:  config/starship.toml
   ~/.config/tealdeer:       config/tealdeer
+  ~/.config/mise/config.toml: config/mise/config.toml
 
 # Directories to ensure exist.
 create:
@@ -85,7 +85,11 @@ shell:
     description: Update tealdeer pages
     optional: true
     if: command -v tldr >/dev/null 2>&1
-  - command: GEM_HOME="$HOME/.local/share/gem" gem install try-cli --no-document
+  - command: env MISE_TRUSTED_CONFIG_PATHS="$HOME/.config/mise/config.toml" mise install
+    description: Install mise-managed runtimes
+    optional: true
+    if: command -v mise >/dev/null 2>&1
+  - command: env -u GEM_HOME -u GEM_PATH MISE_TRUSTED_CONFIG_PATHS="$HOME/.config/mise/config.toml" mise exec ruby -- gem install try-cli --no-document
     description: Install try CLI
     optional: true
-    if: command -v gem >/dev/null 2>&1 && ! command -v try >/dev/null 2>&1 && ! test -x "$HOME/.local/share/gem/bin/try"
+    if: command -v mise >/dev/null 2>&1 && ! env -u GEM_HOME -u GEM_PATH MISE_TRUSTED_CONFIG_PATHS="$HOME/.config/mise/config.toml" mise exec ruby -- gem list -i try-cli >/dev/null 2>&1

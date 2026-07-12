@@ -1,4 +1,4 @@
-.PHONY: help build init plan deploy lint rust-lint shell-lint docker-lint nvim-check test ci clean
+.PHONY: help build init plan deploy lint lint-tools rust-lint shell-lint fish-check docker-lint action-lint nvim-check test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -13,8 +13,10 @@ help:
 		'  make deploy       Deploy in headless mode' \
 		'  make lint         Run Rust, shell, and Dockerfile checks' \
 		'  make rust-lint    Run rustfmt and clippy checks' \
-		'  make shell-lint   Run shellcheck when available' \
-		'  make docker-lint  Run hadolint when available' \
+		'  make shell-lint   Run ShellCheck' \
+		'  make fish-check   Check Fish syntax and PATH scope' \
+		'  make docker-lint  Run Hadolint' \
+		'  make action-lint  Check GitHub Actions workflows' \
 		'  make nvim-check   Check Neovim config loads headlessly' \
 		'  make test         Run tests' \
 		'  make ci           Run lint and tests' \
@@ -34,27 +36,46 @@ plan: $(DOTMAN)
 deploy: $(DOTMAN)
 	$(DOTMAN) deploy --headless
 
-lint: rust-lint shell-lint docker-lint
+lint: lint-tools rust-lint shell-lint fish-check docker-lint action-lint
+
+lint-tools:
+	@missing=""; \
+	for tool in fish shellcheck hadolint actionlint jq; do \
+		command -v "$$tool" >/dev/null 2>&1 || missing="$$missing $$tool"; \
+	done; \
+	if test -n "$$missing"; then \
+		echo "missing lint tools:$$missing" >&2; \
+		echo "install with: brew install fish shellcheck hadolint actionlint jq" >&2; \
+		exit 1; \
+	fi
 
 rust-lint:
 	cargo fmt --check
 	cargo clippy --all-targets --all-features -- -D warnings
 
 shell-lint:
-	@if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck tests/e2e/*.sh tests/e2e/scenarios/*.sh; \
-	else \
-		echo "shellcheck not found; skipping shell lint"; \
-	fi
+	shellcheck bin/tmux-status tests/e2e/*.sh tests/e2e/scenarios/*.sh
+
+fish-check:
+	fish -n config/fish/config.fish
+	@tmp="$$(mktemp -d /private/tmp/dotfiles-fish-check.XXXXXX)"; \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	mkdir -p "$$tmp/home/.local/bin" "$$tmp/home/.cargo/bin" "$$tmp/config/fish"; \
+	env -u MISE_SHELL -u __MISE_DIFF -u __MISE_ORIG_PATH -u __MISE_SESSION \
+	  HOME="$$tmp/home" XDG_CONFIG_HOME="$$tmp/config" fish --no-config -c \
+	  'fish_add_path --global $$HOME/.local/bin $$HOME/.cargo/bin'; \
+	env -u MISE_SHELL -u __MISE_DIFF -u __MISE_ORIG_PATH -u __MISE_SESSION \
+	  HOME="$$tmp/home" XDG_CONFIG_HOME="$$tmp/config" fish --no-config -c \
+	  'not set -q fish_user_paths; or test (count $$fish_user_paths) -eq 0'
 
 docker-lint:
-	@if command -v hadolint >/dev/null 2>&1; then \
-		hadolint tests/e2e/Dockerfile; \
-	else \
-		echo "hadolint not found; skipping Dockerfile lint"; \
-	fi
+	hadolint tests/e2e/Dockerfile tests/e2e/Dockerfile.production tests/e2e/Dockerfile.sudo
+
+action-lint:
+	actionlint
 
 nvim-check:
+	jq empty config/nvim/lazy-lock.json
 	XDG_STATE_HOME=/private/tmp/nvim-state-check XDG_CACHE_HOME=/private/tmp/nvim-cache-check nvim --headless -u config/nvim/init.lua +qa
 
 test:

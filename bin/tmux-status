@@ -9,14 +9,14 @@ C0="#1e1e2e"
 C1="#313244"
 C2="#89dceb"
 C3="#f38ba8"
-C4="#45475a"
-C5="#cdd6f4"
 C6="#f9e2af"
 C7="#89b4fa"
 C8="#fab387"
 C9="#a6e3a1"
-CC="#bac2de"
 SSH_BG="#cba6f7"
+CACHE_TTL=5
+CACHE_DIR="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/tmux"
+CACHE_FILE="$CACHE_DIR/status-metrics"
 
 window_width="$(tmux display-message -p "#{window_width}" 2>/dev/null || printf "120")"
 pane_command="${1:-}"
@@ -131,11 +131,15 @@ disk_percent() {
   fi
 }
 
-battery_segment() {
+battery_percent() {
   command -v pmset >/dev/null 2>&1 || return
+  pmset -g batt | awk 'match($0, /[0-9]+%/) { print substr($0, RSTART, RLENGTH - 1); exit }'
+}
 
-  local percent
-  percent="$(pmset -g batt | grep -Eo '[0-9]+%' | head -n 1 | tr -d '%')"
+battery_segment() {
+  local percent="${1:--}"
+
+  [ "$percent" != "-" ] || return
   [ -n "$percent" ] || return
 
   local icon color
@@ -188,15 +192,42 @@ tail_segment() {
   printf "#[bg=terminal,fg=%s]▓▒░#[default]" "$color"
 }
 
-system_segment() {
-  local cpu ram disk cpu_color ram_color disk_color pad
+system_metrics() {
+  local now cached_at cpu ram disk battery tmp
+
+  now="$(date +%s)"
+  if [ -r "$CACHE_FILE" ] \
+    && read -r cached_at cpu ram disk battery < "$CACHE_FILE" \
+    && [ $((now - cached_at)) -lt "$CACHE_TTL" ]; then
+    printf "%s %s %s %s\n" "$cpu" "$ram" "$disk" "$battery"
+    return
+  fi
 
   cpu="$(cpu_percent 2>/dev/null || printf "0")"
   ram="$(ram_percent 2>/dev/null || printf "0")"
   disk="$(disk_percent 2>/dev/null || printf "0")"
+  battery="$(battery_percent 2>/dev/null || true)"
   cpu="$(normalize_percent "$cpu")"
   ram="$(normalize_percent "$ram")"
   disk="$(normalize_percent "$disk")"
+  if [ -n "$battery" ]; then
+    battery="$(normalize_percent "$battery")"
+  else
+    battery="-"
+  fi
+
+  mkdir -p "$CACHE_DIR" 2>/dev/null || true
+  tmp="${CACHE_FILE}.$$"
+  if printf "%s %s %s %s %s\n" "$now" "$cpu" "$ram" "$disk" "$battery" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$CACHE_FILE" 2>/dev/null || true
+  fi
+
+  printf "%s %s %s %s\n" "$cpu" "$ram" "$disk" "$battery"
+}
+
+system_segment() {
+  local cpu="$1" ram="$2" disk="$3"
+  local cpu_color ram_color disk_color pad
 
   cpu_color="$(pressure_color "$cpu")"
   ram_color="$(pressure_color "$ram")"
@@ -212,17 +243,18 @@ system_segment() {
 }
 
 front="#[bg=terminal,fg=${C7}]░▒▓#[bg=${C7},fg=${C0}]"
+read -r cpu ram disk battery < <(system_metrics)
 
 if [ "$window_width" -gt 80 ]; then
   if [ "$pane_command" = "ssh" ]; then
-    printf "%s %s%s%s%s" "$front" "$(system_segment)" "$(battery_segment)" "$(ssh_segment)" "$(tail_segment "$SSH_BG")"
+    printf "%s %s%s%s%s" "$front" "$(system_segment "$cpu" "$ram" "$disk")" "$(battery_segment "$battery")" "$(ssh_segment)" "$(tail_segment "$SSH_BG")"
   else
-    printf "%s %s%s%s" "$front" "$(system_segment)" "$(battery_segment)" "$(tail_segment "$C7")"
+    printf "%s %s%s%s" "$front" "$(system_segment "$cpu" "$ram" "$disk")" "$(battery_segment "$battery")" "$(tail_segment "$C7")"
   fi
 else
   if [ "$pane_command" = "ssh" ]; then
-    printf "%s %s%s%s" "$front" "$(system_segment)" "$(ssh_segment)" "$(tail_segment "$SSH_BG")"
+    printf "%s %s%s%s" "$front" "$(system_segment "$cpu" "$ram" "$disk")" "$(ssh_segment)" "$(tail_segment "$SSH_BG")"
   else
-    printf "%s %s%s" "$front" "$(system_segment)" "$(tail_segment "$C7")"
+    printf "%s %s%s" "$front" "$(system_segment "$cpu" "$ram" "$disk")" "$(tail_segment "$C7")"
   fi
 fi
