@@ -15,15 +15,13 @@ return {
           NormalFloat = { bg = "NONE" },
           FloatBorder = { bg = "NONE" },
           FloatTitle = { bg = "NONE" },
-          NeoTreeNormal = { bg = "NONE" },
-          NeoTreeNormalNC = { bg = "NONE" },
           SnacksDashboardNormal = { bg = "NONE" },
         }
       end,
     },
     config = function(_, opts)
       require("catppuccin").setup(opts)
-      vim.cmd.colorscheme "catppuccin"
+      vim.cmd.colorscheme("catppuccin")
     end,
   },
 }

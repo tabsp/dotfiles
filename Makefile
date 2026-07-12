@@ -40,12 +40,12 @@ lint: lint-tools rust-lint shell-lint fish-check docker-lint action-lint
 
 lint-tools:
 	@missing=""; \
-	for tool in fish shellcheck hadolint actionlint jq; do \
+	for tool in fish shellcheck hadolint actionlint jq nvim stylua; do \
 		command -v "$$tool" >/dev/null 2>&1 || missing="$$missing $$tool"; \
 	done; \
 	if test -n "$$missing"; then \
 		echo "missing lint tools:$$missing" >&2; \
-		echo "install with: brew install fish shellcheck hadolint actionlint jq" >&2; \
+		echo "install with: brew install fish shellcheck hadolint actionlint jq neovim stylua" >&2; \
 		exit 1; \
 	fi
 
@@ -76,12 +76,16 @@ action-lint:
 
 nvim-check:
 	jq empty config/nvim/lazy-lock.json
-	XDG_STATE_HOME=/private/tmp/nvim-state-check XDG_CACHE_HOME=/private/tmp/nvim-cache-check nvim --headless -u config/nvim/init.lua +qa
+	stylua --check config/nvim
+	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-nvim-check.XXXXXX")"; \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	XDG_STATE_HOME="$$tmp/state" XDG_CACHE_HOME="$$tmp/cache" \
+	  nvim --headless -u config/nvim/init.lua +qa
 
 test:
 	cargo test
 
-ci: lint test
+ci: lint nvim-check test
 	cargo test --test tui_pty -- --nocapture
 
 clean:
