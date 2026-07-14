@@ -85,6 +85,10 @@ layer = "software"
 binary = "rg"
 layer = "enhancement"
 
+[tools.tree-sitter-cli]
+binary = "tree-sitter"
+layer = "enhancement"
+
 [tools.fd]
 layer = "enhancement"
 

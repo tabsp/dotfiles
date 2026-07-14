@@ -37,6 +37,7 @@ install:
   - mise
   # 5. Enhancement
   - ripgrep
+  - tree-sitter-cli
   - fd
   - bat
   - eza

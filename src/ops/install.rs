@@ -466,6 +466,22 @@ mod tests {
     }
 
     #[test]
+    fn find_tree_sitter_cli_uses_cli_binary() {
+        let db = load_db().unwrap();
+        let tree_sitter = find(&db, "tree-sitter-cli").unwrap();
+        assert_eq!(tree_sitter.binary, "tree-sitter");
+        assert_eq!(tree_sitter.layer, "enhancement");
+        assert_eq!(
+            tree_sitter.platforms.get("brew").unwrap().command(),
+            "brew install tree-sitter-cli"
+        );
+        assert_eq!(
+            tree_sitter.platforms.get("pacman").unwrap().command(),
+            "sudo pacman -S --needed --noconfirm tree-sitter-cli"
+        );
+    }
+
+    #[test]
     fn find_maps_brew_cask_template_to_brew_platform() {
         let db = load_db().unwrap();
         let ghostty = find(&db, "ghostty").unwrap();
