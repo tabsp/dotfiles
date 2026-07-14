@@ -6,11 +6,11 @@
 
 # Per-platform package manager
 package_managers:
-  macos:   brew
-  ubuntu:  brew
-  debian:  brew
-  arch:    pacman
-  fedora:  dnf
+  macos: brew
+  ubuntu: brew
+  debian: brew
+  arch: pacman
+  fedora: dnf
 
 # Auto-install pkg manager if missing (idempotent: skips if already present).
 auto_install_pkg_manager: true
@@ -54,27 +54,27 @@ install:
 # All link targets in one block; layer indicated by comment.
 links:
   # 1. Terminal
-  ~/.config/ghostty:        config/ghostty
+  ~/.config/ghostty: config/ghostty
   # 2. Shell
-  ~/.config/fish:           config/fish
+  ~/.config/fish: config/fish
   # 3. Multiplexer
-  ~/.tmux.conf:             config/tmux.conf
+  ~/.tmux.conf: config/tmux.conf
   ~/.local/bin/tmux-status: bin/tmux-status
-  ~/.config/herdr:          config/herdr
+  ~/.config/herdr: config/herdr
   # 4. Software
-  ~/.config/nvim:           config/nvim
-  ~/.config/btop:           config/btop
-  ~/.config/fastfetch:      config/fastfetch
+  ~/.config/nvim: config/nvim
+  ~/.config/btop: config/btop
+  ~/.config/fastfetch: config/fastfetch
   # 5. Enhancement
-  ~/.config/starship.toml:  config/starship.toml
+  ~/.config/starship.toml: config/starship.toml
   ~/.markdownlint-cli2.yaml: config/markdownlint-cli2.yaml
-  ~/.config/tealdeer:       config/tealdeer
+  ~/.config/tealdeer: config/tealdeer
   ~/.config/mise/config.toml: config/mise/config.toml
 
 # Directories to ensure exist.
 create:
-  - ~/.config/fish-local    # 2. Shell (preferred machine-local overrides)
-  - ~/Workspace/tries       # standalone workspace
+  - ~/.config/fish-local # 2. Shell (preferred machine-local overrides)
+  - ~/Workspace/tries # standalone workspace
 
 # Misc shell sync (idempotent / optional).
 shell:

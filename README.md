@@ -99,14 +99,14 @@ Global options:
 
 The footer shows only the primary keys for the current screen:
 
-| Screen | Primary keys |
-| --- | --- |
-| Main menu | `↑↓` navigate, `Enter` open, `q` quit |
-| Plan | `↑↓` navigate, `Space` toggle, `s` save, `r` review, `q` back |
-| Review | `↑↓` scroll, `r` run, `q` back |
+| Screen       | Primary keys                                                                    |
+| ------------ | ------------------------------------------------------------------------------- |
+| Main menu    | `↑↓` navigate, `Enter` open, `q` quit                                           |
+| Plan         | `↑↓` navigate, `Space` toggle, `s` save, `r` review, `q` back                   |
+| Review       | `↑↓` scroll, `r` run, `q` back                                                  |
 | Run / Result | `↑↓` scroll, `Tab` filter, `Enter` fold, `f` follow when paused, `q` abort/back |
-| History | `↑↓` navigate, `Enter` open, `d` delete, `q` back |
-| Run replay | `↑↓` navigate, `Space` fold, `q` back |
+| History      | `↑↓` navigate, `Enter` open, `d` delete, `q` back                               |
+| Run replay   | `↑↓` navigate, `Space` fold, `q` back                                           |
 
 Direct main-menu keys (`d` deploy, `p` plan, `h` history), Vim navigation
 (`j/k`, `gg`, `G`), `Home/End`, `PageUp/PageDown`, arrow-key filter switching,
@@ -135,13 +135,13 @@ default_shell: fish
 install: [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship]
 
 links:
-  ~/.config/fish:    config/fish
-  ~/.config/nvim:    config/nvim
+  ~/.config/fish: config/fish
+  ~/.config/nvim: config/nvim
   ~/.config/ghostty: config/ghostty
-  ~/.tmux.conf:      config/tmux.conf
+  ~/.tmux.conf: config/tmux.conf
 
 create:
-  - ~/.config/fish/local.d
+  - ~/.config/fish-local
   - ~/Workspace/tries
 
 shell:
@@ -193,7 +193,7 @@ resolve profile → sync repo (git pull) → load dotman.yaml → build plan →
 ```
 
 dotman's profile system manages the dotfiles repo itself (URL, branch, clone
-path, auto-sync). The deployment config (`dotman.yaml`) only describes *what*
+path, auto-sync). The deployment config (`dotman.yaml`) only describes _what_
 to deploy — installs, links, creates, shell commands.
 
 Auto-init triggers automatically when no profile or config is found. Headless
@@ -208,7 +208,7 @@ shared repository.
 Fish loads local-only files from:
 
 ```text
-~/.config/fish/local.d/*.fish
+~/.config/fish-local/*.fish
 ```
 
 For first-time setup on a new machine, follow [docs/new-machine.md](docs/new-machine.md).
@@ -217,7 +217,19 @@ For first-time setup on a new machine, follow [docs/new-machine.md](docs/new-mac
 
 ```sh
 make build
+make format        # format all supported tracked files
+make format-check  # check formatting without modifying files
 make lint
 make test
+make config-check  # run the complete local configuration validation
 make ci
+```
+
+Before committing, format the repository, run the complete configuration
+validation, and review the resulting diff:
+
+```sh
+make format
+make config-check
+git diff
 ```

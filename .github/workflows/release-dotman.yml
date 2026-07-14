@@ -20,6 +20,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Prettier
+        run: npm install --global prettier@3.9.5
+
       - name: Install lint tools
         shell: bash
         run: |

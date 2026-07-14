@@ -97,14 +97,14 @@ dotman plan --headless       # headless: 输出 JSON plan
 
 Footer 只显示当前页面的主快捷键：
 
-| 页面 | 主快捷键 |
-| --- | --- |
-| 主菜单 | `↑↓` 导航，`Enter` 打开，`q` 退出 |
-| Plan | `↑↓` 导航，`Space` 切换，`s` 保存，`r` 进入 Review，`q` 返回 |
-| Review | `↑↓` 滚动，`r` 执行，`q` 返回 |
+| 页面         | 主快捷键                                                            |
+| ------------ | ------------------------------------------------------------------- |
+| 主菜单       | `↑↓` 导航，`Enter` 打开，`q` 退出                                   |
+| Plan         | `↑↓` 导航，`Space` 切换，`s` 保存，`r` 进入 Review，`q` 返回        |
+| Review       | `↑↓` 滚动，`r` 执行，`q` 返回                                       |
 | Run / Result | `↑↓` 滚动，`Tab` 过滤，`Enter` 折叠，暂停时 `f` 跟随，`q` 中止/返回 |
-| History | `↑↓` 导航，`Enter` 打开，`d` 删除，`q` 返回 |
-| 历史回放 | `↑↓` 导航，`Space` 折叠，`q` 返回 |
+| History      | `↑↓` 导航，`Enter` 打开，`d` 删除，`q` 返回                         |
+| 历史回放     | `↑↓` 导航，`Space` 折叠，`q` 返回                                   |
 
 主菜单直达键（`d` 部署、`p` 计划、`h` 历史）、Vim 导航（`j/k`、`gg`、`G`）、
 `Home/End`、`PageUp/PageDown`、方向键切换过滤器，以及等价的 `Enter`/`Space`
@@ -131,13 +131,13 @@ default_shell: fish
 install: [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship]
 
 links:
-  ~/.config/fish:    config/fish
-  ~/.config/nvim:    config/nvim
+  ~/.config/fish: config/fish
+  ~/.config/nvim: config/nvim
   ~/.config/ghostty: config/ghostty
-  ~/.tmux.conf:      config/tmux.conf
+  ~/.tmux.conf: config/tmux.conf
 
 create:
-  - ~/.config/fish/local.d
+  - ~/.config/fish-local
   - ~/Workspace/tries
 
 shell:
@@ -194,7 +194,7 @@ TUI 会在 Run 开始前通过 Plan 和 Review 展示部署变更。
 Fish 从以下路径加载本地文件：
 
 ```text
-~/.config/fish/local.d/*.fish
+~/.config/fish-local/*.fish
 ```
 
 新机器的首次设置参考 [docs/new-machine.md](docs/new-machine.md)。
@@ -203,7 +203,18 @@ Fish 从以下路径加载本地文件：
 
 ```sh
 make build
+make format        # 格式化所有支持且由 Git 跟踪的文件
+make format-check  # 只检查格式，不修改文件
 make lint
 make test
+make config-check  # 执行完整的本地配置验证
 make ci
+```
+
+提交前先统一格式、执行完整配置检查，再查看最终差异：
+
+```sh
+make format
+make config-check
+git diff
 ```

@@ -19,6 +19,11 @@ return {
       linters = {
         ["markdownlint-cli2"] = {
           prepend_args = { "--config", markdownlint_config },
+          -- nvim-lint sends the buffer over stdin, so markdownlint-cli2 cannot
+          -- apply path-based ignores from its config file by itself.
+          condition = function(ctx)
+            return vim.fs.basename(ctx.filename) ~= "CLAUDE.md"
+          end,
         },
       },
     },

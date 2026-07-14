@@ -1,26 +1,3 @@
-local function project_dirs()
-  local projects = {}
-  local seen = {}
-
-  local function add(dir)
-    if dir and dir ~= "" and not seen[dir] and vim.fn.isdirectory(dir) == 1 then
-      seen[dir] = true
-      table.insert(projects, dir)
-    end
-  end
-
-  local historyfile = vim.fn.stdpath("data") .. "/project_nvim/project_history"
-  local file = io.open(historyfile, "r")
-  if file then
-    for line in file:lines() do
-      add(line)
-    end
-    file:close()
-  end
-
-  return projects
-end
-
 return {
   {
     "folke/snacks.nvim",
@@ -39,14 +16,6 @@ return {
       opts.dashboard.sections = {
         { section = "header" },
         { icon = " ", title = "Keymaps", section = "keys", indent = 2, padding = 1 },
-        {
-          icon = " ",
-          title = "Projects",
-          section = "projects",
-          dirs = project_dirs,
-          indent = 2,
-          padding = 1,
-        },
         { section = "startup" },
       }
 
@@ -55,10 +24,29 @@ return {
         return
       end
 
-      for _, key in ipairs(keys) do
+      local session_index
+      local has_session_picker = false
+      for index, key in ipairs(keys) do
         if key.desc == "Projects (util.project)" then
           key.desc = "Projects"
+          key.key = "p"
         end
+        if key.key == "s" then
+          session_index = index
+        elseif key.key == "S" then
+          has_session_picker = true
+        end
+      end
+
+      if session_index and not has_session_picker then
+        table.insert(keys, session_index + 1, {
+          icon = " ",
+          key = "S",
+          desc = "Sessions",
+          action = function()
+            require("persistence").select()
+          end,
+        })
       end
     end,
   },

@@ -9,7 +9,7 @@
 
 - 确认 SSH/GPG key 可以恢复，或已经迁移到安全位置。
 - 保存 `~/.gitconfig.local`。
-- 保存 `~/.config/fish/local.d/*.fish` 中的本地私有配置。
+- 保存 `~/.config/fish-local/*.fish` 中的本地私有配置。
 - 确认需要迁移的应用数据、字体、浏览器配置和登录态。
 
 ## 2. 系统基础工具
@@ -150,7 +150,7 @@ getent passwd "$USER" | cut -d: -f7
 ## 6. 恢复私有配置
 
 - 恢复 `~/.gitconfig.local`。
-- 恢复 `~/.config/fish/local.d/*.fish`。
+- 恢复 `~/.config/fish-local/*.fish`。
 - 恢复 SSH/GPG key，并检查权限。
 
 ## 7. 手动应用设置

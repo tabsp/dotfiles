@@ -12,10 +12,10 @@ install: []
 # in dotman-install.yaml (FIXTURE_TYPE=install) only.
 
 links:
-  ~/.config/fish:        config/fish
-  ~/.config/nvim:        config/nvim
-  ~/.tmux.conf:          config/tmux.conf
-  ~/.local/bin/hello:    bin/hello
+  ~/.config/fish: config/fish
+  ~/.config/nvim: config/nvim
+  ~/.tmux.conf: config/tmux.conf
+  ~/.local/bin/hello: bin/hello
 
 create:
   - ~/.config/fish/local.d

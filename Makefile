@@ -1,8 +1,12 @@
-.PHONY: help build init plan deploy lint lint-tools rust-lint shell-lint fish-check docker-lint action-lint nvim-check config-check config-check-tools test ci clean
+.PHONY: help build init plan deploy format format-check format-tools lint lint-tools rust-lint shell-lint fish-check docker-lint action-lint nvim-check config-check config-check-tools test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
 RUST_SOURCES := $(shell find src -name '*.rs')
+NVIM_TEST_LUA := $(wildcard tests/nvim*.lua)
+NVIM_DATA_HOME := $(or $(XDG_DATA_HOME),$(HOME)/.local/share)/nvim
+PRETTIER ?= $(or $(shell command -v prettier 2>/dev/null),$(NVIM_DATA_HOME)/mason/bin/prettier)
+PRETTIER_FILES := $(shell git ls-files --cached --others --exclude-standard -- '*.md' '*.json' '*.jsonc' '*.yaml' '*.yml')
 
 help:
 	@printf '%s\n' \
@@ -11,6 +15,8 @@ help:
 		'  make init         Initialize default dotman profile' \
 		'  make plan         Show deployment plan in headless mode' \
 		'  make deploy       Deploy in headless mode' \
+		'  make format       Format all supported tracked files' \
+		'  make format-check Check repository-wide formatting' \
 		'  make lint         Run Rust, shell, and Dockerfile checks' \
 		'  make rust-lint    Run rustfmt and clippy checks' \
 		'  make shell-lint   Run ShellCheck' \
@@ -37,7 +43,28 @@ plan: $(DOTMAN)
 deploy: $(DOTMAN)
 	$(DOTMAN) deploy --headless
 
-lint: lint-tools rust-lint shell-lint fish-check docker-lint action-lint
+format-tools:
+	@test -x "$(PRETTIER)" || { \
+		echo "missing formatter: prettier" >&2; \
+		echo "install with Mason (:MasonInstall prettier) or add prettier to PATH" >&2; \
+		exit 1; \
+	}
+	@command -v stylua >/dev/null 2>&1 || { echo "missing formatter: stylua" >&2; exit 1; }
+	@command -v cargo >/dev/null 2>&1 || { echo "missing formatter: cargo" >&2; exit 1; }
+
+format: format-tools
+	cargo fmt
+	stylua config/nvim
+	stylua --config-path config/nvim/stylua.toml $(NVIM_TEST_LUA)
+	$(PRETTIER) --write $(PRETTIER_FILES)
+
+format-check: format-tools
+	cargo fmt --check
+	stylua --check config/nvim
+	stylua --check --config-path config/nvim/stylua.toml $(NVIM_TEST_LUA)
+	$(PRETTIER) --check $(PRETTIER_FILES)
+
+lint: lint-tools format-check rust-lint shell-lint fish-check docker-lint action-lint
 
 lint-tools:
 	@missing=""; \
@@ -78,10 +105,24 @@ action-lint:
 nvim-check:
 	jq empty config/nvim/lazy-lock.json
 	stylua --check config/nvim
-	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-nvim-check.XXXXXX")"; \
+	stylua --check --config-path config/nvim/stylua.toml $(NVIM_TEST_LUA)
+	@set -e; \
+	tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-nvim-check.XXXXXX")"; \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	XDG_STATE_HOME="$$tmp/state" XDG_CACHE_HOME="$$tmp/cache" \
-		  nvim --headless -u config/nvim/init.lua +qa
+	  nvim --headless -u config/nvim/init.lua -l tests/nvim_check.lua; \
+	for mode in direct dirchange; do \
+	  NVIM_SESSION_CHECK="$$mode" XDG_STATE_HOME="$$tmp/state" XDG_CACHE_HOME="$$tmp/cache" \
+	    nvim --headless -u config/nvim/init.lua README.md -l tests/nvim_session_check.lua; \
+	done; \
+	NVIM_SESSION_CHECK=directory XDG_STATE_HOME="$$tmp/state" XDG_CACHE_HOME="$$tmp/cache" \
+	  nvim --headless -u config/nvim/init.lua . -l tests/nvim_session_check.lua; \
+	XDG_STATE_HOME="$$tmp/state" XDG_CACHE_HOME="$$tmp/cache" \
+	  nvim --headless -u config/nvim/init.lua --startuptime "$$tmp/startup.log" +qa; \
+	awk 'NF && $$1 ~ /^[0-9.]+$$/ { total=$$1 } END { \
+	  printf "Neovim startup: %.1fms\n", total; \
+	  if (total > 500) { print "Neovim startup exceeded 500ms budget" > "/dev/stderr"; exit 1 } \
+	}' "$$tmp/startup.log"
 
 config-check-tools:
 	@missing=""; \
@@ -93,7 +134,7 @@ config-check-tools:
 		exit 1; \
 	fi
 
-config-check: config-check-tools shell-lint fish-check nvim-check test $(DOTMAN)
+config-check: config-check-tools format-check shell-lint fish-check nvim-check test $(DOTMAN)
 	yq '.' dotman.yaml >/dev/null
 	$(DOTMAN) plan --headless >/dev/null
 	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-tmux-check.XXXXXX")"; \

@@ -28,8 +28,7 @@ require("lazy").setup({
   install = { colorscheme = { "catppuccin", "tokyonight", "habamax" } },
   ui = { border = "rounded" },
   checker = {
-    enabled = true,
-    notify = false,
+    enabled = false,
   },
   rocks = {
     enabled = false,
