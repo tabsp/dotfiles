@@ -9,7 +9,6 @@ C0="#1e1e2e"
 C1="#313244"
 C2="#89dceb"
 C3="#f38ba8"
-C6="#f9e2af"
 C7="#89b4fa"
 C8="#fab387"
 C9="#a6e3a1"
@@ -34,7 +33,7 @@ draw() {
   local percent="$1"
   local size="$2"
   local color="$3"
-  local filled=$((percent * size / 125))
+  local filled=$(((percent * size + 50) / 100))
   local out=""
 
   if [ "$window_width" -le 80 ]; then
@@ -42,10 +41,10 @@ draw() {
   fi
 
   for ((i = 0; i < size; i++)); do
-    if [ "$i" -le "$filled" ]; then
-      out="${out}#[fg=${C1}]${FULL}"
+    if [ "$i" -lt "$filled" ]; then
+      out="${out}#[fg=${color}]${FULL}"
     else
-      out="${out}#[fg=${C6}]${EMPTY}"
+      out="${out}#[fg=${C1}]${EMPTY}"
     fi
   done
 
@@ -227,18 +226,16 @@ system_metrics() {
 
 system_segment() {
   local cpu="$1" ram="$2" disk="$3"
-  local cpu_color ram_color disk_color pad
+  local cpu_color ram_color disk_color
 
   cpu_color="$(pressure_color "$cpu")"
   ram_color="$(pressure_color "$ram")"
   disk_color="$(pressure_color "$disk")"
-  pad=" "
-
-  printf "#[fg=%s] %s %s " "$cpu_color" "${pad:${#cpu}}" "$cpu%"
+  printf "#[fg=%s] %3s%% " "$cpu_color" "$cpu"
   draw "$cpu" 4 "$cpu_color"
-  printf "#[fg=%s]  %s " "$ram_color" "$ram%"
+  printf "#[fg=%s]  %3s%% " "$ram_color" "$ram"
   draw "$ram" 4 "$ram_color"
-  printf "#[fg=%s] 󰽄 %s " "$disk_color" "$disk%"
+  printf "#[fg=%s] 󰽄 %3s%% " "$disk_color" "$disk"
   draw "$disk" 4 "$disk_color"
 }
 

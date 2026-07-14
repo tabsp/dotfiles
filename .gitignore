@@ -11,35 +11,11 @@ target/
 dist/
 public/
 
-# Fish runtime/plugin outputs. Keep config/fish/fish_plugins tracked.
+# Fish runtime/plugin outputs. Fisher is generated from the tracked plugin list;
+# other functions and conf.d files should remain visible to Git by default.
 config/fish/fish_variables
 config/fish/completions/
-config/fish/conf.d/
-!config/fish/conf.d/
-config/fish/conf.d/*
-!config/fish/conf.d/00-mise.fish
-!config/fish/conf.d/10-path.fish
-!config/fish/conf.d/20-editor.fish
-!config/fish/conf.d/30-tools.fish
-!config/fish/conf.d/40-fzf.fish
-!config/fish/conf.d/50-theme.fish
-!config/fish/conf.d/60-aliases.fish
-config/fish/functions/*
-!config/fish/functions/__dotfiles_dir.fish
-!config/fish/functions/__gum_info.fish
-!config/fish/functions/__gum_warn.fish
-!config/fish/functions/dots.fish
-!config/fish/functions/ff.fish
-!config/fish/functions/fish_title.fish
-!config/fish/functions/ls.fish
-!config/fish/functions/t.fish
-!config/fish/functions/try.fish
-!config/fish/functions/vf.fish
-!config/fish/functions/y.fish
-!config/fish/functions/yf.fish
-!config/fish/functions/ys.fish
-!config/fish/functions/zi.fish
-config/fish/local.d/
+config/fish/functions/fisher.fish
 config/fish/themes/
 
 # Machine/platform-specific Ghostty overrides.

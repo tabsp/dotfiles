@@ -25,8 +25,7 @@ function dots --description 'open dotfiles config actions'
         case "Edit nvim config"
             $editor "$HOME/.config/nvim"
         case "Reload fish config"
-            source "$HOME/.config/fish/config.fish"
-            __gum_info "fish config reloaded"
+            exec fish
         case "Dotman status"
             dotman status
         case "Dotman sync"

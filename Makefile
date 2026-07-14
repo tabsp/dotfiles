@@ -1,4 +1,4 @@
-.PHONY: help build init plan deploy lint lint-tools rust-lint shell-lint fish-check docker-lint action-lint nvim-check test ci clean
+.PHONY: help build init plan deploy lint lint-tools rust-lint shell-lint fish-check docker-lint action-lint nvim-check config-check config-check-tools test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -18,6 +18,7 @@ help:
 		'  make docker-lint  Run Hadolint' \
 		'  make action-lint  Check GitHub Actions workflows' \
 		'  make nvim-check   Check Neovim config loads headlessly' \
+		'  make config-check Check all managed configuration files' \
 		'  make test         Run tests' \
 		'  make ci           Run lint and tests' \
 		'  make clean        Remove build artifacts'
@@ -80,7 +81,27 @@ nvim-check:
 	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-nvim-check.XXXXXX")"; \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	XDG_STATE_HOME="$$tmp/state" XDG_CACHE_HOME="$$tmp/cache" \
-	  nvim --headless -u config/nvim/init.lua +qa
+		  nvim --headless -u config/nvim/init.lua +qa
+
+config-check-tools:
+	@missing=""; \
+	for tool in cargo fish shellcheck jq nvim stylua yq tmux; do \
+		command -v "$$tool" >/dev/null 2>&1 || missing="$$missing $$tool"; \
+	done; \
+	if test -n "$$missing"; then \
+		echo "missing config check tools:$$missing" >&2; \
+		exit 1; \
+	fi
+
+config-check: config-check-tools shell-lint fish-check nvim-check test $(DOTMAN)
+	yq '.' dotman.yaml >/dev/null
+	$(DOTMAN) plan --headless >/dev/null
+	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-tmux-check.XXXXXX")"; \
+	socket="$$tmp/tmux.sock"; \
+	trap 'tmux -S "$$socket" kill-server >/dev/null 2>&1 || true; rm -rf "$$tmp"' EXIT; \
+	tmux -S "$$socket" -f "$(CURDIR)/config/tmux.conf" new-session -d -s config-check; \
+	test "$$(tmux -S "$$socket" show-options -gv default-terminal)" = tmux-256color; \
+	test "$$(tmux -S "$$socket" show-options -gv status-interval)" = 5
 
 test:
 	cargo test

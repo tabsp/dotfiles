@@ -73,19 +73,27 @@ links:
 
 # Directories to ensure exist.
 create:
-  - ~/.config/fish/local.d  # 2. Shell (fish local config)
+  - ~/.config/fish-local    # 2. Shell (preferred machine-local overrides)
   - ~/Workspace/tries       # standalone workspace
 
 # Misc shell sync (idempotent / optional).
 shell:
-  - command: fish -lc 'type -q fisher; or curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher update'
+  - command: fish -lc 'type -q fisher; or curl -fsSL https://raw.githubusercontent.com/jorgebucaran/fisher/4.4.8/functions/fisher.fish | source; and fisher update'
     description: Sync fish plugins
     optional: true
     if: command -v fish >/dev/null 2>&1
-  - command: TEALDEER_CONFIG_DIR="$HOME/.config/tealdeer" tldr --update
-    description: Update tealdeer pages
+  - command: >-
+      if [ ! -d "$HOME/.tmux/plugins/tpm/.git" ]; then
+        git clone --filter=blob:none https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm";
+      fi &&
+      if [ "$(git -C "$HOME/.tmux/plugins/tpm" rev-parse HEAD)" != "99469c4a9b1ccf77fade25842dc7bafbc8ce9946" ]; then
+        git -C "$HOME/.tmux/plugins/tpm" fetch --depth=1 origin 99469c4a9b1ccf77fade25842dc7bafbc8ce9946 &&
+        git -C "$HOME/.tmux/plugins/tpm" checkout --detach 99469c4a9b1ccf77fade25842dc7bafbc8ce9946;
+      fi &&
+      "$HOME/.tmux/plugins/tpm/bin/install_plugins"
+    description: Install pinned TPM and sync tmux plugins
     optional: true
-    if: command -v tldr >/dev/null 2>&1
+    if: command -v tmux >/dev/null 2>&1 && command -v git >/dev/null 2>&1
   - command: env MISE_TRUSTED_CONFIG_PATHS="$HOME/.config/mise/config.toml" mise install
     description: Install mise-managed runtimes
     optional: true
