@@ -13,7 +13,7 @@ links:
   ~/.local/bin/hello: bin/hello
 
 create:
-  - ~/.config/fish/local.d
+  - ~/.config/fish-local
 
 shell:
   - command: echo "deployment-verified"

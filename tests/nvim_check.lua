@@ -8,6 +8,13 @@ local function check(condition, message)
   end
 end
 
+local expected_config_root = vim.env.NVIM_CONFIG_CHECK_ROOT
+check(expected_config_root ~= nil and expected_config_root ~= "", "expected config root is not set")
+check(
+  vim.fs.normalize(vim.fn.stdpath("config")) == vim.fs.normalize(expected_config_root),
+  "Neovim config root should point to the repository config"
+)
+
 for _, provider in ipairs({ "node", "perl", "python3", "ruby" }) do
   check(vim.g["loaded_" .. provider .. "_provider"] == 0, provider .. " provider should be disabled")
 end

@@ -160,7 +160,7 @@ install: []
 links:
   ~/.config/fish: config/fish
 create:
-  - ~/.config/fish/local.d
+  - ~/.config/fish-local
 shell: []
 YAML
 
