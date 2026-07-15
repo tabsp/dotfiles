@@ -2133,6 +2133,146 @@ fn review_filesystem_previews_preserve_action_severity_and_status() {
 }
 
 #[test]
+fn review_install_previews_classify_present_missing_and_unknown_tools() {
+    let item = test_plan_item("install tools");
+
+    let present = review_install_entry(&item, None, "auto", "sh", "");
+    assert_eq!(present.kind, "install");
+    assert_eq!(present.severity, ReviewSeverity::Success);
+    assert_eq!(present.status, "present");
+
+    let missing = review_install_entry(
+        &item,
+        None,
+        "brew",
+        "dotman-test-binary-that-does-not-exist-7f4c",
+        "",
+    );
+    assert_eq!(missing.severity, ReviewSeverity::Run);
+    assert_eq!(missing.status, "missing");
+
+    let unknown = review_install_entry(&item, None, "brew", "", "custom installer");
+    assert_eq!(unknown.severity, ReviewSeverity::Warning);
+    assert_eq!(unknown.status, "unknown");
+    assert_eq!(unknown.detail, "custom installer");
+}
+
+#[test]
+fn review_entries_dispatch_all_action_kinds_in_plan_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    let link_target = dir.path().join("linked");
+    let create_target = dir.path().join("created");
+    let clean_target = dir.path().join("cleaned");
+    std::fs::write(&source, "source").unwrap();
+    std::fs::write(&clean_target, "clean me").unwrap();
+
+    let mut plan = test_plan_with_items(&["selected", "ignored"]);
+    plan.config_path = dir.path().join("dotman.yaml");
+    plan.items[0].actions = vec![
+        Action::Install {
+            pkg_mgr: "brew".into(),
+            binary: "dotman-test-binary-that-does-not-exist-a91e".into(),
+            source: String::new(),
+        },
+        Action::Link {
+            target: link_target,
+            source,
+            backup: false,
+            relink: false,
+        },
+        Action::Create {
+            target: create_target,
+        },
+        Action::Shell {
+            command: "printf test".into(),
+            description: Some("run test command".into()),
+            optional: false,
+            if_condition: None,
+        },
+        Action::Clean {
+            target: clean_target,
+            force: true,
+        },
+    ];
+    plan.items[1].selected = false;
+    plan.items[1].actions = vec![test_shell_action("ignored")];
+
+    let entries = review_entries(&plan, None);
+    assert_eq!(entries.len(), 5);
+    assert_eq!(
+        entries.iter().map(|entry| entry.kind).collect::<Vec<_>>(),
+        vec!["install", "link", "create", "shell", "clean"]
+    );
+    assert_eq!(
+        entries.iter().map(|entry| entry.order).collect::<Vec<_>>(),
+        vec![0, 1, 2, 3, 4]
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.status.as_str())
+            .collect::<Vec<_>>(),
+        vec!["missing", "link", "create", "run", "backup remove"]
+    );
+}
+
+#[test]
+fn review_link_failures_and_action_descriptions_keep_exact_severity() {
+    let dir = tempfile::tempdir().unwrap();
+    let item = test_plan_item("links");
+    let icon = icons::current().action_link;
+
+    let missing_source = review_link_entry(
+        &item,
+        dir.path(),
+        &dir.path().join("target"),
+        &dir.path().join("missing-source"),
+        false,
+        false,
+        icon,
+    );
+    assert_eq!(missing_source.severity, ReviewSeverity::Danger);
+    assert_eq!(missing_source.status, "fail: source does not exist");
+
+    let source = dir.path().join("source");
+    std::fs::write(&source, "source").unwrap();
+    let inspection_error = review_link_entry(
+        &item,
+        dir.path(),
+        Path::new(""),
+        &source,
+        false,
+        false,
+        icon,
+    );
+    assert_eq!(inspection_error.severity, ReviewSeverity::Danger);
+    assert!(inspection_error.status.starts_with("inspect failed:"));
+
+    let backup = dir.path().join("backup");
+    let cases = [
+        (LinkAction::Skip, ReviewSeverity::Success, "linked"),
+        (LinkAction::Link, ReviewSeverity::Run, "link"),
+        (
+            LinkAction::Backup(backup),
+            ReviewSeverity::Warning,
+            "backup link",
+        ),
+        (LinkAction::Relink, ReviewSeverity::Warning, "relink"),
+        (
+            LinkAction::Fail("conflict".into()),
+            ReviewSeverity::Danger,
+            "fail: conflict",
+        ),
+    ];
+    for (action, expected_severity, expected_status) in cases {
+        let (severity, status) = describe_link_review(&action);
+        assert_eq!(severity, expected_severity);
+        assert_eq!(status, expected_status);
+    }
+}
+
+#[test]
 fn review_severity_helpers_map_to_exact_groups_icons_and_colors() {
     let icon_set = icons::current();
     let cases = [

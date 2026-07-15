@@ -395,6 +395,165 @@ fn create_existing_directory_reports_no_change() {
 }
 
 #[test]
+fn clean_actions_execute_skip_symlink_and_backup_remove_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing");
+    let source = dir.path().join("source");
+    let symlink = dir.path().join("symlink");
+    let forced = dir.path().join("forced.txt");
+    std::fs::write(&source, "source").unwrap();
+    std::os::unix::fs::symlink(&source, &symlink).unwrap();
+    std::fs::write(&forced, "remove me").unwrap();
+
+    let cfg = test_config(dir.path().join("dotman.yaml"));
+    let plan = test_plan(vec![
+        Action::Clean {
+            target: missing.clone(),
+            force: false,
+        },
+        Action::Clean {
+            target: symlink.clone(),
+            force: false,
+        },
+        Action::Clean {
+            target: forced.clone(),
+            force: true,
+        },
+    ]);
+
+    let run = execute(&plan, &cfg).unwrap();
+
+    assert_eq!(run.status, RunStatus::Success);
+    assert_eq!(run.items[0].actions.len(), 3);
+    assert_eq!(run.items[0].actions[0].status, ActionStatus::NoChange);
+    assert_eq!(run.items[0].actions[1].status, ActionStatus::WillClean);
+    assert_eq!(
+        run.items[0].actions[2].status,
+        ActionStatus::WillBackupRemove
+    );
+    assert!(!missing.exists());
+    assert!(!symlink.is_symlink());
+    assert!(!forced.exists());
+    assert!(
+        dir.path()
+            .read_dir()
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("forced.backup."))
+    );
+}
+
+#[test]
+fn condition_execution_error_fails_action_without_running_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("must-not-run");
+    let later = dir.path().join("later-action");
+    let cfg = test_config(dir.path().join("dotman.yaml"));
+    let plan = test_plan(vec![
+        Action::Shell {
+            command: format!("touch {}", marker.display()),
+            description: Some("guarded command".into()),
+            optional: false,
+            if_condition: Some("dotman-condition-command-that-does-not-exist-52f1".into()),
+        },
+        Action::Create {
+            target: later.clone(),
+        },
+    ]);
+    let mut errors = Vec::new();
+
+    let run = execute_with_events(
+        &plan,
+        &cfg,
+        |event| {
+            if let ExecuteEvent::ActionError { message, .. } = event {
+                errors.push(message);
+            }
+        },
+        || false,
+    )
+    .unwrap();
+
+    assert_eq!(run.status, RunStatus::Failed);
+    assert_eq!(run.items[0].actions[0].status, ActionStatus::WillFail);
+    assert!(
+        run.items[0].actions[0]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("condition failed to execute"))
+    );
+    assert_eq!(run.items[0].actions[1].status, ActionStatus::NotRun);
+    assert!(!marker.exists());
+    assert!(!later.exists());
+    assert!(
+        errors
+            .iter()
+            .any(|message| message.contains("condition error"))
+    );
+}
+
+#[test]
+fn abort_between_actions_preserves_completed_and_not_run_states() {
+    use std::cell::Cell;
+
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    let later_item_target = dir.path().join("later-item");
+    let cfg = test_config(dir.path().join("dotman.yaml"));
+    let mut plan = test_plan(vec![
+        Action::Create {
+            target: first.clone(),
+        },
+        Action::Create {
+            target: second.clone(),
+        },
+    ]);
+    plan.items.push(PlanItem {
+        id: "later-item".into(),
+        name: "later item".into(),
+        layer: "misc".into(),
+        actions: vec![Action::Create {
+            target: later_item_target.clone(),
+        }],
+        selected: true,
+    });
+    let checks = Cell::new(0);
+    let abort_events = Cell::new(0);
+
+    let run = execute_with_events(
+        &plan,
+        &cfg,
+        |event| {
+            if matches!(event, ExecuteEvent::Aborted) {
+                abort_events.set(abort_events.get() + 1);
+            }
+        },
+        || {
+            let current = checks.get();
+            checks.set(current + 1);
+            current >= 2
+        },
+    )
+    .unwrap();
+
+    assert_eq!(run.status, RunStatus::Aborted);
+    assert_eq!(abort_events.get(), 1);
+    assert_eq!(run.items.len(), 2);
+    assert_eq!(run.items[0].status, ActionStatus::Aborted);
+    assert_eq!(run.items[0].actions[0].status, ActionStatus::WillCreate);
+    assert_eq!(run.items[0].actions[1].status, ActionStatus::NotRun);
+    assert_eq!(run.items[1].status, ActionStatus::NotRun);
+    assert_eq!(run.items[1].actions[0].status, ActionStatus::NotRun);
+    assert!(first.is_dir());
+    assert!(!second.exists());
+    assert!(!later_item_target.exists());
+}
+
+#[test]
 fn failed_action_stops_remaining_actions_in_item() {
     let dir = tempfile::tempdir().unwrap();
     let create_target = dir.path().join("should-not-exist");
