@@ -621,6 +621,138 @@ fn plan_bulk_selection_only_marks_actual_changes_dirty() {
 }
 
 #[test]
+fn plan_item_layer_grid_and_jump_interactions_preserve_focus() {
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["one", "two", "three", "four"]));
+    app.plan_columns = 3;
+
+    handle_plan(&mut app, KeyCode::Enter).unwrap();
+    assert!(app.collapsed_layers.contains("misc"));
+    handle_plan(&mut app, KeyCode::Char(' ')).unwrap();
+    assert!(!app.collapsed_layers.contains("misc"));
+
+    let rows = build_plan_rows(
+        app.plan.as_ref().unwrap(),
+        &app.collapsed_layers,
+        app.plan_columns,
+    );
+    let first_grid_row = rows
+        .iter()
+        .position(|row| matches!(row, PlanRow::InlineItems(_)))
+        .unwrap();
+    select_plan_row(&mut app.plan_state, first_grid_row, true);
+
+    handle_plan(&mut app, KeyCode::Right).unwrap();
+    assert_eq!(app.grid_col, 1);
+    handle_plan(&mut app, KeyCode::Char(' ')).unwrap();
+    assert!(!app.plan.as_ref().unwrap().items[1].selected);
+    assert!(app.dirty);
+    assert!(app.status_message.contains("two"));
+
+    handle_plan(&mut app, KeyCode::Char('h')).unwrap();
+    handle_plan(&mut app, KeyCode::Left).unwrap();
+    assert_eq!(app.grid_col, 0);
+    handle_plan(&mut app, KeyCode::Char('l')).unwrap();
+    assert_eq!(app.grid_col, 1);
+
+    handle_plan(&mut app, KeyCode::Char('6')).unwrap();
+    assert!(app.collapsed_layers.contains("misc"));
+    handle_plan(&mut app, KeyCode::Char('6')).unwrap();
+    assert!(!app.collapsed_layers.contains("misc"));
+
+    jump_plan_bottom(&mut app);
+    let bottom = app.plan_state.selected().unwrap();
+    handle_plan(&mut app, KeyCode::PageUp).unwrap();
+    assert!(app.plan_state.selected().unwrap() <= bottom);
+    handle_plan(&mut app, KeyCode::PageDown).unwrap();
+    jump_plan_top(&mut app);
+    assert_eq!(
+        current_plan_focus(&app),
+        Some(PlanFocus::Layer("misc".into()))
+    );
+}
+
+#[test]
+fn plan_run_and_dirty_exit_guards_preserve_user_intent() {
+    let mut read_only = App::new(Mode::Plan);
+    read_only.plan = Some(test_plan_with_items(&["one"]));
+    handle_plan(&mut read_only, KeyCode::Char('r')).unwrap();
+    assert_eq!(read_only.screen, Screen::MainMenu);
+    assert_eq!(
+        read_only.status_message,
+        "plan mode is read-only; choose deploy to run"
+    );
+
+    let mut empty_selection = App::new(Mode::Deploy);
+    let mut plan = test_plan_with_items(&["one"]);
+    plan.items[0].selected = false;
+    empty_selection.plan = Some(plan);
+    handle_plan(&mut empty_selection, KeyCode::Char('r')).unwrap();
+    assert_eq!(empty_selection.status_message, "nothing selected");
+    assert_eq!(empty_selection.status_kind, NoticeKind::Warning);
+
+    let mut dirty = App::new(Mode::Deploy);
+    dirty.plan = Some(test_plan_with_items(&["one"]));
+    dirty.dirty = true;
+    handle_plan(&mut dirty, KeyCode::Esc).unwrap();
+    assert!(dirty.plan_exit_pending);
+    assert!(dirty.status_message.contains("Unsaved selection changes"));
+    handle_plan(&mut dirty, KeyCode::Char('x')).unwrap();
+    assert!(dirty.plan_exit_pending);
+    handle_plan(&mut dirty, KeyCode::Esc).unwrap();
+    assert!(!dirty.plan_exit_pending);
+    assert!(dirty.status_message.is_empty());
+    assert_eq!(dirty.screen, Screen::MainMenu);
+}
+
+#[test]
+fn plan_render_handles_missing_compact_and_wide_layouts() {
+    let backend = ratatui::backend::TestBackend::new(50, 10);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut missing = App::new(Mode::Deploy);
+    terminal
+        .draw(|frame| render_plan(frame, &mut missing))
+        .unwrap();
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(rendered.contains("no plan loaded"));
+
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["one", "two", "three", "four"]));
+    app.dirty = true;
+    app.status_message = "selection changed".into();
+    terminal.draw(|frame| render_plan(frame, &mut app)).unwrap();
+    let compact = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(compact.contains("unsaved"));
+    assert_eq!(app.plan_columns, 1);
+
+    let backend = ratatui::backend::TestBackend::new(140, 18);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_plan(frame, &mut app)).unwrap();
+    let wide = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(wide.contains("4 selected"));
+    assert!(wide.contains("selection changed"));
+    assert_eq!(app.plan_columns, GRID_COLUMNS);
+}
+
+#[test]
 fn history_selection_handles_empty_first_and_last_delete_positions() {
     let mut app = App::new(Mode::History);
     history::clamp_history_selection(&mut app);
@@ -1781,6 +1913,282 @@ fn review_enter_obeys_the_danger_confirmation_gate() {
         "plan has danger items; press ! to confirm before running"
     );
     assert_eq!(app.status_kind, NoticeKind::Error);
+}
+
+#[test]
+fn review_background_check_success_and_panic_reach_terminal_states() {
+    let mut app = App::new(Mode::Deploy);
+    start_review(&mut app);
+    assert!(app.review_thread.is_none());
+
+    app.plan = Some(test_plan_with_items(&["empty"]));
+    start_review(&mut app);
+    assert_eq!(app.screen, Screen::ConfirmView);
+    assert_eq!(app.status_message, "checking action conditions...");
+    assert!(app.review_thread.is_some());
+    while !app.review_thread.as_ref().unwrap().is_finished() {
+        std::thread::yield_now();
+    }
+    assert!(poll_review_thread(&mut app));
+    assert!(app.review_thread.is_none());
+    assert!(app.review_entries.is_empty());
+    assert!(app.status_message.is_empty());
+    assert!(!poll_review_thread(&mut app));
+
+    app.review_entries.push(ReviewEntry {
+        order: 0,
+        item: "stale".into(),
+        kind: "shell",
+        kind_icon: icons::current().action_shell,
+        severity: ReviewSeverity::Run,
+        status: "run".into(),
+        detail: String::new(),
+    });
+    app.review_thread = Some(std::thread::spawn(|| -> Vec<ReviewEntry> {
+        panic!("review test panic")
+    }));
+    while !app.review_thread.as_ref().unwrap().is_finished() {
+        std::thread::yield_now();
+    }
+    assert!(poll_review_thread(&mut app));
+    assert!(app.review_entries.is_empty());
+    assert_eq!(app.status_message, "review condition check panicked");
+    assert_eq!(app.status_kind, NoticeKind::Error);
+}
+
+#[test]
+fn review_navigation_running_guard_confirmation_and_back_are_consistent() {
+    let icon_set = icons::current();
+    let mut app = App::new(Mode::Deploy);
+    app.screen = Screen::ConfirmView;
+    app.plan = Some(test_plan_with_items(&["danger"]));
+    app.review_entries = vec![ReviewEntry {
+        order: 0,
+        item: "replace config".into(),
+        kind: "link",
+        kind_icon: icon_set.action_link,
+        severity: ReviewSeverity::Danger,
+        status: "would overwrite target".into(),
+        detail: String::new(),
+    }];
+
+    handle_confirm(&mut app, KeyCode::Down).unwrap();
+    handle_confirm(&mut app, KeyCode::Char('j')).unwrap();
+    assert_eq!(app.review_scroll, 2);
+    handle_confirm(&mut app, KeyCode::Up).unwrap();
+    handle_confirm(&mut app, KeyCode::Char('k')).unwrap();
+    assert_eq!(app.review_scroll, 0);
+    handle_confirm(&mut app, KeyCode::PageDown).unwrap();
+    assert_eq!(app.review_scroll, 8);
+    handle_confirm(&mut app, KeyCode::PageUp).unwrap();
+    assert_eq!(app.review_scroll, 0);
+    handle_confirm(&mut app, KeyCode::End).unwrap();
+    assert_eq!(app.review_scroll, usize::MAX);
+    handle_confirm(&mut app, KeyCode::Home).unwrap();
+    assert_eq!(app.review_scroll, 0);
+    jump_review_bottom(&mut app);
+    assert_eq!(app.review_scroll, usize::MAX);
+    jump_review_top(&mut app);
+    assert_eq!(app.review_scroll, 0);
+
+    let (release_tx, release_rx) = mpsc::channel();
+    app.review_thread = Some(std::thread::spawn(move || {
+        release_rx.recv().unwrap();
+        Vec::new()
+    }));
+    handle_confirm(&mut app, KeyCode::Enter).unwrap();
+    assert_eq!(app.status_message, "review checks are still running");
+    release_tx.send(()).unwrap();
+    app.review_thread.take().unwrap().join().unwrap();
+
+    handle_confirm(&mut app, KeyCode::Char('!')).unwrap();
+    assert!(app.review_danger_confirmed);
+    assert_eq!(app.status_message, "danger confirmed; press r to run once");
+    handle_confirm(&mut app, KeyCode::Char('r')).unwrap();
+    assert!(!app.review_danger_confirmed);
+    assert_eq!(app.screen, Screen::ConfirmView);
+
+    handle_confirm(&mut app, KeyCode::Esc).unwrap();
+    assert_eq!(app.screen, Screen::PlanView);
+    app.screen = Screen::ConfirmView;
+    handle_confirm(&mut app, KeyCode::Char('q')).unwrap();
+    assert_eq!(app.screen, Screen::PlanView);
+    handle_confirm(&mut app, KeyCode::Null).unwrap();
+}
+
+#[test]
+fn review_render_handles_missing_plan_and_compact_and_normal_summaries() {
+    let backend = ratatui::backend::TestBackend::new(50, 10);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut missing = App::new(Mode::Deploy);
+    terminal
+        .draw(|frame| render_confirm(frame, &mut missing))
+        .unwrap();
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(rendered.contains("no plan loaded"));
+
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["one", "two"]));
+    app.plan.as_mut().unwrap().items[1].selected = false;
+    app.review_entries = vec![ReviewEntry {
+        order: 0,
+        item: "one".into(),
+        kind: "shell",
+        kind_icon: icons::current().action_shell,
+        severity: ReviewSeverity::Warning,
+        status: "run · sudo".into(),
+        detail: "sudo true".into(),
+    }];
+    terminal
+        .draw(|frame| render_confirm(frame, &mut app))
+        .unwrap();
+    let compact = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(compact.contains("Selected 1"));
+    assert!(compact.contains("1 attention"));
+
+    let backend = ratatui::backend::TestBackend::new(100, 24);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    app.status_message = "danger confirmation required".into();
+    app.status_kind = NoticeKind::Warning;
+    terminal
+        .draw(|frame| render_confirm(frame, &mut app))
+        .unwrap();
+    let normal = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(normal.contains("Selected: 1 steps"));
+    assert!(normal.contains("Skipped: 1 steps"));
+    assert!(normal.contains("danger confirmation required"));
+}
+
+#[test]
+fn review_filesystem_previews_preserve_action_severity_and_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let item = test_plan_item("filesystem");
+    let icon_set = icons::current();
+
+    let missing_dir = dir.path().join("missing-dir");
+    let create = review_create_entry(&item, &missing_dir, icon_set.action_create);
+    assert_eq!(create.severity, ReviewSeverity::Run);
+    assert_eq!(create.status, "create");
+    std::fs::create_dir(&missing_dir).unwrap();
+    let exists = review_create_entry(&item, &missing_dir, icon_set.action_create);
+    assert_eq!(exists.severity, ReviewSeverity::Success);
+    assert_eq!(exists.status, "exists");
+
+    let source = dir.path().join("source");
+    let target = dir.path().join("target");
+    std::fs::write(&source, "content").unwrap();
+    let link = review_link_entry(
+        &item,
+        dir.path(),
+        &target,
+        &source,
+        false,
+        false,
+        icon_set.action_link,
+    );
+    assert_eq!(link.severity, ReviewSeverity::Run);
+    assert_eq!(link.status, "link");
+    std::os::unix::fs::symlink(&source, &target).unwrap();
+    let linked = review_link_entry(
+        &item,
+        dir.path(),
+        &target,
+        &source,
+        false,
+        false,
+        icon_set.action_link,
+    );
+    assert_eq!(linked.severity, ReviewSeverity::Success);
+    assert_eq!(linked.status, "linked");
+
+    let absent = review_clean_entry(
+        &item,
+        &dir.path().join("absent"),
+        false,
+        icon_set.action_clean,
+    );
+    assert_eq!(absent.severity, ReviewSeverity::Skip);
+    assert_eq!(absent.status, "skip");
+    let clean_link = review_clean_entry(&item, &target, false, icon_set.action_clean);
+    assert_eq!(clean_link.severity, ReviewSeverity::Warning);
+    assert_eq!(clean_link.status, "remove symlink");
+}
+
+#[test]
+fn review_severity_helpers_map_to_exact_groups_icons_and_colors() {
+    let icon_set = icons::current();
+    let cases = [
+        (
+            ReviewSeverity::Success,
+            ReviewGroup::AlreadyOk,
+            icon_set.success,
+            CATPPUCCIN_MOCHA.success,
+        ),
+        (
+            ReviewSeverity::Skip,
+            ReviewGroup::Skipped,
+            icon_set.skipped,
+            CATPPUCCIN_MOCHA.skip,
+        ),
+        (
+            ReviewSeverity::Run,
+            ReviewGroup::WillRun,
+            icon_set.running,
+            CATPPUCCIN_MOCHA.running,
+        ),
+        (
+            ReviewSeverity::Warning,
+            ReviewGroup::Attention,
+            icon_set.warning,
+            CATPPUCCIN_MOCHA.warning,
+        ),
+        (
+            ReviewSeverity::Danger,
+            ReviewGroup::Attention,
+            icon_set.failed,
+            CATPPUCCIN_MOCHA.danger,
+        ),
+    ];
+    for (severity, group, icon, color) in cases {
+        let entry = ReviewEntry {
+            order: 0,
+            item: "item".into(),
+            kind: "unknown",
+            kind_icon: icon_set.info,
+            severity,
+            status: "status".into(),
+            detail: String::new(),
+        };
+        assert_eq!(review_group_for(&entry), group);
+        assert_eq!(review_status_icon(icon_set, severity), icon);
+        assert_eq!(review_status_style(severity).fg, Some(color));
+    }
+    assert_eq!(review_kind_rank("install"), 0);
+    assert_eq!(review_kind_rank("link"), 1);
+    assert_eq!(review_kind_rank("create"), 2);
+    assert_eq!(review_kind_rank("shell"), 3);
+    assert_eq!(review_kind_rank("clean"), 4);
+    assert_eq!(review_kind_rank("unknown"), usize::MAX);
+    assert_eq!(selected_item_count(None), 0);
+    assert_eq!(selected_action_count(None), 0);
 }
 
 #[test]
