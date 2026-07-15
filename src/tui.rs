@@ -4,7 +4,6 @@
 
 use crate::cli::Mode;
 use crate::config;
-use crate::execute::MAX_TUI_OUTPUT_LINES;
 use crate::icons;
 use crate::model::{
     Action, ActionStatus, Mode as PlanMode, OutputStream, Plan, PlanItem, Run, RunAction, RunItem,
@@ -32,11 +31,7 @@ use ratatui::{DefaultTerminal, Frame};
 use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-    mpsc,
-};
+use std::sync::{Arc, atomic::AtomicBool, mpsc};
 use std::time::{Duration, Instant};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -255,6 +250,22 @@ fn render(app: &mut App, f: &mut Frame) {
 use plan::*;
 #[cfg(test)]
 use review::*;
+#[cfg(test)]
+use run::events::{apply_run_thread_result, drain_all_run_events, sync_finished_run_state};
+#[cfg(test)]
+use run::log::{
+    log_bottom_scroll, log_scroll_offset, push_log, push_log_group, push_log_indented,
+    sanitize_tui_log_line, scroll_run_log, toggle_current_log_group, visible_log_lines,
+};
+#[cfg(test)]
+use run::view::{
+    RunDisplayLine, RunGroup, action_kind_for_view, current_run_item_name, finished_run_for_view,
+    grouped_run_lines, live_run_display_lines, ordered_run_lines, run_action_kind_icon,
+    run_action_total, run_body_lines, run_executed_action_total, run_group_for_status,
+    run_group_header_line, run_is_aborting, run_is_terminal, run_log_panel_height,
+    run_progress_bar, run_status_icon, run_status_label_for_view, run_status_line, run_title,
+    selected_run_action_total,
+};
 #[cfg(test)]
 use run::*;
 #[cfg(test)]

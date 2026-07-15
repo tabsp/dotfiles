@@ -1,6 +1,8 @@
 use super::*;
+use crate::execute::MAX_TUI_OUTPUT_LINES;
 use crate::tui::history::{history_content_area, replay_help_line, replay_lines};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 
 fn test_plan_item(name: &str) -> PlanItem {
     PlanItem {
@@ -227,6 +229,70 @@ fn run_progress_advances_on_action_finished() {
 
     assert_eq!(app.progress, (1, 2));
     assert_eq!(app.run_action_statuses[0][1], Some(ActionStatus::NoChange));
+}
+
+#[test]
+fn run_event_lifecycle_updates_active_and_final_state() {
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["config"]));
+    app.progress = (0, 1);
+    app.run_item_statuses = vec![None];
+    app.run_action_statuses = vec![vec![None]];
+    let (tx, rx) = mpsc::channel();
+    app.run_events = Some(rx);
+
+    tx.send(crate::execute::ExecuteEvent::ItemStarted {
+        index: 0,
+        name: "config".into(),
+    })
+    .unwrap();
+    tx.send(crate::execute::ExecuteEvent::ActionStarted {
+        item_index: 0,
+        action_index: 0,
+        item: "config".into(),
+        action: "shell".into(),
+    })
+    .unwrap();
+    tx.send(crate::execute::ExecuteEvent::Output {
+        item: "config".into(),
+        stream: OutputStream::Stdout,
+        line: "working".into(),
+    })
+    .unwrap();
+    tx.send(crate::execute::ExecuteEvent::ActionFinished {
+        item_index: 0,
+        action_index: 0,
+        item: "config".into(),
+        action: "shell".into(),
+        status: ActionStatus::Executed,
+    })
+    .unwrap();
+    tx.send(crate::execute::ExecuteEvent::ItemFinished {
+        index: 0,
+        name: "config".into(),
+        status: ActionStatus::Executed,
+    })
+    .unwrap();
+
+    drain_all_run_events(&mut app);
+
+    assert_eq!(app.progress, (1, 1));
+    assert_eq!(app.current_item, None);
+    assert_eq!(app.current_action, None);
+    assert_eq!(app.last_item_index, Some(0));
+    assert_eq!(app.run_item_statuses, vec![Some(ActionStatus::Executed)]);
+    assert_eq!(
+        app.run_action_statuses,
+        vec![vec![Some(ActionStatus::Executed)]]
+    );
+    let log = app
+        .current_log
+        .iter()
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>();
+    assert!(log.contains(&"working"));
+    assert!(log.contains(&"finished shell: ran"));
+    assert!(log.contains(&"finished: ran"));
 }
 
 #[test]
@@ -918,6 +984,319 @@ fn run_arrow_keys_scroll_and_switch_filters() {
     assert_eq!(app.log_filter, LogFilter::Errors);
     handle_run(&mut app, KeyCode::Right).unwrap();
     assert_eq!(app.log_filter, LogFilter::All);
+}
+
+#[test]
+fn run_shortcuts_preserve_filters_folding_navigation_and_exit_states() {
+    let mut app = App::new(Mode::Deploy);
+    app.log_viewport_height = 3;
+    push_log_group(&mut app, "group");
+    push_log_indented(&mut app, "failed", None, 1, LogKind::Stderr);
+    for index in 0..8 {
+        push_log(&mut app, &format!("line {index}"), None);
+    }
+
+    handle_run(&mut app, KeyCode::Tab).unwrap();
+    assert_eq!(app.log_filter, LogFilter::Current);
+    handle_run(&mut app, KeyCode::Char('e')).unwrap();
+    assert_eq!(app.log_filter, LogFilter::Errors);
+    handle_run(&mut app, KeyCode::Char('c')).unwrap();
+    assert_eq!(app.log_filter, LogFilter::Current);
+
+    app.log_filter = LogFilter::All;
+    app.log_scroll = 0;
+    handle_run(&mut app, KeyCode::Enter).unwrap();
+    assert!(app.collapsed_log_groups.contains("group"));
+
+    jump_run_top(&mut app);
+    assert!(!app.log_follow);
+    assert_eq!(app.log_scroll, 0);
+    jump_run_bottom(&mut app);
+    assert!(app.log_follow);
+
+    handle_run_mouse(&mut app, crossterm::event::MouseEventKind::ScrollUp);
+    assert!(!app.log_follow);
+    handle_run_mouse(&mut app, crossterm::event::MouseEventKind::ScrollDown);
+    handle_run_mouse(&mut app, crossterm::event::MouseEventKind::Moved);
+
+    handle_run(&mut app, KeyCode::Char('F')).unwrap();
+    assert!(app.log_follow);
+
+    app.plan = Some(test_plan_with_items(&["fish"]));
+    handle_run(&mut app, KeyCode::Esc).unwrap();
+    assert_eq!(app.screen, Screen::PlanView);
+
+    app.plan = None;
+    app.screen = Screen::RunView;
+    handle_run(&mut app, KeyCode::Char('q')).unwrap();
+    assert_eq!(app.screen, Screen::MainMenu);
+
+    let abort_flag = Arc::new(AtomicBool::new(false));
+    app.abort_flag = Some(Arc::clone(&abort_flag));
+    handle_run(&mut app, KeyCode::Char('q')).unwrap();
+    assert!(abort_flag.load(Ordering::SeqCst));
+    assert_eq!(app.status_kind, NoticeKind::Warning);
+    assert!(app.status_message.contains("abort requested"));
+
+    handle_run(&mut app, KeyCode::Null).unwrap();
+}
+
+#[test]
+fn render_run_joins_finished_worker_and_displays_result() {
+    let backend = ratatui::backend::TestBackend::new(80, 20);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = App::new(Mode::Deploy);
+    app.screen = Screen::RunView;
+    app.progress = (0, 1);
+    app.run_thread = Some(std::thread::spawn(|| RunThreadResult {
+        run: Some(test_run(
+            RunStatus::Success,
+            vec![test_run_item("fish", ActionStatus::Executed, None)],
+        )),
+        error: None,
+        save_warning: Some("history save warning".into()),
+    }));
+    while !app.run_thread.as_ref().unwrap().is_finished() {
+        std::thread::yield_now();
+    }
+
+    terminal.draw(|frame| render_run(frame, &mut app)).unwrap();
+
+    assert!(app.run_thread.is_none());
+    assert!(app.run_events.is_none());
+    assert!(app.abort_flag.is_none());
+    assert_eq!(
+        app.run.as_ref().map(|run| run.status),
+        Some(RunStatus::Success)
+    );
+    assert_eq!(
+        app.run_save_warning.as_deref(),
+        Some("history save warning")
+    );
+    assert!(app.log_viewport_height > 0);
+}
+
+#[test]
+fn render_run_reports_worker_panics() {
+    let backend = ratatui::backend::TestBackend::new(60, 12);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = App::new(Mode::Deploy);
+    app.run_thread = Some(std::thread::spawn(|| -> RunThreadResult {
+        panic!("test worker panic")
+    }));
+    while !app.run_thread.as_ref().unwrap().is_finished() {
+        std::thread::yield_now();
+    }
+
+    terminal.draw(|frame| render_run(frame, &mut app)).unwrap();
+
+    assert_eq!(app.run_error.as_deref(), Some("run thread panicked"));
+    assert!(app.run_thread.is_none());
+    assert!(
+        app.current_log
+            .iter()
+            .any(|line| line.text.contains("run thread panicked"))
+    );
+}
+
+#[test]
+fn run_view_helpers_preserve_status_action_and_overflow_semantics() {
+    let icon_set = icons::current();
+    let statuses = [
+        (
+            ActionStatus::WillFail,
+            icon_set.failed,
+            CATPPUCCIN_MOCHA.danger,
+        ),
+        (
+            ActionStatus::Aborted,
+            icon_set.warning,
+            CATPPUCCIN_MOCHA.warning,
+        ),
+        (
+            ActionStatus::WillSkip,
+            icon_set.skipped,
+            CATPPUCCIN_MOCHA.fg_dim,
+        ),
+        (
+            ActionStatus::NotRun,
+            icon_set.skipped,
+            CATPPUCCIN_MOCHA.fg_dim,
+        ),
+        (
+            ActionStatus::NoChange,
+            icon_set.info,
+            CATPPUCCIN_MOCHA.text_muted,
+        ),
+        (
+            ActionStatus::Executed,
+            icon_set.success,
+            CATPPUCCIN_MOCHA.success,
+        ),
+        (
+            ActionStatus::WillInstall,
+            icon_set.success,
+            CATPPUCCIN_MOCHA.success,
+        ),
+    ];
+    for (status, expected_icon, expected_color) in statuses {
+        let icon = run_status_icon(Some(status));
+        assert_eq!(icon.content.as_ref(), expected_icon);
+        assert_eq!(icon.style.fg, Some(expected_color));
+        assert_eq!(
+            run_status_style(Some(status), false).fg,
+            Some(expected_color)
+        );
+        assert_eq!(
+            run_status_label_for_view(Some(status), false),
+            status.result_label()
+        );
+    }
+    let pending = run_status_icon(None);
+    assert_eq!(pending.content.as_ref(), icon_set.pending);
+    assert_eq!(pending.style.fg, Some(CATPPUCCIN_MOCHA.fg_dim));
+    assert_eq!(
+        run_status_style(None, false).fg,
+        Some(CATPPUCCIN_MOCHA.fg_dim)
+    );
+    assert_eq!(
+        run_status_style(None, true).fg,
+        Some(CATPPUCCIN_MOCHA.running)
+    );
+    assert_eq!(run_status_label_for_view(None, false), "pending");
+    assert_eq!(run_status_label_for_view(None, true), "running");
+
+    for (group, expected_label) in [
+        (RunGroup::Failed, "Failed (1)"),
+        (RunGroup::Aborted, "Aborted (1)"),
+        (RunGroup::Running, "Running (1)"),
+        (RunGroup::Ran, "Ran (1)"),
+        (RunGroup::Changed, "Changed (1)"),
+        (RunGroup::NoChange, "No Change (1)"),
+        (RunGroup::NotRun, "Not Run (1)"),
+        (RunGroup::Skipped, "Skipped (1)"),
+        (RunGroup::Pending, "Pending (1)"),
+    ] {
+        assert!(line_text(&run_group_header_line(group, 1, 40)).contains(expected_label));
+    }
+
+    let actions = [
+        Action::Install {
+            pkg_mgr: "brew".into(),
+            binary: "fish".into(),
+            source: "brew install fish".into(),
+        },
+        Action::Link {
+            target: PathBuf::from("target"),
+            source: PathBuf::from("source"),
+            backup: false,
+            relink: false,
+        },
+        Action::Create {
+            target: PathBuf::from("dir"),
+        },
+        test_shell_action("shell"),
+        Action::Clean {
+            target: PathBuf::from("old"),
+            force: false,
+        },
+    ];
+    for (action, (expected_kind, expected_icon)) in actions.iter().zip([
+        ("install", icon_set.action_install),
+        ("link", icon_set.action_link),
+        ("create", icon_set.action_create),
+        ("shell", icon_set.action_shell),
+        ("clean", icon_set.action_clean),
+    ]) {
+        assert_eq!(action_kind_for_view(action), expected_kind);
+        assert_eq!(run_action_kind_icon(expected_kind), expected_icon);
+    }
+    assert_eq!(run_action_kind_icon("unknown"), icon_set.info);
+
+    let make_lines = || {
+        (0..12)
+            .map(|index| RunDisplayLine {
+                group: if index % 2 == 0 {
+                    RunGroup::Failed
+                } else {
+                    RunGroup::Changed
+                },
+                line: Line::from(format!("line {index}")),
+                active: index == 7,
+            })
+            .collect::<Vec<_>>()
+    };
+    let grouped = grouped_run_lines(make_lines(), 30, 4);
+    assert_eq!(grouped.len(), 4);
+    assert!(lines_text(&grouped).contains("above"));
+    assert!(lines_text(&grouped).contains("below"));
+    let ordered = ordered_run_lines(make_lines(), 30, 4);
+    assert_eq!(ordered.len(), 4);
+    assert!(lines_text(&ordered).contains("above"));
+    assert!(lines_text(&ordered).contains("below"));
+}
+
+#[test]
+fn live_run_lines_preserve_empty_unselected_and_action_kind_states() {
+    let mut empty = test_plan_item("empty");
+    empty.selected = false;
+    let mut actions = test_plan_item("actions");
+    actions.actions = vec![
+        Action::Install {
+            pkg_mgr: "brew".into(),
+            binary: "fish".into(),
+            source: "brew install fish".into(),
+        },
+        Action::Link {
+            target: PathBuf::from("target"),
+            source: PathBuf::from("source"),
+            backup: false,
+            relink: false,
+        },
+        Action::Create {
+            target: PathBuf::from("dir"),
+        },
+        test_shell_action("shell"),
+        Action::Clean {
+            target: PathBuf::from("old"),
+            force: false,
+        },
+    ];
+    let mut plan = test_plan_with_items(&[]);
+    plan.items = vec![empty, actions];
+    let mut app = App::new(Mode::Deploy);
+    app.current_action = Some((1, 2));
+    app.run_item_statuses = vec![None, None];
+    app.run_action_statuses = vec![vec![], vec![Some(ActionStatus::NoChange); 5]];
+
+    let lines = live_run_display_lines(&app, &plan, 80);
+    assert_eq!(lines.len(), 6);
+    assert_eq!(lines.iter().filter(|line| line.active).count(), 1);
+    assert_eq!(lines[0].group, RunGroup::Skipped);
+    assert_eq!(lines[3].group, RunGroup::Running);
+    assert!(
+        lines[1..]
+            .iter()
+            .enumerate()
+            .all(|(index, line)| index == 2 || line.group == RunGroup::NoChange)
+    );
+    let rendered = lines
+        .iter()
+        .map(|line| line_text(&line.line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for expected in ["install fish", "target", "dir", "shell", "old"] {
+        assert!(
+            rendered.contains(expected),
+            "missing action text: {expected}"
+        );
+    }
+    assert_eq!(
+        lines_text(&run_body_lines(&App::new(Mode::Deploy), 40, 3)),
+        "loading..."
+    );
+    assert_eq!(run_log_panel_height(2), 0);
+    assert_eq!(run_log_panel_height(30), 10);
 }
 
 #[test]
