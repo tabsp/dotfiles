@@ -1,0 +1,20 @@
+{
+  "name": "site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run generate:frames && npm run build:wasm && vite",
+    "generate:frames": "cd .. && DOTMAN_ICONS=nerd cargo run --quiet --bin dotman-web-export -- dotman.yaml site/public/demo-frames.json 160 40",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build": "npm run generate:frames && npm run build:wasm && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "5.0.4",
+    "vite": "6.4.2",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {}
+}

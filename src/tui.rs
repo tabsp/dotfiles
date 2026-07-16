@@ -42,6 +42,7 @@ mod main_menu;
 mod plan;
 mod review;
 mod run;
+pub mod web_demo;
 
 pub use app::{App, LogFilter, LogKind, LogLine, NoticeKind, RunThreadResult, Screen};
 use components::*;

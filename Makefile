@@ -1,4 +1,4 @@
-.PHONY: help build init plan deploy format format-check format-tools lint lint-tools rust-lint shell-lint fish-check docker-lint action-lint portability-check nvim-check config-check config-check-tools test ci clean
+.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint fish-check docker-lint action-lint portability-check nvim-check config-check config-check-tools test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -15,6 +15,8 @@ help:
 		'  make init         Initialize default dotman profile' \
 		'  make plan         Show deployment plan in headless mode' \
 		'  make deploy       Deploy in headless mode' \
+		'  make web-demo-generate Render the website frames from the real TUI' \
+		'  make web-demo-build Build the static Vercel website' \
 		'  make format       Format all supported tracked files' \
 		'  make format-check Check repository-wide formatting' \
 		'  make lint         Run Rust, shell, and Dockerfile checks' \
@@ -43,6 +45,12 @@ plan: $(DOTMAN)
 
 deploy: $(DOTMAN)
 	$(DOTMAN) deploy --headless
+
+web-demo-generate:
+	cd site && npm run generate:frames
+
+web-demo-build:
+	cd site && npm run build
 
 format-tools:
 	@test -x "$(PRETTIER)" || { \

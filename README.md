@@ -9,6 +9,14 @@ per-machine state and persistent run history.
 
 ## Preview
 
+Try the interactive, UI-only TUI demo at [dotfiles.tabsp.com](https://dotfiles.tabsp.com/).
+It renders real Ratatui buffers in the browser, drives navigation through a side-effect-free
+Rust/WebAssembly state machine, and never runs deployment actions. Plan selection, derived Review
+content, progressive Run logs, filters/folding, and Replay expansion are interactive but remain
+in memory. Keyboard, mouse, touch controls, and vertical wheel navigation share the same WASM
+state. `make web-demo-build` regenerates the frames from the current TUI before producing the static
+Vercel build.
+
 ![dotman main menu](assets/screenshots/dotman-main-menu.png)
 
 ![dotfiles workspace](assets/screenshots/dotfiles-workspace.png)

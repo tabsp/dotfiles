@@ -1,0 +1,13 @@
+.git/
+.vercel/
+target/
+site/node_modules/
+site/dist/
+site/.npm-cache/
+site/wasm/target/
+
+# Runtime files can be sockets and cannot be uploaded as deployment sources.
+**/*.sock
+config/herdr/*.log
+config/herdr/session.json
+config/herdr/release-notes.json

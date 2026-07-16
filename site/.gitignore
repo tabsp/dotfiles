@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.npm-cache/
+public/demo-frames.json
+public/dotman-web-state.wasm
