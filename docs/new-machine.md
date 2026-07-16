@@ -15,6 +15,8 @@
 ## 2. 系统基础工具
 
 - `curl`
+- `tar`
+- `sha256sum` 或 `shasum`
 - CA certificates
 - `git`（可选；缺失时必须在 headless 部署中加入 `--bootstrap-git`）
 
@@ -26,21 +28,16 @@ xcode-select --install
 
 ## 3. 安装 dotman
 
-通过 latest release 二进制安装：
+推荐使用安装脚本。脚本会自动选择平台产物并校验 SHA-256：
 
 ```sh
-case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) target="aarch64-apple-darwin" ;;
-  Darwin-x86_64) target="x86_64-apple-darwin" ;;
-  Linux-aarch64) target="aarch64-unknown-linux-gnu" ;;
-  Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
-  *) echo "unsupported platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
-esac
+curl -fsSL https://github.com/tabsp/dotfiles/releases/latest/download/install.sh | sh
+```
 
-mkdir -p ~/.local/bin
-export PATH="$HOME/.local/bin:$PATH"
-curl -fsSL "https://github.com/tabsp/dotfiles/releases/latest/download/dotman-${target}.tar.gz" |
-  tar -xz -C ~/.local/bin dotman
+如果系统已经安装 Homebrew，也可以使用 Tap：
+
+```sh
+brew install tabsp/tap/dotman
 ```
 
 确认安装结果：

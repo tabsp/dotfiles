@@ -1,4 +1,4 @@
-.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint fish-check docker-lint action-lint portability-check nvim-check config-check config-check-tools test ci clean
+.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint installer-test fish-check docker-lint action-lint portability-check nvim-check config-check config-check-tools test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -22,6 +22,7 @@ help:
 		'  make lint         Run Rust, shell, and Dockerfile checks' \
 		'  make rust-lint    Run rustfmt and clippy checks' \
 		'  make shell-lint   Run ShellCheck' \
+		'  make installer-test Test the release installer' \
 		'  make fish-check   Check Fish syntax and PATH scope' \
 		'  make docker-lint  Run Hadolint' \
 		'  make action-lint  Check GitHub Actions workflows' \
@@ -91,7 +92,10 @@ rust-lint:
 	cargo clippy --all-targets --all-features -- -D warnings
 
 shell-lint:
-	shellcheck bin/tmux-status tests/e2e/*.sh tests/e2e/scenarios/*.sh
+	shellcheck bin/tmux-status scripts/*.sh tests/*.sh tests/e2e/*.sh tests/e2e/scenarios/*.sh
+
+installer-test:
+	sh tests/install-script.sh
 
 fish-check:
 	fish -n config/fish/config.fish config/fish/conf.d/*.fish config/fish/functions/*.fish
@@ -165,7 +169,7 @@ config-check: config-check-tools format-check shell-lint fish-check portability-
 	test "$$(tmux -S "$$socket" show-options -gv default-terminal)" = tmux-256color; \
 	test "$$(tmux -S "$$socket" show-options -gv status-interval)" = 5
 
-test:
+test: installer-test
 	cargo test
 
 ci: lint nvim-check test

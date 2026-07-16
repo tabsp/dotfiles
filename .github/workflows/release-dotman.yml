@@ -2,9 +2,17 @@ name: Release dotman
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Semantic release tag matching Cargo.toml (for example v0.3.2)
+        required: true
+        type: string
   push:
     tags:
       - "v*"
+
+env:
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
 
 permissions:
   contents: write
@@ -15,6 +23,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version=$(awk '
+            $0 == "[package]" { in_package = 1; next }
+            /^\[/ { in_package = 0 }
+            in_package && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
+          ' Cargo.toml)
+          test "$RELEASE_TAG" = "v$package_version"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -46,8 +67,25 @@ jobs:
 
       - run: make ci
 
+  homebrew-tap-preflight:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require Homebrew Tap deploy key
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: test -n "$HOMEBREW_TAP_DEPLOY_KEY"
+
+      - name: Check out Homebrew Tap
+        uses: actions/checkout@v4
+        with:
+          repository: tabsp/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+
   build:
-    needs: test
+    needs:
+      - test
+      - homebrew-tap-preflight
     strategy:
       fail-fast: false
       # Keep this target list in sync with scripts/build-site.sh manifest generation.
@@ -66,6 +104,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -110,6 +150,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -118,10 +162,77 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'dotman-latest' }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || 'dotman latest' }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: dotman ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           overwrite_files: true
           files: |
             dist/dotman-*.tar.gz
             dist/dotman-*.tar.gz.sha256
+            scripts/install.sh
+
+  update-homebrew-tap:
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Check out Homebrew Tap
+        uses: actions/checkout@v4
+        with:
+          repository: tabsp/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: homebrew-tap
+
+      - name: Update Formula
+        env:
+          DOTMAN_CHECKSUM_DIR: dist
+        run: scripts/update-homebrew-formula.sh "$RELEASE_TAG" homebrew-tap/Formula/dotman.rb
+
+      - name: Set up Homebrew
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew_bin="$(command -v brew || true)"
+          if [[ -z "$brew_bin" && -x /home/linuxbrew/.linuxbrew/bin/brew ]]; then
+            brew_bin=/home/linuxbrew/.linuxbrew/bin/brew
+          fi
+          if [[ -z "$brew_bin" ]]; then
+            echo "Homebrew not found" >&2
+            exit 1
+          fi
+          eval "$("$brew_bin" shellenv)"
+          brew_prefix="$("$brew_bin" --prefix)"
+          echo "$brew_prefix/bin" >> "$GITHUB_PATH"
+          echo "$brew_prefix/sbin" >> "$GITHUB_PATH"
+
+      - name: Validate Formula syntax and style
+        run: |
+          ruby -c homebrew-tap/Formula/dotman.rb
+          brew style homebrew-tap/Formula/dotman.rb
+
+      - name: Install and test Formula
+        run: |
+          brew install --formula ./homebrew-tap/Formula/dotman.rb
+          brew test dotman
+
+      - name: Publish Formula
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/dotman.rb
+          if git diff --cached --quiet; then
+            echo "Formula is already current."
+            exit 0
+          fi
+          git commit -m "chore: update dotman to ${RELEASE_TAG#v}"
+          git push

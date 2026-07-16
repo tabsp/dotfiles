@@ -23,28 +23,36 @@ Vercel build.
 
 ## Quick Start
 
-Install the latest `dotman` release binary:
+Install the latest `dotman` release with the checksum-verifying installer:
 
 ```sh
-case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) target="aarch64-apple-darwin" ;;
-  Darwin-x86_64) target="x86_64-apple-darwin" ;;
-  Linux-aarch64) target="aarch64-unknown-linux-gnu" ;;
-  Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
-  *) echo "unsupported platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
-esac
-
-mkdir -p ~/.local/bin
-export PATH="$HOME/.local/bin:$PATH"
-curl -fsSL "https://github.com/tabsp/dotfiles/releases/latest/download/dotman-${target}.tar.gz" |
-  tar -xz -C ~/.local/bin dotman
+curl -fsSL https://github.com/tabsp/dotfiles/releases/latest/download/install.sh | sh
 ```
 
-Update an existing installation in place (downloads and verifies the matching GitHub Release asset):
+The installer detects macOS/Linux and arm64/x86_64, verifies the release SHA-256,
+and installs to `~/.local/bin`. Set `DOTMAN_VERSION=v0.3.1` to pin a release or
+`DOTMAN_INSTALL_DIR` to choose another directory.
+
+If Homebrew is already available, install and upgrade through the Tap instead:
+
+```sh
+brew install tabsp/tap/dotman
+```
+
+Update an installation created by `install.sh` in place:
 
 ```bash
 dotman self update
 ```
+
+Homebrew owns installations created through the Tap. Upgrade those with:
+
+```sh
+brew upgrade dotman
+```
+
+To prevent the two package managers from overwriting each other, `self update`
+detects Homebrew Cellar installations and refuses to modify them.
 
 Then run it. On first launch, dotman initializes the default dotfiles profile and
 opens the main menu. Choose Deploy, adjust the Plan, then review the selected
@@ -241,3 +249,16 @@ make format
 make config-check
 git diff
 ```
+
+### Automated releases
+
+Pushing a `vX.Y.Z` tag that matches the version in `Cargo.toml` builds and tests
+all four release targets, publishes their archives, checksums, and `install.sh`,
+then generates, installs, tests, and pushes `Formula/dotman.rb` to
+`tabsp/homebrew-tap`. Manual workflow runs are only for retrying an existing
+semantic release tag and build that tag rather than the selected UI branch.
+
+The Homebrew publication uses a write-enabled SSH Deploy Key scoped to the
+public `tabsp/homebrew-tap` repository. Its private key is stored in this
+repository as the `HOMEBREW_TAP_DEPLOY_KEY` Actions secret; no personal access
+token is required.

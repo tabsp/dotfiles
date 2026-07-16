@@ -21,12 +21,30 @@ struct Release {
 pub fn run() -> Result<(), String> {
     let executable =
         std::env::current_exe().map_err(|e| format!("cannot locate current executable: {e}"))?;
+    ensure_self_update_allowed(&executable)?;
     update(
         env!("CARGO_PKG_VERSION"),
         &executable,
         GITHUB_API,
         GITHUB_DOWNLOAD,
     )
+}
+
+fn ensure_self_update_allowed(executable: &Path) -> Result<(), String> {
+    let resolved = fs::canonicalize(executable).unwrap_or_else(|_| executable.to_path_buf());
+    if is_homebrew_managed(executable) || is_homebrew_managed(&resolved) {
+        return Err(
+            "dotman is managed by Homebrew; update it with: brew upgrade dotman".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn is_homebrew_managed(executable: &Path) -> bool {
+    let components: Vec<_> = executable.components().collect();
+    components
+        .windows(2)
+        .any(|pair| pair[0].as_os_str() == "Cellar" && pair[1].as_os_str() == "dotman")
 }
 
 fn update(
@@ -247,5 +265,39 @@ mod tests {
     #[test]
     fn compares_versions_with_optional_v_prefix() {
         assert!(parse_version("v0.3.0").unwrap() > parse_version("0.2.0").unwrap());
+    }
+
+    #[test]
+    fn rejects_homebrew_cellar_installations() {
+        for executable in [
+            "/opt/homebrew/Cellar/dotman/0.3.1/bin/dotman",
+            "/usr/local/Cellar/dotman/0.3.1/bin/dotman",
+            "/home/linuxbrew/.linuxbrew/Cellar/dotman/0.3.1/bin/dotman",
+        ] {
+            let error = ensure_self_update_allowed(Path::new(executable)).unwrap_err();
+            assert!(error.contains("brew upgrade dotman"));
+        }
+    }
+
+    #[test]
+    fn permits_standalone_installations() {
+        ensure_self_update_allowed(Path::new("/home/user/.local/bin/dotman")).unwrap();
+        ensure_self_update_allowed(Path::new("/tmp/Cellar/other/1.0/bin/dotman")).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinks_into_a_homebrew_cellar() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cellar = dir.path().join("Cellar/dotman/0.3.1/bin");
+        fs::create_dir_all(&cellar).unwrap();
+        let managed = cellar.join("dotman");
+        fs::write(&managed, b"binary").unwrap();
+        let linked = dir.path().join("dotman");
+        symlink(managed, &linked).unwrap();
+
+        assert!(ensure_self_update_allowed(&linked).is_err());
     }
 }
