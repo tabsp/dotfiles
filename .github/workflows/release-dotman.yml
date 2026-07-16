@@ -219,10 +219,15 @@ jobs:
           ruby -c homebrew-tap/Formula/dotman.rb
           brew style homebrew-tap/Formula/dotman.rb
 
+      - name: Register Formula test Tap
+        run: |
+          brew tap-new tabsp/tap
+          cp homebrew-tap/Formula/dotman.rb "$(brew --repository tabsp/tap)/Formula/dotman.rb"
+
       - name: Install and test Formula
         run: |
-          brew install --formula ./homebrew-tap/Formula/dotman.rb
-          brew test dotman
+          brew install tabsp/tap/dotman
+          brew test tabsp/tap/dotman
 
       - name: Publish Formula
         working-directory: homebrew-tap
