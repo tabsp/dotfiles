@@ -2,22 +2,39 @@
 
 [English](README.md)
 
-dotman 是一个轻量的 Rust TUI dotfiles 部署工具，用于我的 macOS/Linux 开发环境。
+[![CI](https://github.com/tabsp/dotfiles/actions/workflows/ci.yml/badge.svg)](https://github.com/tabsp/dotfiles/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tabsp/dotfiles)](https://github.com/tabsp/dotfiles/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/tabsp/dotfiles)](LICENSE)
+[![Demo](https://img.shields.io/badge/demo-interactive-brightgreen)](https://dotfiles.tabsp.com/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/tabsp/dotfiles/blob/main/README.zh-CN.md#快速开始)
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
+
+dotman 是一个轻量的 Rust TUI dotfiles 管理工具，用于我的 macOS/Linux 开发环境。
 使用 YAML 配置安装软件、链接配置文件、创建目录、清理旧路径、运行设置命令——全部走
 Plan -> Review -> Run 流程，支持每台机器独立的状态和持久化运行历史。
 
 ## 预览
 
-可以在 [dotfiles.tabsp.com](https://dotfiles.tabsp.com/) 体验仅复刻界面的交互式
-TUI 演示；它在浏览器中渲染真实 Ratatui buffer，通过无副作用的 Rust/WebAssembly
-状态机驱动导航，并且不会执行任何部署操作。Plan 选择、派生的 Review 内容、渐进式
-Run 日志、过滤/折叠和 Replay 展开都可交互，但只保存在内存中。键盘、鼠标、触控
-按钮和纵向滚轮共用同一个 WASM 状态。`make web-demo-build` 会先从
-当前 TUI 重新生成帧，再产出用于 Vercel 的静态构建。
+在 [dotfiles.tabsp.com](https://dotfiles.tabsp.com/) 体验交互式演示——真实 Ratatui TUI
+由无副作用的 Rust/WebAssembly 状态机在浏览器中渲染。Plan、Review、Run 和 Replay
+均可完整操作，但不会执行任何部署动作。
 
 ![dotman main menu](assets/screenshots/dotman-main-menu.png)
 
 ![dotfiles workspace](assets/screenshots/dotfiles-workspace.png)
+
+## 环境一览
+
+| 分层          | 工具                                                    |
+| ------------- | ------------------------------------------------------- |
+| 终端          | Ghostty                                                 |
+| Shell         | Fish（数字前缀的模块化 `conf.d`，Fisher 插件）          |
+| 复用器        | tmux 搭配 tmux-status；herdr                            |
+| 软件          | Neovim（LazyVim）、mise、lazygit、btop、fastfetch、yazi |
+| 增强 · 提示符 | Starship、tealdeer、markdownlint-cli2                   |
+| 增强 · 命令行 | ripgrep、fd、bat、eza、dua-cli、gum、tree-sitter-cli    |
+| 增强 · 数据   | fzf、zoxide、jq、yq、direnv                             |
+| 字体          | Maple Mono NF                                           |
 
 ## 快速开始
 
@@ -28,7 +45,7 @@ curl -fsSL https://github.com/tabsp/dotfiles/releases/latest/download/install.sh
 ```
 
 脚本会识别 macOS/Linux 和 arm64/x86_64、校验 release SHA-256，并安装到
-`~/.local/bin`。可以设置 `DOTMAN_VERSION=v0.3.1` 固定版本，或用
+`~/.local/bin`。可以设置 `DOTMAN_VERSION=v0.3.2` 固定版本，或用
 `DOTMAN_INSTALL_DIR` 指定其他目录。
 
 如果已经有 Homebrew，也可以通过 Tap 安装和升级：

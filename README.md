@@ -2,24 +2,40 @@
 
 [中文](README.zh-CN.md)
 
-dotman is a tiny Rust-based TUI dotfiles deployer for my personal macOS/Linux environment.
+[![CI](https://github.com/tabsp/dotfiles/actions/workflows/ci.yml/badge.svg)](https://github.com/tabsp/dotfiles/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tabsp/dotfiles)](https://github.com/tabsp/dotfiles/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/tabsp/dotfiles)](LICENSE)
+[![Demo](https://img.shields.io/badge/demo-interactive-brightgreen)](https://dotfiles.tabsp.com/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/tabsp/dotfiles#quick-start)
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
+
+dotman is a tiny Rust TUI dotfiles manager for my personal macOS/Linux environment.
 It uses a flat YAML config to install software, link config files, create directories,
 clean old paths, and run setup commands — all in a Plan -> Review -> Run flow with
 per-machine state and persistent run history.
 
 ## Preview
 
-Try the interactive, UI-only TUI demo at [dotfiles.tabsp.com](https://dotfiles.tabsp.com/).
-It renders real Ratatui buffers in the browser, drives navigation through a side-effect-free
-Rust/WebAssembly state machine, and never runs deployment actions. Plan selection, derived Review
-content, progressive Run logs, filters/folding, and Replay expansion are interactive but remain
-in memory. Keyboard, mouse, touch controls, and vertical wheel navigation share the same WASM
-state. `make web-demo-build` regenerates the frames from the current TUI before producing the static
-Vercel build.
+Try the interactive demo at [dotfiles.tabsp.com](https://dotfiles.tabsp.com/) — the real
+Ratatui TUI rendered in the browser by a side-effect-free Rust/WebAssembly state machine.
+Plan, Review, Run, and Replay are fully navigable; nothing ever executes.
 
 ![dotman main menu](assets/screenshots/dotman-main-menu.png)
 
 ![dotfiles workspace](assets/screenshots/dotfiles-workspace.png)
+
+## What's Inside
+
+| Layer                | Tools                                                  |
+| -------------------- | ------------------------------------------------------ |
+| Terminal             | Ghostty                                                |
+| Shell                | Fish with numbered `conf.d` modules and Fisher plugins |
+| Multiplexer          | tmux with tmux-status; herdr                           |
+| Software             | Neovim (LazyVim), mise, lazygit, btop, fastfetch, yazi |
+| Enhancement · prompt | Starship, tealdeer, markdownlint-cli2                  |
+| Enhancement · cli    | ripgrep, fd, bat, eza, dua-cli, gum, tree-sitter-cli   |
+| Enhancement · data   | fzf, zoxide, jq, yq, direnv                            |
+| Font                 | Maple Mono NF                                          |
 
 ## Quick Start
 
@@ -30,7 +46,7 @@ curl -fsSL https://github.com/tabsp/dotfiles/releases/latest/download/install.sh
 ```
 
 The installer detects macOS/Linux and arm64/x86_64, verifies the release SHA-256,
-and installs to `~/.local/bin`. Set `DOTMAN_VERSION=v0.3.1` to pin a release or
+and installs to `~/.local/bin`. Set `DOTMAN_VERSION=v0.3.2` to pin a release or
 `DOTMAN_INSTALL_DIR` to choose another directory.
 
 If Homebrew is already available, install and upgrade through the Tap instead:
