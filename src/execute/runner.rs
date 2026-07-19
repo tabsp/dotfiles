@@ -110,10 +110,9 @@ where
                 action: action_name.clone(),
             });
             match action {
-                Action::Install { binary, .. } => {
+                Action::Install { spec } => {
                     let install_result = run_install_streaming(
-                        binary,
-                        &config.package_managers,
+                        spec,
                         DEFAULT_INSTALL_RETRIES,
                         &plan_item.name,
                         &mut emit,

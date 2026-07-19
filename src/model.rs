@@ -51,9 +51,7 @@ pub struct PlanItem {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Action {
     Install {
-        pkg_mgr: String,
-        binary: String,
-        source: String, // install command (e.g., "brew install neovim")
+        spec: crate::ops::install::InstallSpec,
     },
     Link {
         target: PathBuf,
@@ -81,7 +79,7 @@ pub enum Action {
 impl Action {
     pub fn describe(&self) -> String {
         match self {
-            Action::Install { binary, .. } => format!("install {binary}"),
+            Action::Install { spec } => format!("install {}", spec.entry.name),
             Action::Link { target, source, .. } => {
                 format!("link {} -> {}", target.display(), source.display())
             }

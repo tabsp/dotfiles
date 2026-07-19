@@ -36,6 +36,11 @@ fn test_plan(actions: Vec<Action>) -> Plan {
     }
 }
 
+fn test_install_spec(name: &str, pkg_mgr: &str) -> crate::ops::install::InstallSpec {
+    let db = crate::ops::install::load_db().unwrap();
+    crate::ops::install::resolve_install(&db, name, pkg_mgr).unwrap()
+}
+
 fn test_config(path: PathBuf) -> Config {
     Config {
         path,
@@ -227,9 +232,9 @@ fn install_skips_when_binary_is_present() {
 
     let mut events = Vec::new();
     let mut sudo_auth = deny_sudo;
+    let spec = test_install_spec("sh", &crate::package_managers::default_pkg_mgr_name());
     let (status, err, attempts, output) = run_install_streaming(
-        "sh",
-        &crate::config::PackageManagerConfig::default(),
+        &spec,
         DEFAULT_INSTALL_RETRIES,
         "sh",
         &mut |event| events.push(event),
@@ -249,6 +254,34 @@ fn install_skips_when_binary_is_present() {
     assert!(events.iter().any(|event| {
         matches!(event, ExecuteEvent::ActionMessage { message, .. } if message.contains("already installed: sh"))
     }));
+}
+
+#[test]
+fn install_executes_command_captured_in_spec() {
+    fn allow_sudo(_: &str) -> bool {
+        true
+    }
+
+    let mut spec = test_install_spec("dotman-test-snapshot-command", "brew");
+    spec.command = Some("printf 'snapshot-command\\n'".into());
+    spec.error = None;
+    let mut events = Vec::new();
+    let mut sudo_auth = allow_sudo;
+
+    let (status, err, attempts, output) = run_install_streaming(
+        &spec,
+        0,
+        "snapshot install",
+        &mut |event| events.push(event),
+        &|| false,
+        &mut sudo_auth,
+    )
+    .unwrap();
+
+    assert_eq!(status, ActionStatus::WillInstall);
+    assert!(err.is_none());
+    assert_eq!(attempts, 1);
+    assert!(output.iter().any(|line| line.line == "snapshot-command"));
 }
 
 #[test]

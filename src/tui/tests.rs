@@ -53,6 +53,11 @@ fn test_shell_action(name: &str) -> Action {
     }
 }
 
+fn test_install_spec(name: &str, pkg_mgr: &str) -> crate::ops::install::InstallSpec {
+    let db = crate::ops::install::load_db().unwrap();
+    crate::ops::install::resolve_install(&db, name, pkg_mgr).unwrap()
+}
+
 fn test_run_item(name: &str, status: ActionStatus, error: Option<&str>) -> RunItem {
     RunItem {
         id: name.to_string(),
@@ -1314,9 +1319,7 @@ fn run_view_helpers_preserve_status_action_and_overflow_semantics() {
 
     let actions = [
         Action::Install {
-            pkg_mgr: "brew".into(),
-            binary: "fish".into(),
-            source: "brew install fish".into(),
+            spec: test_install_spec("fish", "brew"),
         },
         Action::Link {
             target: PathBuf::from("target"),
@@ -1375,9 +1378,7 @@ fn live_run_lines_preserve_empty_unselected_and_action_kind_states() {
     let mut actions = test_plan_item("actions");
     actions.actions = vec![
         Action::Install {
-            pkg_mgr: "brew".into(),
-            binary: "fish".into(),
-            source: "brew install fish".into(),
+            spec: test_install_spec("fish", "brew"),
         },
         Action::Link {
             target: PathBuf::from("target"),
@@ -2136,22 +2137,21 @@ fn review_filesystem_previews_preserve_action_severity_and_status() {
 fn review_install_previews_classify_present_missing_and_unknown_tools() {
     let item = test_plan_item("install tools");
 
-    let present = review_install_entry(&item, None, "auto", "sh", "");
+    let present_spec = test_install_spec("sh", "brew");
+    let present = review_install_entry(&item, &present_spec);
     assert_eq!(present.kind, "install");
     assert_eq!(present.severity, ReviewSeverity::Success);
     assert_eq!(present.status, "present");
 
-    let missing = review_install_entry(
-        &item,
-        None,
-        "brew",
-        "dotman-test-binary-that-does-not-exist-7f4c",
-        "",
-    );
+    let missing_spec = test_install_spec("dotman-test-binary-that-does-not-exist-7f4c", "brew");
+    let missing = review_install_entry(&item, &missing_spec);
     assert_eq!(missing.severity, ReviewSeverity::Run);
     assert_eq!(missing.status, "missing");
 
-    let unknown = review_install_entry(&item, None, "brew", "", "custom installer");
+    let mut unknown_spec = test_install_spec("metadata-only", "brew");
+    unknown_spec.entry.binary.clear();
+    unknown_spec.command = Some("custom installer".into());
+    let unknown = review_install_entry(&item, &unknown_spec);
     assert_eq!(unknown.severity, ReviewSeverity::Warning);
     assert_eq!(unknown.status, "unknown");
     assert_eq!(unknown.detail, "custom installer");
@@ -2171,9 +2171,7 @@ fn review_entries_dispatch_all_action_kinds_in_plan_order() {
     plan.config_path = dir.path().join("dotman.yaml");
     plan.items[0].actions = vec![
         Action::Install {
-            pkg_mgr: "brew".into(),
-            binary: "dotman-test-binary-that-does-not-exist-a91e".into(),
-            source: String::new(),
+            spec: test_install_spec("dotman-test-binary-that-does-not-exist-a91e", "brew"),
         },
         Action::Link {
             target: link_target,

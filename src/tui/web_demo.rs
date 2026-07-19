@@ -327,12 +327,14 @@ fn demo_review_entries(plan: &Plan) -> Vec<review::ReviewEntry> {
     for item in plan.items.iter().filter(|item| item.selected) {
         for action in &item.actions {
             let (kind, kind_icon, severity, status, detail) = match action {
-                Action::Install { binary, .. } => (
+                Action::Install { spec } => (
                     "install",
                     icon_set.action_install,
                     review::ReviewSeverity::Run,
                     "missing".to_string(),
-                    format!("install {binary}"),
+                    spec.command
+                        .clone()
+                        .unwrap_or_else(|| format!("install {}", spec.entry.name)),
                 ),
                 Action::Link { target, source, .. } => (
                     "link",

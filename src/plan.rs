@@ -33,6 +33,8 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     let config_hash = hash_file(&config_path).unwrap_or_default();
     let id = Ulid::new().to_string();
     let tool_db = crate::ops::install::load_db()?;
+    let pkg_mgr = resolve_pkg_mgr_name(&config.package_managers)
+        .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
 
     let mut items: Vec<PlanItem> = Vec::new();
     let mut used_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -60,16 +62,13 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     for tool in &config.install {
         let layer =
             crate::ops::install::tool_layer(&tool_db, tool).unwrap_or_else(|| "software".into());
+        let spec = crate::ops::install::resolve_install(&tool_db, tool, &pkg_mgr)?;
         let id = unique_id(tool, &mut used_ids);
         items.push(PlanItem {
             id,
             name: tool.clone(),
             layer,
-            actions: vec![Action::Install {
-                pkg_mgr: "auto".into(),
-                binary: tool.clone(),
-                source: format!("install {tool}"),
-            }],
+            actions: vec![Action::Install { spec }],
             selected: false,
         });
     }
@@ -191,8 +190,6 @@ pub fn build(config: &Config, mode: Mode) -> Result<Plan> {
     // Uses the same resolution as the execution path (resolve + default
     // fallback) so we don't miss "apt" when no explicit pkg mgr is configured
     // but the distro defaults to apt.
-    let pkg_mgr = resolve_pkg_mgr_name(&config.package_managers)
-        .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
     if pkg_mgr == "apt" {
         let has_selected_install = items.iter().any(|item| {
             item.selected
@@ -249,8 +246,8 @@ fn find_owner<'a>(target: &Path, items: &'a mut [PlanItem]) -> Option<&'a mut Pl
         if item.layer == "misc" {
             continue;
         }
-        if let Some(Action::Install { binary, .. }) = item.actions.first() {
-            for owner_name in owner_names(binary) {
+        if let Some(Action::Install { spec }) = item.actions.first() {
+            for owner_name in owner_names(&spec.entry.name) {
                 if target_str.contains(&format!("/{owner_name}/"))
                     || target_str.ends_with(&format!("/{owner_name}"))
                     || target_str.contains(&format!("/{owner_name}."))
@@ -413,16 +410,15 @@ impl Plan {
     ///
     /// Used to decide whether to pre-cache sudo credentials before execution.
     /// This is a static check — it does NOT evaluate shell if_condition guards.
-    /// Covers:
-    /// 1. Shell commands containing the word "sudo" (Linux installs, bootstrap).
-    /// 2. Any selected Install action on Linux (db.toml commands all use sudo).
+    /// Covers shell commands and resolved install commands containing `sudo`.
     pub fn needs_sudo(&self) -> bool {
         self.items.iter().filter(|item| item.selected).any(|item| {
             item.actions.iter().any(|action| match action {
                 Action::Shell { command, .. } => shell::command_contains_sudo(command),
-                Action::Install { .. } => {
-                    crate::package_managers::detect_os() == crate::package_managers::Os::Linux
-                }
+                Action::Install { spec } => spec
+                    .command
+                    .as_deref()
+                    .is_some_and(shell::command_contains_sudo),
                 _ => false,
             })
         })

@@ -3,8 +3,8 @@
 //! Phase 3: real implementations (brew/pacman/dnf, font handling, retry).
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
-use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -15,7 +15,7 @@ pub enum InstallPresence {
     Unknown,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InstallCommand {
     pub command: String,
     #[serde(default)]
@@ -33,7 +33,7 @@ impl InstallCommand {
 }
 
 /// One entry in the tool database.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ToolEntry {
     pub name: String,
     pub binary: String,
@@ -56,6 +56,108 @@ pub struct ToolDb {
     pub templates: BTreeMap<String, InstallCommandTemplate>,
     #[serde(default)]
     pub tools: BTreeMap<String, ToolRule>,
+}
+
+impl ToolDb {
+    pub fn validate(&self) -> Result<()> {
+        if self.default_platforms.is_empty() {
+            anyhow::bail!("tool db has no default_platforms");
+        }
+
+        for platform in &self.default_platforms {
+            let template = self.templates.get(platform).with_context(|| {
+                format!("default platform '{platform}' references an unknown template")
+            })?;
+            if !template.command.contains("{package}") {
+                anyhow::bail!("default platform template '{platform}' must contain '{{package}}'");
+            }
+        }
+
+        for (name, template) in &self.templates {
+            if name.trim().is_empty() {
+                anyhow::bail!("tool db contains an empty template name");
+            }
+            if template.command.trim().is_empty() {
+                anyhow::bail!("template '{name}' has an empty command");
+            }
+            if template
+                .platform
+                .as_deref()
+                .is_some_and(|platform| platform.trim().is_empty())
+            {
+                anyhow::bail!("template '{name}' has an empty platform");
+            }
+            if template.os.iter().any(|os| os.trim().is_empty()) {
+                anyhow::bail!("template '{name}' contains an empty os value");
+            }
+        }
+
+        for (name, rule) in &self.tools {
+            if name.trim().is_empty() {
+                anyhow::bail!("tool db contains an empty tool name");
+            }
+            if rule
+                .binary
+                .as_deref()
+                .is_some_and(|binary| binary.trim().is_empty())
+            {
+                anyhow::bail!("tool '{name}' has an empty binary");
+            }
+            if rule
+                .layer
+                .as_deref()
+                .is_some_and(|layer| layer.trim().is_empty())
+            {
+                anyhow::bail!("tool '{name}' has an empty layer");
+            }
+            if !rule.kind.is_empty() && rule.kind != "font" {
+                anyhow::bail!("tool '{name}' has unsupported kind '{}'", rule.kind);
+            }
+            if rule.kind == "font" && rule.font_family.trim().is_empty() {
+                anyhow::bail!("font tool '{name}' is missing font_family");
+            }
+            if rule
+                .package
+                .as_deref()
+                .is_some_and(|package| package.trim().is_empty())
+                || rule
+                    .packages
+                    .values()
+                    .any(|package| package.trim().is_empty())
+            {
+                anyhow::bail!("tool '{name}' contains an empty package name");
+            }
+
+            for platform in rule.packages.keys() {
+                if !self.templates.contains_key(platform) {
+                    anyhow::bail!(
+                        "tool '{name}' has a package override for unknown template '{platform}'"
+                    );
+                }
+            }
+
+            let platforms = rule.platforms.as_ref().unwrap_or(&self.default_platforms);
+            let has_font_fallback = rule.kind == "font" && !rule.source_url.is_empty();
+            if platforms.is_empty() && !has_font_fallback {
+                anyhow::bail!("tool '{name}' has no install platforms");
+            }
+
+            let mut install_keys = BTreeSet::new();
+            for platform in platforms {
+                let template = self.templates.get(platform).with_context(|| {
+                    format!("tool '{name}' references unknown template '{platform}'")
+                })?;
+                let install_key = template.platform.as_deref().unwrap_or(platform);
+                if !install_keys.insert(install_key) {
+                    anyhow::bail!(
+                        "tool '{name}' maps multiple templates to install platform '{install_key}'"
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,12 +198,33 @@ pub struct ToolRule {
     pub platforms: Option<Vec<String>>,
 }
 
+/// Fully resolved install data captured when a Plan is built.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct InstallSpec {
+    pub entry: ToolEntry,
+    pub pkg_mgr: String,
+    pub command: Option<String>,
+    pub error: Option<String>,
+}
+
 /// Embedded tool database (compiled in via include_str!).
 pub const TOOL_DB_TOML: &str = include_str!("db.toml");
 
 pub fn load_db() -> Result<ToolDb> {
     let db: ToolDb = toml::from_str(TOOL_DB_TOML).context("failed to parse tool db")?;
+    db.validate().context("invalid tool db")?;
     Ok(db)
+}
+
+pub fn resolve_install(db: &ToolDb, name: &str, pkg_mgr: &str) -> Result<InstallSpec> {
+    let entry = find(db, name).with_context(|| format!("cannot resolve tool '{name}'"))?;
+    let (command, error) = resolve_command(&entry, pkg_mgr);
+    Ok(InstallSpec {
+        entry,
+        pkg_mgr: pkg_mgr.to_string(),
+        command,
+        error,
+    })
 }
 
 pub fn find(db: &ToolDb, name: &str) -> Option<ToolEntry> {
@@ -137,6 +260,10 @@ pub fn tool_layer(db: &ToolDb, name: &str) -> Option<String> {
 }
 
 pub fn command_for_current_platform(entry: &ToolEntry, pkg_mgr: &str) -> Option<String> {
+    resolve_command(entry, pkg_mgr).0
+}
+
+fn resolve_command(entry: &ToolEntry, pkg_mgr: &str) -> (Option<String>, Option<String>) {
     let distro = crate::package_managers::distro_id();
     let mut candidates = vec![pkg_mgr.to_string()];
     if let Some(distro) = &distro
@@ -149,14 +276,33 @@ pub fn command_for_current_platform(entry: &ToolEntry, pkg_mgr: &str) -> Option<
         candidates.push(os);
     }
 
+    let mut saw_unsupported = false;
     for candidate in candidates {
-        if let Some(command) = entry.platforms.get(&candidate)
-            && command_supports_current_platform(command, distro.as_deref())
-        {
-            return Some(command.command().to_string());
+        if let Some(command) = entry.platforms.get(&candidate) {
+            if command_supports_current_platform(command, distro.as_deref()) {
+                return (Some(command.command().to_string()), None);
+            }
+            saw_unsupported = true;
         }
     }
-    None
+
+    if entry.kind == "font" {
+        let error = entry
+            .source_url
+            .is_empty()
+            .then(|| format!("font {} missing source_url", entry.name));
+        return (None, error);
+    }
+    let error = if saw_unsupported {
+        format!(
+            "{} is not supported for {pkg_mgr} on {}",
+            entry.name,
+            crate::package_managers::os_name()
+        )
+    } else {
+        format!("no install command for {pkg_mgr}")
+    };
+    (None, Some(error))
 }
 
 pub fn detect_presence(entry: &ToolEntry, install_command: Option<&str>) -> InstallPresence {
@@ -425,6 +571,64 @@ mod tests {
         let db = load_db().unwrap();
         assert!(db.templates.contains_key("brew"));
         assert!(db.tools.contains_key("fish"));
+    }
+
+    #[test]
+    fn validation_rejects_unknown_tool_template() {
+        let db: ToolDb = toml::from_str(
+            r#"
+default_platforms = ["brew"]
+
+[templates.brew]
+command = "brew install {package}"
+
+[tools.fish]
+platforms = ["missing"]
+"#,
+        )
+        .unwrap();
+
+        let error = db.validate().unwrap_err().to_string();
+        assert!(error.contains("tool 'fish' references unknown template 'missing'"));
+    }
+
+    #[test]
+    fn validation_rejects_duplicate_install_platforms() {
+        let db: ToolDb = toml::from_str(
+            r#"
+default_platforms = ["brew"]
+
+[templates.brew]
+command = "brew install {package}"
+
+[templates.brew_cask]
+command = "brew install --cask {package}"
+platform = "brew"
+
+[tools.ghostty]
+platforms = ["brew", "brew_cask"]
+"#,
+        )
+        .unwrap();
+
+        let error = db.validate().unwrap_err().to_string();
+        assert!(error.contains("maps multiple templates to install platform 'brew'"));
+    }
+
+    #[test]
+    fn validation_rejects_default_template_without_package_placeholder() {
+        let db: ToolDb = toml::from_str(
+            r#"
+default_platforms = ["brew"]
+
+[templates.brew]
+command = "brew install fish"
+"#,
+        )
+        .unwrap();
+
+        let error = db.validate().unwrap_err().to_string();
+        assert!(error.contains("must contain '{package}'"));
     }
 
     #[test]

@@ -14,8 +14,7 @@ const RETRY_INITIAL_DELAY_SECS: u64 = 5;
 
 /// Install with retry and streaming output.
 pub(super) fn run_install_streaming<F, C>(
-    binary: &str,
-    pkg_mgrs: &crate::config::PackageManagerConfig,
+    spec: &install::InstallSpec,
     max_retries: u32,
     item_name: &str,
     emit: &mut F,
@@ -26,30 +25,11 @@ where
     F: FnMut(ExecuteEvent),
     C: Fn() -> bool,
 {
-    let db = install::load_db()?;
-    let entry = install::find(&db, binary);
-
-    let entry = match entry {
-        Some(e) => e,
-        None => {
-            let msg = format!("tool '{binary}' not in tool db");
-            emit(ExecuteEvent::ActionError {
-                item: item_name.to_string(),
-                message: msg.clone(),
-            });
-            return Ok((ActionStatus::WillFail, Some(msg), 0, vec![]));
-        }
-    };
-
-    let pkg_mgr = crate::package_managers::resolve_pkg_mgr_name(pkg_mgrs)
-        .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
-    let platform_cmd = install_command_for_platform(&entry, &pkg_mgr);
-    let presence_command = platform_cmd
-        .as_ref()
-        .and_then(|cmd| cmd.as_ref().ok())
-        .map(String::as_str);
+    let entry = &spec.entry;
+    let binary = &entry.name;
+    let presence_command = spec.command.as_deref();
     if matches!(
-        install::detect_presence(&entry, presence_command),
+        install::detect_presence(entry, presence_command),
         install::InstallPresence::Present
     ) {
         let msg = format!("already installed: {}", entry.name);
@@ -70,10 +50,7 @@ where
 
     // Fonts can use package-manager installs on platforms where a package
     // exists, with source_url as a fallback for platforms without one.
-    if entry.kind == "font"
-        && (platform_cmd.is_none()
-            || matches!(platform_cmd, Some(Err(InstallCommandError::UnsupportedOs))))
-    {
+    if entry.kind == "font" && spec.command.is_none() {
         if entry.source_url.is_empty() {
             let msg = format!("font {} missing source_url", entry.name);
             emit(ExecuteEvent::ActionError {
@@ -160,19 +137,13 @@ where
         }
     }
 
-    let cmd = match platform_cmd {
-        Some(Ok(cmd)) => cmd,
-        Some(Err(InstallCommandError::UnsupportedOs)) => {
-            let os = crate::package_managers::os_name();
-            let msg = format!("{} is not supported for {pkg_mgr} on {os}", entry.name);
-            emit(ExecuteEvent::ActionError {
-                item: item_name.to_string(),
-                message: msg.clone(),
-            });
-            return Ok((ActionStatus::WillFail, Some(msg), 0, vec![]));
-        }
-        None | Some(Err(InstallCommandError::MissingPlatform)) => {
-            let msg = format!("no install command for {pkg_mgr}");
+    let cmd = match &spec.command {
+        Some(command) => command.clone(),
+        None => {
+            let msg = spec
+                .error
+                .clone()
+                .unwrap_or_else(|| format!("no install command for {}", spec.pkg_mgr));
             emit(ExecuteEvent::ActionError {
                 item: item_name.to_string(),
                 message: msg.clone(),
@@ -276,54 +247,6 @@ where
         push_output_line(&mut all_output, OutputStream::Action, message);
     }
     Ok((ActionStatus::WillFail, last_err, attempt, all_output))
-}
-
-enum InstallCommandError {
-    MissingPlatform,
-    UnsupportedOs,
-}
-
-fn install_command_for_platform(
-    entry: &install::ToolEntry,
-    pkg_mgr: &str,
-) -> Option<Result<String, InstallCommandError>> {
-    let distro = crate::package_managers::distro_id();
-    let mut candidates = vec![pkg_mgr.to_string()];
-    if let Some(distro) = &distro
-        && !candidates.iter().any(|candidate| candidate == distro)
-    {
-        candidates.push(distro.clone());
-    }
-    let os = crate::package_managers::os_name().to_string();
-    if !candidates.iter().any(|candidate| candidate == &os) {
-        candidates.push(os);
-    }
-
-    let mut saw_unsupported = false;
-    for candidate in candidates {
-        if let Some(c) = entry.platforms.get(&candidate) {
-            if command_supports_current_platform(c, distro.as_deref()) {
-                return Some(Ok(c.command().into()));
-            }
-            saw_unsupported = true;
-        }
-    }
-
-    if saw_unsupported {
-        Some(Err(InstallCommandError::UnsupportedOs))
-    } else if entry.kind == "font" {
-        None
-    } else {
-        Some(Err(InstallCommandError::MissingPlatform))
-    }
-}
-
-fn command_supports_current_platform(
-    command: &install::InstallCommand,
-    distro: Option<&str>,
-) -> bool {
-    command.supports_os(crate::package_managers::os_name())
-        || distro.is_some_and(|distro| command.supports_os(distro))
 }
 
 /// Return a single-quoted shell string safe for embedding in `sh -c` commands.

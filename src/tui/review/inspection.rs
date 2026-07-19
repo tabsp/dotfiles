@@ -22,7 +22,7 @@ pub(in crate::tui) struct ReviewEntry {
 
 pub(in crate::tui) fn review_entries(
     plan: &Plan,
-    config: Option<&config::Config>,
+    _config: Option<&config::Config>,
 ) -> Vec<ReviewEntry> {
     let icon_set = icons::current();
     let config_dir = plan
@@ -34,11 +34,7 @@ pub(in crate::tui) fn review_entries(
     for item in plan.items.iter().filter(|item| item.selected) {
         for action in &item.actions {
             let mut entry = match action {
-                Action::Install {
-                    pkg_mgr,
-                    binary,
-                    source,
-                } => review_install_entry(item, config, pkg_mgr, binary, source),
+                Action::Install { spec } => review_install_entry(item, spec),
                 Action::Link {
                     target,
                     source,
@@ -83,45 +79,42 @@ pub(in crate::tui) fn review_entries(
 
 pub(in crate::tui) fn review_install_entry(
     item: &PlanItem,
-    config: Option<&config::Config>,
-    pkg_mgr: &str,
-    binary: &str,
-    source: &str,
+    spec: &install::InstallSpec,
 ) -> ReviewEntry {
     let icon_set = icons::current();
-    let resolved_pkg_mgr = config
-        .and_then(|cfg| crate::package_managers::resolve_pkg_mgr_name(&cfg.package_managers))
-        .unwrap_or_else(|| {
-            if pkg_mgr == "auto" {
-                crate::package_managers::default_pkg_mgr_name()
-            } else {
-                pkg_mgr.to_string()
-            }
-        });
-    let command = install_command_summary(binary, &resolved_pkg_mgr).unwrap_or_else(|| {
-        if source.trim().is_empty() {
-            format!("install {binary}")
-        } else {
-            source.to_string()
-        }
-    });
+    let detail = spec
+        .command
+        .clone()
+        .or_else(|| (!spec.entry.source_url.is_empty()).then(|| spec.entry.source_url.clone()))
+        .or_else(|| spec.error.clone())
+        .unwrap_or_else(|| format!("install {}", spec.entry.name));
 
-    let db = install::load_db().ok();
-    let entry = db.as_ref().and_then(|db| install::find(db, binary));
-    match entry
-        .as_ref()
-        .map(|entry| install::detect_presence(entry, Some(&command)))
-        .unwrap_or(install::InstallPresence::Unknown)
-    {
-        install::InstallPresence::Present => ReviewEntry {
+    let presence = install::detect_presence(&spec.entry, spec.command.as_deref());
+    if presence == install::InstallPresence::Present {
+        return ReviewEntry {
             order: 0,
             item: item.name.clone(),
             kind: "install",
             kind_icon: icon_set.action_install,
             severity: ReviewSeverity::Success,
             status: "present".into(),
-            detail: command,
-        },
+            detail,
+        };
+    }
+    if let Some(error) = &spec.error {
+        return ReviewEntry {
+            order: 0,
+            item: item.name.clone(),
+            kind: "install",
+            kind_icon: icon_set.action_install,
+            severity: ReviewSeverity::Danger,
+            status: "unavailable".into(),
+            detail: error.clone(),
+        };
+    }
+
+    match presence {
+        install::InstallPresence::Present => unreachable!("handled above"),
         install::InstallPresence::Missing => ReviewEntry {
             order: 0,
             item: item.name.clone(),
@@ -129,7 +122,7 @@ pub(in crate::tui) fn review_install_entry(
             kind_icon: icon_set.action_install,
             severity: ReviewSeverity::Run,
             status: "missing".into(),
-            detail: command,
+            detail,
         },
         install::InstallPresence::Unknown => ReviewEntry {
             order: 0,
@@ -138,7 +131,7 @@ pub(in crate::tui) fn review_install_entry(
             kind_icon: icon_set.action_install,
             severity: ReviewSeverity::Warning,
             status: "unknown".into(),
-            detail: command,
+            detail,
         },
     }
 }
@@ -282,10 +275,4 @@ pub(in crate::tui) fn describe_link_review(action: &LinkAction) -> (ReviewSeveri
         LinkAction::Relink => (ReviewSeverity::Warning, "relink".into()),
         LinkAction::Fail(reason) => (ReviewSeverity::Danger, format!("fail: {reason}")),
     }
-}
-
-pub(in crate::tui) fn install_command_summary(binary: &str, pkg_mgr: &str) -> Option<String> {
-    let db = install::load_db().ok()?;
-    let entry = install::find(&db, binary)?;
-    install::command_for_current_platform(&entry, pkg_mgr)
 }

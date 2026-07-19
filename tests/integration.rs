@@ -141,9 +141,12 @@ fn plan_serialization_roundtrip() {
             name: "fish".into(),
             layer: "shell".into(),
             actions: vec![Action::Install {
-                pkg_mgr: "brew".into(),
-                binary: "fish".into(),
-                source: "brew install fish".into(),
+                spec: dotman::ops::install::resolve_install(
+                    &dotman::ops::install::load_db().unwrap(),
+                    "fish",
+                    "brew",
+                )
+                .unwrap(),
             }],
             selected: true,
         }],
