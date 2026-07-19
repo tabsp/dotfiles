@@ -46,7 +46,7 @@ curl -fsSL https://github.com/tabsp/dotfiles/releases/latest/download/install.sh
 ```
 
 The installer detects macOS/Linux and arm64/x86_64, verifies the release SHA-256,
-and installs to `~/.local/bin`. Set `DOTMAN_VERSION=v0.3.2` to pin a release or
+and installs to `~/.local/bin`. Set `DOTMAN_VERSION=v0.3.3` to pin a release or
 `DOTMAN_INSTALL_DIR` to choose another directory.
 
 If Homebrew is already available, install and upgrade through the Tap instead:

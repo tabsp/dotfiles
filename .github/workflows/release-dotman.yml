@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Semantic release tag matching Cargo.toml (for example v0.3.2)
+        description: Semantic release tag matching Cargo.toml (for example v0.3.3)
         required: true
         type: string
   push:

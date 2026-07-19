@@ -45,7 +45,7 @@ curl -fsSL https://github.com/tabsp/dotfiles/releases/latest/download/install.sh
 ```
 
 脚本会识别 macOS/Linux 和 arm64/x86_64、校验 release SHA-256，并安装到
-`~/.local/bin`。可以设置 `DOTMAN_VERSION=v0.3.2` 固定版本，或用
+`~/.local/bin`。可以设置 `DOTMAN_VERSION=v0.3.3` 固定版本，或用
 `DOTMAN_INSTALL_DIR` 指定其他目录。
 
 如果已经有 Homebrew，也可以通过 Tap 安装和升级：
