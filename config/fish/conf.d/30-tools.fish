@@ -33,6 +33,23 @@ if type -q direnv
     direnv hook fish | source
 end
 
+if type -q atuin
+    # Keep shell history local, leave Up on Fish's context-aware history, and
+    # reserve Ctrl-R for Atuin's full-text search.
+    atuin init fish --disable-up-arrow --disable-ai | source
+end
+
+if type -q delta
+    set -gx GIT_PAGER delta
+end
+
+if type -q pay-respects
+    # Suggestions are explicit via `fix`; do not replace command-not-found or
+    # enable the optional network-backed AI module.
+    set -gx _PR_AI_DISABLE 1
+    pay-respects fish --alias fix --nocnf | source
+end
+
 if type -q starship
     starship init fish | source
 end

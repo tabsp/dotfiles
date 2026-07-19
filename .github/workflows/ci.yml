@@ -16,6 +16,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -43,6 +45,6 @@ jobs:
           brew_prefix="$("$brew_bin" --prefix)"
           echo "$brew_prefix/bin" >> "$GITHUB_PATH"
           echo "$brew_prefix/sbin" >> "$GITHUB_PATH"
-          "$brew_bin" install fish shellcheck hadolint actionlint jq neovim stylua
+          "$brew_bin" install fish shellcheck hadolint actionlint jq neovim stylua gitleaks
 
       - run: make ci

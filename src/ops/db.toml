@@ -42,6 +42,21 @@ command = "curl -fsSL https://herdr.dev/install.sh | sh"
 platform = "linux"
 os = ["linux"]
 
+[templates.atuin_direct_linux]
+command = "curl --proto '=https' --tlsv1.2 -LsSf https://setup.atuin.sh | sh -s -- --non-interactive"
+platform = "linux"
+os = ["linux"]
+
+[templates.pay_respects_direct_macos]
+command = "curl -sSfL https://raw.githubusercontent.com/iffse/pay-respects/main/install.sh | sh"
+platform = "macos"
+os = ["macos"]
+
+[templates.pay_respects_direct_linux]
+command = "curl -sSfL https://raw.githubusercontent.com/iffse/pay-respects/main/install.sh | sh"
+platform = "linux"
+os = ["linux"]
+
 [tools.ghostty]
 layer = "terminal"
 platforms = ["brew_cask", "ubuntu_ghostty", "pacman", "fedora_ghostty"]
@@ -136,6 +151,27 @@ layer = "enhancement"
 
 [tools.zoxide]
 layer = "enhancement"
+
+[tools.atuin]
+layer = "enhancement"
+platforms = ["brew", "pacman", "atuin_direct_linux"]
+
+[tools.git-delta]
+binary = "delta"
+layer = "enhancement"
+
+[tools.trash-cli]
+binary = "trash-put"
+layer = "enhancement"
+platforms = ["brew", "pacman", "dnf"]
+
+[tools.pay-respects]
+layer = "enhancement"
+platforms = ["pay_respects_direct_macos", "pay_respects_direct_linux"]
+
+[tools.gitleaks]
+layer = "enhancement"
+platforms = ["brew", "pacman", "dnf"]
 
 [tools.font-maple-mono-nf-cn]
 layer = "enhancement"

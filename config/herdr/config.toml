@@ -56,7 +56,9 @@ agent_panel_sort = "spaces"
 accent = "#89b4fa"
 
 [ui.toast]
-delivery = "off"
+# Route background events through the attached outer terminal. This keeps
+# desktop notifications owned by Ghostty on both macOS and Linux.
+delivery = "terminal"
 
 [ui.sound]
 enabled = false

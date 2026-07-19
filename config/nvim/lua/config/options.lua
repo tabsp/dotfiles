@@ -11,3 +11,8 @@ vim.g.loaded_node_provider = 0
 vim.g.loaded_python3_provider = 0
 vim.g.loaded_ruby_provider = 0
 vim.g.loaded_perl_provider = 0
+
+-- Keep the default register connected to the system clipboard even when a
+-- local terminal inherits stale SSH environment variables. LazyVim defers this
+-- provider until UIEnter, then restores the value configured here.
+vim.opt.clipboard = "unnamedplus"

@@ -1,0 +1,10 @@
+# History remains local unless sync is explicitly configured on a machine.
+auto_sync = false
+update_check = false
+
+search_mode = "fuzzy"
+filter_mode = "global"
+filter_mode_shell_up_key = "directory"
+style = "compact"
+inline_height = 20
+show_preview = true

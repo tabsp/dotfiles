@@ -50,6 +50,11 @@ install:
   - fzf
   - gum
   - zoxide
+  - atuin
+  - git-delta
+  - trash-cli
+  - pay-respects
+  - gitleaks
   - font-maple-mono-nf-cn
 
 # All link targets in one block; layer indicated by comment.
@@ -68,6 +73,7 @@ links:
   ~/.config/fastfetch: config/fastfetch
   # 5. Enhancement
   ~/.config/starship.toml: config/starship.toml
+  ~/.config/atuin: config/atuin
   ~/.markdownlint-cli2.yaml: config/markdownlint-cli2.yaml
   ~/.config/tealdeer: config/tealdeer
   ~/.config/mise/config.toml: config/mise/config.toml
@@ -83,6 +89,14 @@ shell:
     description: Sync fish plugins
     optional: true
     if: command -v fish >/dev/null 2>&1
+  - command: brew tap laishulu/homebrew && brew trust --formula laishulu/homebrew/macism && brew install macism
+    description: Install the macOS input source controller
+    optional: true
+    if: '[ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1 && ! command -v macism >/dev/null 2>&1'
+  - command: mkdir -p "$HOME/.local/bin" && ln -sfn "$(brew --prefix trash-cli)/bin/trash-put" "$HOME/.local/bin/trash-put"
+    description: Expose Homebrew's keg-only trash-cli command
+    optional: true
+    if: '[ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1 && brew list --formula trash-cli >/dev/null 2>&1 && ! command -v trash-put >/dev/null 2>&1'
   - command: >-
       if [ ! -d "$HOME/.tmux/plugins/tpm/.git" ]; then
         git clone --filter=blob:none https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm";

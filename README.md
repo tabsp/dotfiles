@@ -26,16 +26,16 @@ Plan, Review, Run, and Replay are fully navigable; nothing ever executes.
 
 ## What's Inside
 
-| Layer                | Tools                                                  |
-| -------------------- | ------------------------------------------------------ |
-| Terminal             | Ghostty                                                |
-| Shell                | Fish with numbered `conf.d` modules and Fisher plugins |
-| Multiplexer          | tmux with tmux-status; herdr                           |
-| Software             | Neovim (LazyVim), mise, lazygit, btop, fastfetch, yazi |
-| Enhancement · prompt | Starship, tealdeer, markdownlint-cli2                  |
-| Enhancement · cli    | ripgrep, fd, bat, eza, dua-cli, gum, tree-sitter-cli   |
-| Enhancement · data   | fzf, zoxide, jq, yq, direnv                            |
-| Font                 | Maple Mono NF                                          |
+| Layer                | Tools                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| Terminal             | Ghostty                                                                                        |
+| Shell                | Fish with numbered `conf.d` modules and Fisher plugins                                         |
+| Multiplexer          | tmux with tmux-status; herdr                                                                   |
+| Software             | Neovim (LazyVim), mise, lazygit, btop, fastfetch, yazi                                         |
+| Enhancement · prompt | Starship, tealdeer, markdownlint-cli2                                                          |
+| Enhancement · cli    | ripgrep, fd, bat, eza, dua-cli, gum, tree-sitter-cli, delta, trash-cli, pay-respects, gitleaks |
+| Enhancement · data   | fzf, zoxide, jq, yq, direnv, Atuin                                                             |
+| Font                 | Maple Mono NF                                                                                  |
 
 ## Quick Start
 
@@ -164,7 +164,8 @@ auto_install_pkg_manager: true
 
 default_shell: fish
 
-install: [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship]
+install:
+  [ghostty, fish, tmux, neovim, lazygit, btop, ripgrep, fzf, starship, atuin]
 
 links:
   ~/.config/fish: config/fish
@@ -252,6 +253,7 @@ make build
 make format        # format all supported tracked files
 make format-check  # check formatting without modifying files
 make lint
+make secret-check  # scan the working tree and Git history for secrets
 make test
 make config-check  # run the complete local configuration validation
 make ci

@@ -1,4 +1,4 @@
-.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint installer-test fish-check docker-lint action-lint portability-check nvim-check config-check config-check-tools test ci clean
+.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint installer-test fish-check docker-lint action-lint portability-check secret-check nvim-check config-check config-check-tools test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -27,6 +27,7 @@ help:
 		'  make docker-lint  Run Hadolint' \
 		'  make action-lint  Check GitHub Actions workflows' \
 		'  make portability-check Check for host-specific absolute paths' \
+		'  make secret-check Scan the working tree and Git history for secrets' \
 		'  make nvim-check   Check Neovim config loads headlessly' \
 		'  make config-check Check all managed configuration files' \
 		'  make test         Run tests' \
@@ -74,7 +75,7 @@ format-check: format-tools
 	stylua --check --config-path config/nvim/stylua.toml $(NVIM_TEST_LUA)
 	$(PRETTIER) --check $(PRETTIER_FILES)
 
-lint: lint-tools format-check rust-lint shell-lint fish-check docker-lint action-lint portability-check
+lint: lint-tools format-check rust-lint shell-lint fish-check docker-lint action-lint portability-check secret-check
 
 lint-tools:
 	@missing=""; \
@@ -126,6 +127,21 @@ portability-check:
 		exit 1; \
 	fi
 
+secret-check:
+	@command -v gitleaks >/dev/null 2>&1 || { \
+		echo "missing checker: gitleaks (run dotman deploy)" >&2; \
+		exit 1; \
+	}
+	@set -e; \
+		tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-gitleaks.XXXXXX")"; \
+		trap 'rm -rf "$$tmp"' EXIT; \
+		git ls-files --cached --others --exclude-standard -z > "$$tmp/files"; \
+		tar --null -T "$$tmp/files" -cf "$$tmp/worktree.tar"; \
+		mkdir "$$tmp/worktree"; \
+		tar -xf "$$tmp/worktree.tar" -C "$$tmp/worktree"; \
+		gitleaks dir --redact --no-banner "$$tmp/worktree"
+	gitleaks git --redact --no-banner
+
 nvim-check:
 	jq empty config/nvim/lazy-lock.json
 	stylua --check config/nvim
@@ -159,7 +175,7 @@ config-check-tools:
 		exit 1; \
 	fi
 
-config-check: config-check-tools format-check shell-lint fish-check portability-check nvim-check test $(DOTMAN)
+config-check: config-check-tools format-check shell-lint fish-check portability-check secret-check nvim-check test $(DOTMAN)
 	yq '.' dotman.yaml >/dev/null
 	$(DOTMAN) plan --headless >/dev/null
 	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-tmux-check.XXXXXX")"; \

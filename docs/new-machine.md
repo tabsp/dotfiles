@@ -162,6 +162,13 @@ getent passwd "$USER" | cut -d: -f7
   `~/.config/ghostty/config.local`。
 - 检查字体、输入法、浏览器扩展和 GUI 应用设置。
 - 首次打开 Neovim，让插件和工具完成安装。
+- Atuin 默认只在本机保存历史、不启用同步，并仅接管 `Ctrl-r`。如需导入原有 Fish
+  历史，在部署完成后手动执行一次 `atuin import fish`。
+- 长命令超过 15 秒且 Ghostty 窗口不在前台时，Ghostty 会直接发送系统通知。通知由
+  终端自身判断焦点，不依赖 shell 中可能残留的 SSH 环境变量。Herdr 使用内置 Agent
+  状态通知，并通过外层终端发送桌面通知。tmux 不发送通用桌面通知；后台 window 有
+  输出或响铃时，状态栏分别显示 `#` 或 `!`，切换到该 window 后自动清除。
+- 使用 `del PATH...` 将文件移入系统垃圾桶；原始 `rm` 语义保持不变。
 
 ## 8. 验证
 
