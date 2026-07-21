@@ -193,6 +193,11 @@ jobs:
           ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           path: homebrew-tap
 
+      - name: Configure Git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Update Formula
         env:
           DOTMAN_CHECKSUM_DIR: dist
@@ -217,24 +222,26 @@ jobs:
 
       - name: Validate Formula syntax and style
         run: |
+          set -euo pipefail
           ruby -c homebrew-tap/Formula/dotman.rb
           brew style homebrew-tap/Formula/dotman.rb
 
       - name: Register Formula test Tap
         run: |
+          set -euo pipefail
           brew tap-new tabsp/tap
           cp homebrew-tap/Formula/dotman.rb "$(brew --repository tabsp/tap)/Formula/dotman.rb"
 
       - name: Install and test Formula
         run: |
+          set -euo pipefail
           brew install tabsp/tap/dotman
           brew test tabsp/tap/dotman
 
       - name: Publish Formula
         working-directory: homebrew-tap
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
           git add Formula/dotman.rb
           if git diff --cached --quiet; then
             echo "Formula is already current."
