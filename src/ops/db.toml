@@ -114,6 +114,10 @@ dnf = "fd-find"
 [tools.bat]
 layer = "enhancement"
 
+[tools.glow]
+layer = "enhancement"
+platforms = ["brew", "pacman"]
+
 [tools.eza]
 layer = "enhancement"
 platforms = ["brew", "pacman"]

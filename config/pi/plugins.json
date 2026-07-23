@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    "npm:pi-permission-system@0.8.0",
+    "npm:pi-subagents@0.35.1",
+    "npm:pi-lens@3.8.71",
+    "npm:context-mode@1.0.169",
+    "npm:pi-mcp-adapter@2.11.0",
+    {
+      "source": "npm:pi-web-access@0.13.0",
+      "extensions": ["index.ts"],
+      "skills": ["skills/librarian/SKILL.md"]
+    },
+    {
+      "source": "npm:pi-extensions@0.1.58",
+      "extensions": [
+        "files-widget/index.ts",
+        "raw-paste/index.ts",
+        "code-actions/index.ts",
+        "usage-extension/index.ts",
+        "session-recap/index.ts",
+        "tab-status/tab-status.ts",
+        "pi-ralph-wiggum/index.ts"
+      ],
+      "skills": ["pi-ralph-wiggum/SKILL.md"]
+    }
+  ]
+}

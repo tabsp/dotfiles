@@ -1,0 +1,27 @@
+{
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/target/**",
+    "**/coverage/**",
+    "**/*.snapshot",
+    "vendor/**"
+  ],
+  "format": {
+    "enabled": true,
+    "mode": "deferred"
+  },
+  "actionableWarnings": {
+    "enabled": true,
+    "includeLspCodeActions": true,
+    "deltaOnly": true,
+    "autoFix": {
+      "enabled": false,
+      "maxFixes": 5
+    }
+  },
+  "contextInjection": {
+    "enabled": false
+  }
+}
