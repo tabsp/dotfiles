@@ -78,15 +78,6 @@ links:
   ~/.markdownlint-cli2.yaml: config/markdownlint-cli2.yaml
   ~/.config/tealdeer: config/tealdeer
   ~/.config/mise/config.toml: config/mise/config.toml
-  # 6. AI development
-  ~/.local/bin/pi-plugin-stack: bin/pi-plugin-stack
-  ~/.config/pi/plugins.json: config/pi/plugins.json
-  ~/.pi-lens/config.json: config/pi-lens/config.json
-  ~/.pi/agent/AGENTS.md: config/pi/agent/AGENTS.md
-  ~/.pi/agent/pi-permissions.jsonc: config/pi/agent/pi-permissions.jsonc
-  ~/.pi/agent/prompts: config/pi/agent/prompts
-  ~/.pi/agent/extensions/subagent/config.json: config/pi/agent/extensions/subagent/config.json
-  ~/.pi/web-search.json: config/pi/web-search.json
 
 # Directories to ensure exist.
 create:
@@ -127,7 +118,3 @@ shell:
     description: Install try CLI
     optional: true
     if: command -v mise >/dev/null 2>&1 && ! env -u GEM_HOME -u GEM_PATH MISE_TRUSTED_CONFIG_PATHS="$HOME/.config/mise/config.toml" mise exec ruby -- gem list -i try-cli >/dev/null 2>&1
-  - command: ./bin/pi-plugin-stack install
-    description: Sync pinned Pi plugins
-    optional: true
-    if: command -v pi >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && ! PI_PLUGIN_CATALOG="$PWD/config/pi/plugins.json" ./bin/pi-plugin-stack check >/dev/null 2>&1

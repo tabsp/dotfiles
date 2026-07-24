@@ -1,4 +1,4 @@
-.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint installer-test pi-plugin-test pi-permission-test fish-check docker-lint action-lint portability-check secret-check nvim-check config-check config-check-tools test ci clean
+.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint installer-test fish-check docker-lint action-lint portability-check secret-check nvim-check config-check config-check-tools test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -6,7 +6,7 @@ RUST_SOURCES := $(shell find src -name '*.rs')
 NVIM_TEST_LUA := $(wildcard tests/nvim*.lua)
 NVIM_DATA_HOME := $(or $(XDG_DATA_HOME),$(HOME)/.local/share)/nvim
 PRETTIER ?= $(or $(shell command -v prettier 2>/dev/null),$(NVIM_DATA_HOME)/mason/bin/prettier)
-PRETTIER_FILES := $(shell git ls-files --cached --others --exclude-standard -- '*.md' '*.json' '*.jsonc' '*.yaml' '*.yml')
+PRETTIER_FILES := $(shell git ls-files --cached --others --exclude-standard -- '*.md' '*.json' '*.jsonc' '*.yaml' '*.yml' | while IFS= read -r file; do test -e "$$file" && printf '%s\n' "$$file"; done)
 
 help:
 	@printf '%s\n' \
@@ -23,8 +23,6 @@ help:
 		'  make rust-lint    Run rustfmt and clippy checks' \
 		'  make shell-lint   Run ShellCheck' \
 		'  make installer-test Test the release installer' \
-		'  make pi-plugin-test Test the Pi plugin stack manager' \
-		'  make pi-permission-test Test the Pi permission policy' \
 		'  make fish-check   Check Fish syntax and PATH scope' \
 		'  make docker-lint  Run Hadolint' \
 		'  make action-lint  Check GitHub Actions workflows' \
@@ -95,16 +93,10 @@ rust-lint:
 	cargo clippy --all-targets --all-features -- -D warnings
 
 shell-lint:
-	shellcheck bin/pi-plugin-stack bin/tmux-status scripts/*.sh tests/*.sh tests/e2e/*.sh tests/e2e/scenarios/*.sh
+	shellcheck bin/tmux-status scripts/*.sh tests/*.sh tests/e2e/*.sh tests/e2e/scenarios/*.sh
 
 installer-test:
 	sh tests/install-script.sh
-
-pi-plugin-test:
-	bash tests/pi-plugin-stack.sh
-
-pi-permission-test:
-	bash tests/pi-permissions.sh
 
 fish-check:
 	fish -n config/fish/config.fish config/fish/conf.d/*.fish config/fish/functions/*.fish
@@ -143,8 +135,9 @@ secret-check:
 	@set -e; \
 		tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-gitleaks.XXXXXX")"; \
 		trap 'rm -rf "$$tmp"' EXIT; \
-		git ls-files --cached --others --exclude-standard -z > "$$tmp/files"; \
-		tar --null -T "$$tmp/files" -cf "$$tmp/worktree.tar"; \
+		git ls-files --cached --others --exclude-standard | \
+		  while IFS= read -r file; do test -e "$$file" && printf '%s\n' "$$file"; done > "$$tmp/files"; \
+		tar -T "$$tmp/files" -cf "$$tmp/worktree.tar"; \
 		mkdir "$$tmp/worktree"; \
 		tar -xf "$$tmp/worktree.tar" -C "$$tmp/worktree"; \
 		gitleaks dir --redact --no-banner "$$tmp/worktree"
@@ -183,9 +176,7 @@ config-check-tools:
 		exit 1; \
 	fi
 
-config-check: config-check-tools format-check shell-lint fish-check portability-check secret-check nvim-check test pi-plugin-test pi-permission-test $(DOTMAN)
-	jq empty config/pi/plugins.json config/pi/agent/extensions/subagent/config.json config/pi/web-search.json config/pi-lens/config.json
-	PI_PLUGIN_CATALOG="$(CURDIR)/config/pi/plugins.json" bin/pi-plugin-stack list >/dev/null
+config-check: config-check-tools format-check shell-lint fish-check portability-check secret-check nvim-check test $(DOTMAN)
 	yq '.' dotman.yaml >/dev/null
 	$(DOTMAN) plan --headless >/dev/null
 	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-tmux-check.XXXXXX")"; \

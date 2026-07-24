@@ -149,11 +149,6 @@ getent passwd "$USER" | cut -d: -f7
 - 恢复 `~/.gitconfig.local`。
 - 恢复 `~/.config/fish-local/*.fish`。
 - 恢复 SSH/GPG key，并检查权限。
-- 安装并完成 Pi 首次初始化；provider、model、API Key、`models.json` 和
-  `auth.json` 保持机器本地。
-- Pi 和 `jq` 可用后，在 dotman 的 Plan 中启用 `Sync pinned Pi plugins`；
-  也可以手动执行 `pi-plugin-stack install`，再用
-  `pi-plugin-stack check` 验证。
 
 ## 7. 手动应用设置
 
@@ -174,11 +169,6 @@ getent passwd "$USER" | cut -d: -f7
   状态通知，并通过外层终端发送桌面通知。tmux 不发送通用桌面通知；后台 window 有
   输出或响铃时，状态栏分别显示 `#` 或 `!`，切换到该 window 后自动清除。
 - 使用 `del PATH...` 将文件移入系统垃圾桶；原始 `rm` 语义保持不变。
-- Pi 的 `AGENTS.md`、权限、提示词和插件参数由 dotman 链接；不要把 API Key、
-  `~/.pi/agent/auth.json`、`models.json`、`settings.json`、会话或信任状态加入
-  dotfiles。
-- Pi Lens 的共享策略由 `~/.pi-lens/config.json` 链接；项目特定的忽略项和复杂度
-  阈值仍应放在对应项目的 `.pi-lens.json` 中。
 
 ## 8. 验证
 
@@ -191,15 +181,6 @@ dotman history
 `dotman history` 应显示刚完成的运行；打开记录后可逐 action 查看状态、错误和已保存输出。
 Plan 选择保存在 `~/.local/share/dotman/selection/`，同一配置文件的小幅修改不会清空
 已有选择。
-
-如果安装了 Pi，再验证插件栈：
-
-```sh
-pi-plugin-stack check
-```
-
-需要调查开源依赖实现时，可以直接要求 Pi 使用 `librarian`；该技能允许克隆公开仓库，
-但不会读取浏览器 Cookie。
 
 检查 Maple Mono 字体：
 

@@ -31,7 +31,7 @@ Plan, Review, Run, and Replay are fully navigable; nothing ever executes.
 | Terminal             | Ghostty                                                                                              |
 | Shell                | Fish with numbered `conf.d` modules and Fisher plugins                                               |
 | Multiplexer          | tmux with tmux-status; herdr                                                                         |
-| Software             | Neovim (LazyVim), Pi coding agent, mise, lazygit, btop, fastfetch, yazi                              |
+| Software             | Neovim (LazyVim), mise, lazygit, btop, fastfetch, yazi                                               |
 | Enhancement · prompt | Starship, tealdeer, markdownlint-cli2                                                                |
 | Enhancement · cli    | ripgrep, fd, bat, glow, eza, dua-cli, gum, tree-sitter-cli, delta, trash-cli, pay-respects, gitleaks |
 | Enhancement · data   | fzf, zoxide, jq, yq, direnv, Atuin                                                                   |
@@ -237,44 +237,6 @@ Plan and Review before Run starts.
 
 Machine-specific paths, tokens, and temporary tool setup should stay out of the
 shared repository.
-
-### Pi coding agent
-
-Shared Pi instructions, permissions, prompts, plugin settings, and the pinned
-plugin catalog live under `config/pi/`. `dotman` links those files into
-`~/.pi` and exposes `pi-plugin-stack` in `~/.local/bin`.
-
-Plugin installation is an optional, idempotent deployment action. It runs only
-when both `pi` and `jq` are available and the installed packages or
-`settings.json.packages` differ from `config/pi/plugins.json`. Run it manually
-when needed:
-
-```sh
-pi-plugin-stack list
-pi-plugin-stack install --dry-run
-pi-plugin-stack install
-pi-plugin-stack check
-```
-
-The catalog accepts exact npm versions only. Installation preserves every
-machine-local setting outside `packages` and restores the previous
-`settings.json` if a package installation fails.
-
-The global permission policy allows file edits plus common read-only shell,
-build, lint, and test commands without prompting. Unknown commands, shell
-composition/redirection, in-place transforms, deployment, publication, and
-other potentially dangerous operations still require confirmation.
-
-Web Access includes the `librarian` skill and may clone public repositories for
-source-backed dependency research. Browser cookie access remains disabled. Pi
-Lens uses the shared `config/pi-lens/config.json`, ignores generated dependency
-trees, reports actionable warnings, defers formatting until the end of a turn,
-and never applies automatic fixes.
-
-The real `~/.pi/agent/settings.json` remains machine-local. The installer
-updates only its `packages` field, preserving the selected provider, model, and
-other preferences. `models.json`, `auth.json`, API keys, trust decisions,
-sessions, caches, and MCP server definitions are never managed by this repo.
 
 Fish loads local-only files from:
 
