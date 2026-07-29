@@ -6,6 +6,10 @@ pub(super) use inspection::*;
 
 const REVIEW_PAGE_SIZE: isize = 8;
 
+pub(super) fn default_expanded_groups() -> BTreeSet<ReviewGroup> {
+    BTreeSet::from([ReviewGroup::Attention, ReviewGroup::WillRun])
+}
+
 // ---------------- ConfirmView ----------------
 
 pub(super) fn start_review(app: &mut App) {
@@ -15,6 +19,9 @@ pub(super) fn start_review(app: &mut App) {
     let config = app.config.clone();
     app.review_entries.clear();
     app.review_scroll = 0;
+    app.review_group_focus = 0;
+    app.review_follow_group_focus = true;
+    app.review_expanded_groups = default_expanded_groups();
     app.review_danger_confirmed = false;
     app.status_message = "checking action conditions...".into();
     app.status_kind = NoticeKind::Info;
@@ -36,6 +43,8 @@ pub(super) fn poll_review_thread(app: &mut App) -> bool {
     match handle.join() {
         Ok(entries) => {
             app.review_entries = entries;
+            app.review_group_focus = first_visible_review_group(&app.review_entries);
+            app.review_follow_group_focus = true;
             app.status_message.clear();
             app.status_kind = NoticeKind::Info;
         }
@@ -50,12 +59,41 @@ pub(super) fn poll_review_thread(app: &mut App) -> bool {
 
 pub(super) fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
     match key {
-        KeyCode::Down | KeyCode::Char('j') => scroll_review(app, 1),
-        KeyCode::Up | KeyCode::Char('k') => scroll_review(app, -1),
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+            move_review_group_focus(app, 1);
+        }
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::BackTab => {
+            move_review_group_focus(app, -1);
+        }
         KeyCode::PageDown => scroll_review(app, REVIEW_PAGE_SIZE),
         KeyCode::PageUp => scroll_review(app, -REVIEW_PAGE_SIZE),
-        KeyCode::Home => app.review_scroll = 0,
-        KeyCode::End => app.review_scroll = usize::MAX,
+        KeyCode::Home => {
+            app.review_scroll = 0;
+            app.review_follow_group_focus = false;
+        }
+        KeyCode::End => {
+            app.review_scroll = usize::MAX;
+            app.review_follow_group_focus = false;
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            app.review_expanded_groups
+                .remove(&focused_review_group(app));
+            app.review_scroll = 0;
+            app.review_follow_group_focus = true;
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            app.review_expanded_groups.insert(focused_review_group(app));
+            app.review_scroll = 0;
+            app.review_follow_group_focus = true;
+        }
+        KeyCode::Char(' ') => {
+            let group = focused_review_group(app);
+            if !app.review_expanded_groups.insert(group) {
+                app.review_expanded_groups.remove(&group);
+            }
+            app.review_scroll = 0;
+            app.review_follow_group_focus = true;
+        }
         KeyCode::Char('!') if review_entries_have_danger(&app.review_entries) => {
             app.review_danger_confirmed = true;
             app.status_message = "danger confirmed; press r to run once".into();
@@ -88,6 +126,9 @@ pub(super) fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
                 }
             }
             app.review_danger_confirmed = false;
+            app.status_message.clear();
+            app.status_kind = NoticeKind::Info;
+            app.status_is_focus_info = false;
             run::start_run(app);
         }
         KeyCode::Char('q') | KeyCode::Esc => {
@@ -98,15 +139,35 @@ pub(super) fn handle_confirm(app: &mut App, key: KeyCode) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn jump_review_top(app: &mut App) {
+fn focused_review_group(app: &App) -> ReviewGroup {
+    REVIEW_GROUPS[app.review_group_focus.min(REVIEW_GROUPS.len() - 1)]
+}
+
+fn move_review_group_focus(app: &mut App, direction: isize) {
+    app.review_group_focus =
+        next_visible_review_group(&app.review_entries, app.review_group_focus, direction);
     app.review_scroll = 0;
+    app.review_follow_group_focus = true;
+}
+
+pub(super) fn jump_review_top(app: &mut App) {
+    app.review_group_focus = first_visible_review_group(&app.review_entries);
+    app.review_scroll = 0;
+    app.review_follow_group_focus = true;
 }
 
 pub(super) fn jump_review_bottom(app: &mut App) {
+    app.review_group_focus = next_visible_review_group(
+        &app.review_entries,
+        first_visible_review_group(&app.review_entries),
+        -1,
+    );
     app.review_scroll = usize::MAX;
+    app.review_follow_group_focus = true;
 }
 
 pub(super) fn scroll_review(app: &mut App, delta: isize) {
+    app.review_follow_group_focus = false;
     if delta < 0 {
         app.review_scroll = app.review_scroll.saturating_sub(delta.unsigned_abs());
     } else {
@@ -122,6 +183,7 @@ pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
         LayoutDensity::Compact => 1,
         LayoutDensity::Normal => 3,
     };
+    let footer_size = footer_height(&app.status_message);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
@@ -129,7 +191,7 @@ pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
             Constraint::Length(1),
             Constraint::Length(summary_height),
             Constraint::Min(3),
-            Constraint::Length(1),
+            Constraint::Length(footer_size),
         ])
         .split(area);
 
@@ -170,30 +232,31 @@ pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
         })
         .count();
 
-    let title_prefix = format!("{}  dotman - Review  {:?} ", icon_set.info, app.mode);
-    let divider_width = usize::from(chunks[0].width).saturating_sub(display_width(&title_prefix));
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled(
-            title_prefix,
-            Style::default()
-                .fg(CATPPUCCIN_MOCHA.fg_dim)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" {}", "─".repeat(divider_width)),
-            Style::default().fg(CATPPUCCIN_MOCHA.border_subtle),
-        ),
-    ]));
-    f.render_widget(title, chunks[0]);
+    let meta = vec![Span::styled(
+        mode_label(&app.mode),
+        Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+    )];
+    f.render_widget(
+        Paragraph::new(screen_header(
+            icon_set.info,
+            "Review",
+            meta,
+            usize::from(chunks[0].width),
+        )),
+        chunks[0],
+    );
 
     let summary = if density == LayoutDensity::Compact {
         vec![Line::from(vec![
             Span::styled("Selected ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
             Span::styled(
                 selected.to_string(),
-                Style::default().fg(CATPPUCCIN_MOCHA.success),
+                Style::default().fg(CATPPUCCIN_MOCHA.accent),
             ),
-            Span::raw(format!(" · {actions} actions · ")),
+            Span::styled(
+                format!(" · {actions} actions · "),
+                Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+            ),
             Span::styled(
                 format!("{risk_count} attention"),
                 Style::default().fg(if risk_count > 0 {
@@ -204,30 +267,44 @@ pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
             ),
         ])]
     } else {
+        let dim = Style::default().fg(CATPPUCCIN_MOCHA.fg_dim);
         vec![
             Line::from(vec![
-                Span::styled("Selected: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+                Span::styled("Selected: ", dim),
                 Span::styled(
                     selected.to_string(),
-                    Style::default().fg(CATPPUCCIN_MOCHA.success),
+                    Style::default().fg(CATPPUCCIN_MOCHA.accent),
                 ),
-                Span::raw(" steps, "),
+                Span::styled(" steps · ", dim),
                 Span::styled(
                     actions.to_string(),
                     Style::default().fg(CATPPUCCIN_MOCHA.accent),
                 ),
-                Span::raw(" actions"),
+                Span::styled(" actions", dim),
             ]),
             Line::from(vec![
-                Span::styled("Skipped: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
-                Span::raw(skipped.to_string()),
-                Span::raw(" steps"),
+                Span::styled("Skipped: ", dim),
+                Span::styled(
+                    skipped.to_string(),
+                    Style::default().fg(CATPPUCCIN_MOCHA.fg),
+                ),
+                Span::styled(" steps", dim),
             ]),
             Line::from(vec![
-                Span::styled("Review: ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
-                Span::raw(format!(
-                    "{review_count} actions, {change_count} active, {risk_count} attention"
-                )),
+                Span::styled("Review: ", dim),
+                Span::styled(
+                    format!("{review_count} actions · {change_count} active"),
+                    Style::default().fg(CATPPUCCIN_MOCHA.fg),
+                ),
+                Span::styled(" · ", dim),
+                Span::styled(
+                    format!("{risk_count} attention"),
+                    Style::default().fg(if risk_count > 0 {
+                        CATPPUCCIN_MOCHA.warning
+                    } else {
+                        CATPPUCCIN_MOCHA.text_muted
+                    }),
+                ),
             ]),
         ]
     };
@@ -235,32 +312,37 @@ pub(super) fn render_confirm(f: &mut Frame, app: &mut App) {
 
     let body_width = usize::from(chunks[2].width);
     let body_height = usize::from(chunks[2].height);
+    let follow_group_focus = app.review_follow_group_focus;
     let body = if entries.is_empty() {
         vec![Line::from("No selected actions.")]
     } else {
-        review_body_lines(entries, body_width, body_height, &mut app.review_scroll)
+        review_body_lines(
+            entries,
+            body_width,
+            body_height,
+            &mut app.review_scroll,
+            &app.review_expanded_groups,
+            app.review_group_focus,
+            follow_group_focus,
+        )
     };
+    app.review_follow_group_focus = false;
     f.render_widget(Paragraph::new(body).wrap(Wrap { trim: false }), chunks[2]);
 
-    let help_line = if app.status_message.is_empty() {
-        review_help_line(usize::from(chunks[3].width))
-    } else {
-        Line::from(vec![
-            Span::styled(
-                format!("  {}  ", notice_label(app.status_kind)),
-                notice_style(app.status_kind),
-            ),
-            Span::styled(
-                fit_to_width(
-                    &app.status_message,
-                    usize::from(chunks[3].width).saturating_sub(9),
-                ),
-                notice_style(app.status_kind),
-            ),
-        ])
-    };
-    let help = Paragraph::new(help_line);
-    f.render_widget(help, chunks[3]);
+    let notice = (!app.status_message.is_empty()).then(|| FooterNotice {
+        message: &app.status_message,
+        kind: app.status_kind,
+    });
+    let footer = screen_footer(
+        notice,
+        vim_prefix_help(
+            app,
+            review_help_line(usize::from(chunks[3].width)),
+            usize::from(chunks[3].width),
+        ),
+        usize::from(chunks[3].width),
+    );
+    f.render_widget(footer, chunks[3]);
 }
 
 pub(super) fn selected_item_count(plan: Option<&Plan>) -> usize {
@@ -279,7 +361,7 @@ pub(super) fn selected_action_count(plan: Option<&Plan>) -> usize {
     .unwrap_or(0)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum ReviewGroup {
     Attention,
     WillRun,
@@ -287,29 +369,78 @@ pub(super) enum ReviewGroup {
     Skipped,
 }
 
+const REVIEW_GROUPS: [ReviewGroup; 4] = [
+    ReviewGroup::Attention,
+    ReviewGroup::WillRun,
+    ReviewGroup::AlreadyOk,
+    ReviewGroup::Skipped,
+];
+
+fn first_visible_review_group(entries: &[ReviewEntry]) -> usize {
+    REVIEW_GROUPS
+        .iter()
+        .position(|group| {
+            entries
+                .iter()
+                .any(|entry| review_group_for(entry) == *group)
+        })
+        .unwrap_or(0)
+}
+
+fn next_visible_review_group(entries: &[ReviewEntry], current: usize, delta: isize) -> usize {
+    let mut candidate = current.min(REVIEW_GROUPS.len() - 1);
+    for _ in 0..REVIEW_GROUPS.len() {
+        candidate = if delta < 0 {
+            candidate.checked_sub(1).unwrap_or(REVIEW_GROUPS.len() - 1)
+        } else {
+            (candidate + 1) % REVIEW_GROUPS.len()
+        };
+        if entries
+            .iter()
+            .any(|entry| review_group_for(entry) == REVIEW_GROUPS[candidate])
+        {
+            return candidate;
+        }
+    }
+    current
+}
+
 pub(super) fn review_body_lines(
     entries: &[ReviewEntry],
     width: usize,
     height: usize,
     scroll: &mut usize,
+    expanded_groups: &BTreeSet<ReviewGroup>,
+    focused_group: usize,
+    follow_group_focus: bool,
 ) -> Vec<Line<'static>> {
     if height == 0 {
         return Vec::new();
     }
     let mut all_lines = Vec::new();
-    for group in [
-        ReviewGroup::Attention,
-        ReviewGroup::WillRun,
-        ReviewGroup::AlreadyOk,
-        ReviewGroup::Skipped,
-    ] {
+    let mut focused_line = None;
+    for (group_index, group) in REVIEW_GROUPS.into_iter().enumerate() {
         let group_entries = sorted_review_group_entries(entries, group);
         if group_entries.is_empty() {
             continue;
         }
-        all_lines.push(review_group_header_line(group, group_entries.len(), width));
-        for entry in group_entries {
-            all_lines.extend(review_entry_lines(entry, width));
+        let expanded = expanded_groups.contains(&group);
+        if group_index == focused_group {
+            focused_line = Some(all_lines.len());
+        }
+        all_lines.push(review_group_header_line(
+            group,
+            group_entries.len(),
+            width,
+            expanded,
+            group_index == focused_group,
+        ));
+        if expanded {
+            for entry in group_entries {
+                all_lines.extend(review_entry_lines(entry, width));
+            }
+        } else {
+            all_lines.push(review_group_summary_line(&group_entries, width));
         }
     }
     if all_lines.len() <= height {
@@ -318,6 +449,9 @@ pub(super) fn review_body_lines(
     }
 
     let max_scroll = all_lines.len().saturating_sub(height);
+    if follow_group_focus && let Some(focused_line) = focused_line {
+        *scroll = focused_line.saturating_sub(1).min(max_scroll);
+    }
     *scroll = (*scroll).min(max_scroll);
 
     let mut visible = all_lines
@@ -329,19 +463,13 @@ pub(super) fn review_body_lines(
     if *scroll > 0
         && let Some(first) = visible.first_mut()
     {
-        *first = Line::from(Span::styled(
-            fit_to_width(&format!("  ... {} above", *scroll), width),
-            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
-        ));
+        *first = scroll_marker_line(true, *scroll, width);
     }
     let below = all_lines.len().saturating_sub(*scroll + height);
     if below > 0
         && let Some(last) = visible.last_mut()
     {
-        *last = Line::from(Span::styled(
-            fit_to_width(&format!("  ... {below} below"), width),
-            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
-        ));
+        *last = scroll_marker_line(false, below, width);
     }
     visible
 }
@@ -382,40 +510,57 @@ pub(super) fn review_group_header_line(
     group: ReviewGroup,
     count: usize,
     width: usize,
+    expanded: bool,
+    focused: bool,
 ) -> Line<'static> {
     let icon_set = icons::current();
-    let (icon, label, style) = match group {
-        ReviewGroup::Attention => (
-            icon_set.warning,
-            "Attention",
-            Style::default().fg(CATPPUCCIN_MOCHA.warning),
-        ),
-        ReviewGroup::WillRun => (
-            icon_set.running,
-            "Will Run",
-            Style::default().fg(CATPPUCCIN_MOCHA.running),
-        ),
-        ReviewGroup::AlreadyOk => (
-            icon_set.success,
-            "Already OK",
-            Style::default().fg(CATPPUCCIN_MOCHA.success),
-        ),
-        ReviewGroup::Skipped => (
-            icon_set.skipped,
-            "Skipped",
-            Style::default().fg(CATPPUCCIN_MOCHA.skip),
-        ),
+    let (status_icon, label, color) = match group {
+        ReviewGroup::Attention => (icon_set.warning, "Attention", CATPPUCCIN_MOCHA.warning),
+        ReviewGroup::WillRun => (icon_set.running, "Will Run", CATPPUCCIN_MOCHA.running),
+        ReviewGroup::AlreadyOk => (icon_set.success, "Already OK", CATPPUCCIN_MOCHA.success),
+        ReviewGroup::Skipped => (icon_set.skipped, "Skipped", CATPPUCCIN_MOCHA.skip),
     };
+    let disclosure = if expanded {
+        icon_set.expanded
+    } else {
+        icon_set.collapsed
+    };
+    let marker = if focused { "▎" } else { " " };
+    let head = format!("{marker} {disclosure} {status_icon} {label}");
+    let tail = format!("  ({count})");
+    let padding = width.saturating_sub(display_width(&head) + display_width(&tail));
+    Line::from(vec![
+        Span::styled(
+            head,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" ".repeat(padding)),
+        Span::styled(tail, Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+    ])
+}
+
+fn review_group_summary_line(entries: &[&ReviewEntry], width: usize) -> Line<'static> {
+    let count = |kind: &str| entries.iter().filter(|entry| entry.kind == kind).count();
+    let mut parts = Vec::new();
+    for (kind, label) in [
+        ("install", "installs"),
+        ("link", "links"),
+        ("create", "directories"),
+        ("shell", "shell steps"),
+        ("clean", "cleanups"),
+    ] {
+        let value = count(kind);
+        if value > 0 {
+            parts.push(format!("{value} {label}"));
+        }
+    }
     Line::from(Span::styled(
-        fit_to_width(&format!("{icon} {label} ({count})"), width),
-        style.add_modifier(Modifier::BOLD),
+        fit_to_width(&format!("    {}", parts.join(" · ")), width),
+        Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
     ))
 }
 
 pub(super) fn review_entry_lines(entry: &ReviewEntry, width: usize) -> Vec<Line<'static>> {
-    let icon_set = icons::current();
-    let status_icon = review_status_icon(icon_set, entry.severity);
-    let status_style = review_status_style(entry.severity);
     let left = format!("{} {:<7} {}", entry.kind_icon, entry.kind, entry.item);
     let detail = review_entry_detail(entry);
     let single = if let Some(detail) = detail {
@@ -425,24 +570,22 @@ pub(super) fn review_entry_lines(entry: &ReviewEntry, width: usize) -> Vec<Line<
     };
     if display_width(&single) <= width.saturating_sub(2) {
         return vec![Line::from(vec![
-            Span::styled(status_icon, status_style),
-            Span::raw(" "),
+            Span::raw("    "),
             Span::styled(single, Style::default().fg(CATPPUCCIN_MOCHA.fg)),
         ])];
     }
 
     let first = format!("{left}  {}", entry.status);
     let mut lines = vec![Line::from(vec![
-        Span::styled(status_icon, status_style),
-        Span::raw(" "),
+        Span::raw("    "),
         Span::styled(
-            fit_to_width(&first, width.saturating_sub(2)),
+            fit_to_width(&first, width.saturating_sub(4)),
             Style::default().fg(CATPPUCCIN_MOCHA.fg),
         ),
     ])];
     if let Some(detail) = detail {
         lines.push(Line::from(Span::styled(
-            fit_to_width(&format!("  {} {detail}", icon_set.info), width),
+            fit_to_width(&format!("      {detail}"), width),
             Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
         )));
     }
@@ -471,6 +614,7 @@ pub(super) fn review_entry_needs_sudo(entry: &ReviewEntry) -> bool {
     ) && (entry.status.contains("sudo") || shell::command_contains_sudo(&entry.detail))
 }
 
+#[cfg(test)]
 pub(super) fn review_status_icon(
     icon_set: &'static icons::IconSet,
     severity: ReviewSeverity,
@@ -484,6 +628,7 @@ pub(super) fn review_status_icon(
     }
 }
 
+#[cfg(test)]
 pub(super) fn review_status_style(severity: ReviewSeverity) -> Style {
     Style::default().fg(match severity {
         ReviewSeverity::Success => CATPPUCCIN_MOCHA.success,

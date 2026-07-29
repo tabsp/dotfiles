@@ -131,24 +131,34 @@ Global options:
 
 The footer shows only the primary keys for the current screen:
 
-| Screen       | Primary keys                                                                    |
-| ------------ | ------------------------------------------------------------------------------- |
-| Main menu    | `↑↓` navigate, `Enter` open, `q` quit                                           |
-| Plan         | `↑↓` navigate, `Space` toggle, `s` save, `r` review, `q` back                   |
-| Review       | `↑↓` scroll, `r` run, `q` back                                                  |
-| Run / Result | `↑↓` scroll, `Tab` filter, `Enter` fold, `f` follow when paused, `q` abort/back |
-| History      | `↑↓` navigate, `Enter` open, `d` delete, `q` back                               |
-| Run replay   | `↑↓` navigate, `Space` fold, `q` back                                           |
+| Screen       | Primary keys                                                             |
+| ------------ | ------------------------------------------------------------------------ |
+| Main menu    | `↑↓` navigate, `Enter` open, `q` quit                                    |
+| Plan         | `↑↓` navigate, `Space` toggle, `s` save, `r` review, `q` back            |
+| Review       | `j/k` group, `h/l` fold, `Space` toggle, `r` run, `q` back               |
+| Run / Result | `j/k` scroll, `h/l` filter, `Enter` fold, `f` follow, `q/Esc` abort/back |
+| History      | `j/k` navigate, `l` open, `dd` delete, `h` back                          |
+| Run replay   | `j/k` navigate, `h/l` fold, `Space` toggle, `q` back                     |
 
 Direct main-menu keys (`d` deploy, `p` plan, `h` history), Vim navigation
-(`j/k`, `gg`, `G`), `Home/End`, `PageUp/PageDown`, arrow-key filter switching,
-and equivalent `Enter`/`Space` actions remain available as unlisted convenience
-keys.
+(`j/k`, `gg`, `G`), `Home/End`, `PageUp/PageDown`, arrow-key equivalents, and
+screen-specific `Enter`/`Space` actions remain available as unlisted
+convenience keys. `Ctrl-U/D` move half a page, `Ctrl-B/F` move a full page, and
+`Ctrl-C` follows the current screen's safe back/abort behavior.
 
 Result labels are intentional: **Ran** means a shell command completed;
 **Changed** means dotman installed, created, linked, backed up, or cleaned
 something. Errors are shown before warnings, while the final run result remains
 visible if saving history fails.
+
+The TUI uses `DOTMAN_THEME=auto` by default. Auto mode preserves the terminal's
+transparent/native background while choosing Catppuccin Mocha or Latte
+foreground and semantic colors from `COLORFGBG`; when the background cannot be
+detected, it falls back to the terminal's default foreground plus ANSI semantic
+accents. Explicit `mocha` or `latte` enables that theme's solid background.
+`terminal` is a compatibility alias for transparent auto mode rather than a
+separate palette, `ansi` uses transparent 16-color accents, and `NO_COLOR`
+disables palette colors.
 
 ## Configuration
 

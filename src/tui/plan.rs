@@ -223,13 +223,14 @@ pub(super) fn jump_plan_bottom(app: &mut App) {
 pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
     let icon_set = icons::current();
     let area = f.area();
+    let footer_size = footer_height(&app.status_message);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(3),
-            Constraint::Length(3),
+            Constraint::Length(footer_size),
         ])
         .split(area);
 
@@ -254,42 +255,35 @@ pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
 
     let selected = review::selected_item_count(Some(plan));
     let actions = review::selected_action_count(Some(plan));
-    let state = if app.dirty { "unsaved" } else { "saved" };
-    let status_prefix = format!(
-        "{}  dotman - Plan (○ {state})  {selected} selected · {actions} actions ",
-        icon_set.app
-    );
-    let divider_width = usize::from(chunks[0].width).saturating_sub(display_width(&status_prefix));
-    let status = Paragraph::new(Line::from(vec![
-        Span::styled(
-            format!("{}  dotman - Plan (", icon_set.app),
-            Style::default()
-                .fg(CATPPUCCIN_MOCHA.fg_dim)
-                .add_modifier(Modifier::BOLD),
-        ),
+    let state_style = if app.dirty {
+        CATPPUCCIN_MOCHA.warning
+    } else {
+        CATPPUCCIN_MOCHA.text_muted
+    };
+    let meta = vec![
         Span::styled(
             if app.dirty {
-                "○ unsaved"
+                "● unsaved"
             } else {
-                "○ saved"
+                "✓ saved"
             },
-            Style::default().fg(if app.dirty {
-                CATPPUCCIN_MOCHA.warning
-            } else {
-                CATPPUCCIN_MOCHA.text_muted
-            }),
+            Style::default().fg(state_style),
         ),
-        Span::styled(")  ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+        Span::styled(" · ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
         Span::styled(
             format!("{selected} selected · {actions} actions"),
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+            Style::default().fg(CATPPUCCIN_MOCHA.accent),
         ),
-        Span::styled(
-            format!(" {}", "─".repeat(divider_width)),
-            Style::default().fg(CATPPUCCIN_MOCHA.border_subtle),
-        ),
-    ]));
-    f.render_widget(status, chunks[0]);
+    ];
+    f.render_widget(
+        Paragraph::new(screen_header(
+            icon_set.app,
+            "Plan",
+            meta,
+            usize::from(chunks[0].width),
+        )),
+        chunks[0],
+    );
 
     let rows = build_plan_rows(plan, &app.collapsed_layers, app.plan_columns);
     let mut items: Vec<ListItem> = Vec::new();
@@ -338,8 +332,9 @@ pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
                 items.push(ListItem::new(Line::from(spans)));
             }
             PlanRow::Divider => {
+                let divider_width = row_width.saturating_sub(2).min(36);
                 items.push(ListItem::new(Line::from(Span::styled(
-                    format!("  {}", "─".repeat(row_width.saturating_sub(2))),
+                    format!("  {}", "─".repeat(divider_width)),
                     divider_style(),
                 ))));
             }
@@ -351,19 +346,20 @@ pub(super) fn render_plan(f: &mut Frame, app: &mut App) {
         .highlight_symbol("");
     f.render_stateful_widget(list, chunks[1], &mut app.plan_state);
 
-    let status_line = if app.status_message.is_empty() {
-        Line::from("")
-    } else {
-        Line::from(vec![
-            Span::raw("  "),
-            Span::styled(&app.status_message, notice_style(app.status_kind)),
-        ])
-    };
-    let help = Paragraph::new(vec![
-        status_line,
-        plan_help_line(usize::from(chunks[2].width), matches!(app.mode, Mode::Plan)),
-    ]);
-    f.render_widget(help, chunks[2]);
+    let notice = (!app.status_message.is_empty()).then(|| FooterNotice {
+        message: &app.status_message,
+        kind: app.status_kind,
+    });
+    let footer = screen_footer(
+        notice,
+        vim_prefix_help(
+            app,
+            plan_help_line(usize::from(chunks[2].width), matches!(app.mode, Mode::Plan)),
+            usize::from(chunks[2].width),
+        ),
+        usize::from(chunks[2].width),
+    );
+    f.render_widget(footer, chunks[2]);
 }
 
 pub(super) fn build_plan_rows(

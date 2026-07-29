@@ -1,6 +1,7 @@
 use super::*;
 use crate::execute::MAX_TUI_OUTPUT_LINES;
-use crate::tui::history::{history_content_area, replay_help_line, replay_lines};
+use crate::tui::history::{replay_help_line, replay_lines};
+use crate::tui::run::view::{RunActionLineSpec, run_action_line};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
@@ -158,7 +159,8 @@ fn review_help_line_keeps_full_labels_when_space_allows() {
     let line = review_help_line(100);
     let text = line_text(&line);
 
-    assert!(text.contains("Scroll"));
+    assert!(text.contains("Group"));
+    assert!(text.contains("[h/l]"));
     assert!(text.contains("[r]"));
     assert!(!text.contains("Page"));
     assert!(text.contains("Run"));
@@ -447,6 +449,23 @@ fn run_body_lines_group_finished_actions() {
     assert!(text.contains("changed"));
     assert!(text.contains("no change"));
     assert!(text.contains("failed"));
+}
+
+#[test]
+fn run_action_line_preserves_the_complete_status_within_the_viewport() {
+    let line = run_action_line(RunActionLineSpec {
+        kind: "install",
+        item_name: "tree-sitter-cli",
+        action_name: "install tree-sitter-cli",
+        status_label: "no change",
+        status: Some(ActionStatus::NoChange),
+        active: false,
+        width: 160,
+        spinner_frame: 0,
+    });
+
+    assert!(line_text(&line).contains("no change"));
+    assert_eq!(line_display_width(&line), 160);
 }
 
 #[test]
@@ -804,15 +823,30 @@ fn successful_history_reload_clears_stale_page_notice() {
 }
 
 #[test]
-fn history_notice_reserves_a_row_above_content() {
-    let area = Rect::new(2, 4, 80, 10);
+fn history_footer_carries_the_notice() {
+    // After the chrome refactor the notice lives in the footer rather than
+    // reserving a content row; the screen still renders without panicking.
+    let backend = ratatui::backend::TestBackend::new(80, 12);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = App::new(Mode::History);
+    app.runs = vec![test_run(
+        RunStatus::Success,
+        vec![test_run_item("one", ActionStatus::NoChange, None)],
+    )];
+    app.status_message = "deleted run old-id".into();
+    app.status_kind = NoticeKind::Success;
 
-    assert_eq!(history_content_area(area, false), area);
-    assert_eq!(history_content_area(area, true), Rect::new(2, 5, 80, 9));
-    assert_eq!(
-        history_content_area(Rect::new(0, 0, 20, 0), true),
-        Rect::new(0, 1, 20, 0)
-    );
+    terminal
+        .draw(|frame| history::render_history(frame, &mut app))
+        .unwrap();
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(rendered.contains("deleted run old-id"));
 }
 
 #[test]
@@ -837,6 +871,88 @@ fn home_and_end_use_consistent_global_navigation() {
     assert_eq!(app.menu_state.selected(), Some(0));
     handle_key(&mut app, KeyCode::End).unwrap();
     assert_eq!(app.menu_state.selected(), Some(3));
+}
+
+#[test]
+fn main_menu_focus_keeps_a_stable_activity_first_launcher() {
+    let render_menu = |selected, width, height| {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let mut app = App::new(Mode::Deploy);
+        app.screen = Screen::MainMenu;
+        app.menu_state.select(Some(selected));
+        app.runs = vec![test_run(
+            RunStatus::Success,
+            vec![test_run_item("fish", ActionStatus::NoChange, None)],
+        )];
+
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let lines = (0..buffer.area().height)
+            .map(|y| {
+                (0..buffer.area().width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        let rows = ["Deploy", "Plan", "History", "Quit"]
+            .map(|title| {
+                lines
+                    .iter()
+                    .position(|line| line.contains(title))
+                    .expect("menu option is visible")
+            })
+            .to_vec();
+
+        (rows, lines.join("\n"))
+    };
+
+    let (deploy_rows, deploy_frame) = render_menu(0, 80, 24);
+    let (plan_rows, plan_frame) = render_menu(1, 80, 24);
+    let (compact_rows, compact_frame) = render_menu(2, 60, 18);
+    let (wide_rows, wide_frame) = render_menu(0, 160, 40);
+
+    assert_eq!(deploy_rows, plan_rows, "moving focus reflowed the menu");
+    assert!(deploy_rows[0] < 12, "launcher drifted below the upper half");
+    assert_eq!(compact_rows.len(), 4);
+    assert_eq!(
+        [
+            wide_rows[1] - wide_rows[0],
+            wide_rows[2] - wide_rows[1],
+            wide_rows[3] - wide_rows[2],
+        ],
+        [2, 2, 2],
+        "terminal height stretched the command rail"
+    );
+    let activity_row = wide_frame
+        .lines()
+        .position(|line| line.contains("last deployment succeeded"))
+        .expect("recent activity is visible");
+    assert_eq!(
+        activity_row - wide_rows[3],
+        5,
+        "recent activity drifted away from the launcher"
+    );
+    let activity_divider = wide_frame
+        .lines()
+        .skip(wide_rows[3] + 1)
+        .take(activity_row - wide_rows[3] - 1)
+        .find(|line| line.contains('─'))
+        .expect("activity divider is visible")
+        .trim();
+    assert!(
+        (72..=96).contains(&activity_divider.chars().count()),
+        "wide terminal stretched the content rail: {activity_divider}"
+    );
+    for frame in [&deploy_frame, &plan_frame] {
+        assert!(frame.contains("Sync dotfiles to this machine"));
+        assert!(frame.contains("Preview changes without executing"));
+        assert!(frame.contains("Browse past deployment records"));
+        assert!(frame.contains("last deployment succeeded"));
+        assert!(frame.contains("Jan 01 · deploy · 1 item · 0 failed"));
+    }
+    assert!(compact_frame.contains("Browse past deployment records"));
 }
 
 #[test]
@@ -969,10 +1085,13 @@ fn run_status_colors_are_shared_and_semantically_distinct() {
         run_status_color(RunStatus::Aborted),
         CATPPUCCIN_MOCHA.warning
     );
-    assert_ne!(
-        run_status_color(RunStatus::Running),
-        run_status_color(RunStatus::Aborted)
-    );
+    if CATPPUCCIN_MOCHA.running != Color::Reset || CATPPUCCIN_MOCHA.warning != Color::Reset {
+        assert_ne!(
+            run_status_color(RunStatus::Running),
+            run_status_color(RunStatus::Aborted)
+        );
+    }
+    assert_ne!(crate::theme::MOCHA.running, crate::theme::MOCHA.warning);
 }
 
 #[test]
@@ -1120,6 +1239,10 @@ fn run_arrow_keys_scroll_and_switch_filters() {
     handle_run(&mut app, KeyCode::Left).unwrap();
     assert_eq!(app.log_filter, LogFilter::Errors);
     handle_run(&mut app, KeyCode::Right).unwrap();
+    assert_eq!(app.log_filter, LogFilter::All);
+    handle_run(&mut app, KeyCode::Char('h')).unwrap();
+    assert_eq!(app.log_filter, LogFilter::Errors);
+    handle_run(&mut app, KeyCode::Char('l')).unwrap();
     assert_eq!(app.log_filter, LogFilter::All);
 }
 
@@ -1363,12 +1486,12 @@ fn run_view_helpers_preserve_status_action_and_overflow_semantics() {
     };
     let grouped = grouped_run_lines(make_lines(), 30, 4);
     assert_eq!(grouped.len(), 4);
-    assert!(lines_text(&grouped).contains("above"));
-    assert!(lines_text(&grouped).contains("below"));
+    assert!(lines_text(&grouped).contains("↑"));
+    assert!(lines_text(&grouped).contains("↓"));
     let ordered = ordered_run_lines(make_lines(), 30, 4);
     assert_eq!(ordered.len(), 4);
-    assert!(lines_text(&ordered).contains("above"));
-    assert!(lines_text(&ordered).contains("below"));
+    assert!(lines_text(&ordered).contains("↑"));
+    assert!(lines_text(&ordered).contains("↓"));
 }
 
 #[test]
@@ -1857,13 +1980,20 @@ fn review_body_shows_group_headers() {
     ];
     let mut scroll = 0;
 
-    let lines = review_body_lines(&entries, 76, 20, &mut scroll);
+    let expanded = BTreeSet::from([
+        ReviewGroup::Attention,
+        ReviewGroup::WillRun,
+        ReviewGroup::AlreadyOk,
+        ReviewGroup::Skipped,
+    ]);
+    let lines = review_body_lines(&entries, 76, 20, &mut scroll, &expanded, 0, false);
     let text = lines_text(&lines);
 
-    assert!(text.contains("Attention (1)"));
-    assert!(text.contains("Will Run (1)"));
-    assert!(text.contains("Already OK (1)"));
-    assert!(text.contains("Skipped (1)"));
+    assert!(text.contains("Attention"));
+    assert!(text.contains("Will Run"));
+    assert!(text.contains("Already OK"));
+    assert!(text.contains("Skipped"));
+    assert_eq!(text.matches("(1)").count(), 4);
     assert_eq!(scroll, 0);
 }
 
@@ -1883,12 +2013,52 @@ fn review_body_shows_scroll_markers() {
         .collect::<Vec<_>>();
     let mut scroll = 2;
 
-    let lines = review_body_lines(&entries, 76, 4, &mut scroll);
+    let expanded = BTreeSet::from([
+        ReviewGroup::Attention,
+        ReviewGroup::WillRun,
+        ReviewGroup::AlreadyOk,
+        ReviewGroup::Skipped,
+    ]);
+    let lines = review_body_lines(&entries, 76, 4, &mut scroll, &expanded, 0, false);
     let text = lines_text(&lines);
 
-    assert!(text.contains("2 above"));
-    assert!(text.contains("below"));
+    assert!(text.contains("↑ 2 more"));
+    assert!(text.contains("↓"));
     assert_eq!(lines.len(), 4);
+}
+
+#[test]
+fn review_group_focus_scrolls_the_target_header_into_view() {
+    let icon_set = icons::current();
+    let mut entries = (0..8)
+        .map(|index| ReviewEntry {
+            order: index,
+            item: format!("risk-{index}"),
+            kind: "shell",
+            kind_icon: icon_set.action_shell,
+            severity: ReviewSeverity::Warning,
+            status: "sudo".into(),
+            detail: String::new(),
+        })
+        .collect::<Vec<_>>();
+    entries.push(ReviewEntry {
+        order: 8,
+        item: "fish".into(),
+        kind: "install",
+        kind_icon: icon_set.action_install,
+        severity: ReviewSeverity::Run,
+        status: "missing".into(),
+        detail: String::new(),
+    });
+    let expanded = BTreeSet::from([ReviewGroup::Attention]);
+    let mut scroll = 0;
+
+    let lines = review_body_lines(&entries, 76, 4, &mut scroll, &expanded, 1, true);
+    let text = lines_text(&lines);
+
+    assert!(scroll > 0);
+    assert!(text.contains("Will Run"), "{text}");
+    assert!(text.contains('▎'), "{text}");
 }
 
 #[test]
@@ -1975,7 +2145,8 @@ fn review_navigation_running_guard_confirmation_and_back_are_consistent() {
 
     handle_confirm(&mut app, KeyCode::Down).unwrap();
     handle_confirm(&mut app, KeyCode::Char('j')).unwrap();
-    assert_eq!(app.review_scroll, 2);
+    assert_eq!(app.review_group_focus, 0);
+    assert_eq!(app.review_scroll, 0);
     handle_confirm(&mut app, KeyCode::Up).unwrap();
     handle_confirm(&mut app, KeyCode::Char('k')).unwrap();
     assert_eq!(app.review_scroll, 0);
@@ -2007,6 +2178,7 @@ fn review_navigation_running_guard_confirmation_and_back_are_consistent() {
     assert_eq!(app.status_message, "danger confirmed; press r to run once");
     handle_confirm(&mut app, KeyCode::Char('r')).unwrap();
     assert!(!app.review_danger_confirmed);
+    assert!(app.status_message.is_empty());
     assert_eq!(app.screen, Screen::ConfirmView);
 
     handle_confirm(&mut app, KeyCode::Esc).unwrap();
@@ -2417,4 +2589,305 @@ fn review_relative_config_path_uses_current_directory_for_conditions() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].severity, ReviewSeverity::Skip);
     assert_eq!(entries[0].status, "if skip");
+}
+
+#[test]
+fn shared_chrome_uses_theme_layers() {
+    let backend = ratatui::backend::TestBackend::new(80, 24);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = App::new(Mode::Deploy);
+    app.runs = vec![test_run(
+        RunStatus::Success,
+        vec![test_run_item("fish", ActionStatus::NoChange, None)],
+    )];
+
+    terminal.draw(|frame| render(&mut app, frame)).unwrap();
+
+    // Layout-agnostic: solid themes paint the canvas and panels. Transparent
+    // themes must leave every layer at the terminal default.
+    let cells = terminal.backend().buffer().content();
+    if CATPPUCCIN_MOCHA.bg == Color::Reset {
+        assert!(
+            cells.iter().all(|cell| cell.bg == Color::Reset),
+            "a component overwrote the transparent terminal background"
+        );
+    } else {
+        assert!(
+            cells.iter().any(|cell| cell.bg == CATPPUCCIN_MOCHA.bg),
+            "global theme background is missing"
+        );
+        assert!(
+            cells.iter().any(|cell| cell.bg == CATPPUCCIN_MOCHA.surface),
+            "surface layer is missing"
+        );
+        assert!(
+            cells.iter().all(|cell| cell.bg != Color::Reset),
+            "unpainted cells remain"
+        );
+    }
+}
+
+#[test]
+fn run_log_panel_uses_surface_background() {
+    let backend = ratatui::backend::TestBackend::new(80, 24);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = App::new(Mode::Deploy);
+    app.screen = Screen::RunView;
+    app.plan = Some(test_plan_with_items(&["fish", "ghostty"]));
+    app.progress = (1, 3);
+    app.current_item = Some(1);
+    app.current_log.push(LogLine {
+        text: "deploy started".into(),
+        fg: Some(CATPPUCCIN_MOCHA.text_muted),
+        indent: 0,
+        group: None,
+        kind: LogKind::System,
+    });
+
+    terminal.draw(|frame| render(&mut app, frame)).unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let cells = buffer.content();
+    if CATPPUCCIN_MOCHA.bg != Color::Reset {
+        assert!(
+            cells.iter().all(|cell| cell.bg != Color::Reset),
+            "unpainted cells remain"
+        );
+    }
+
+    // Locate the log panel by its title text instead of fixed coordinates.
+    let title_row = (0..buffer.area().height)
+        .find(|&y| {
+            (0..buffer.area().width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .contains("log · follow")
+        })
+        .expect("log panel title row exists");
+    // The panel lives inside the 1-cell screen margin, so the outer columns
+    // keep the global background; the panel columns must be surface.
+    let panel_columns = || 1..buffer.area().width - 1;
+    assert!(
+        panel_columns().all(|x| buffer[(x, title_row)].bg == CATPPUCCIN_MOCHA.surface),
+        "log panel title row is not surface-filled"
+    );
+    // The row below the title holds the log content on the same surface.
+    assert!(
+        panel_columns().all(|x| buffer[(x, title_row + 1)].bg == CATPPUCCIN_MOCHA.surface),
+        "log content area is not surface-filled"
+    );
+}
+
+#[test]
+fn compact_history_metadata_is_readable() {
+    assert_eq!(short_datetime("2026-07-05T12:34:56+08:00"), "Jul 05 12:34");
+    assert_eq!(short_run_id("01WEBDEMO0000000000000000"), "01WEBDEM…");
+    assert_eq!(short_run_id("short"), "short");
+}
+
+#[test]
+fn progress_bar_uses_partial_blocks() {
+    assert_eq!(run_progress_bar(1, 3, 10), "███▍░░░░░░");
+    assert_eq!(run_progress_bar(2, 3, 10), "██████▋░░░");
+}
+
+#[test]
+fn run_title_keeps_the_state_block_intact_on_narrow_terminals() {
+    let mut app = App::new(Mode::Deploy);
+    app.plan = Some(test_plan_with_items(&["fish"]));
+    app.progress = (1, 3);
+
+    for width in [50usize, 60, 72, 80, 120] {
+        let text = run_title(&app, width);
+
+        assert!(
+            display_width(&text) <= width,
+            "title overflows at {width}: {text}"
+        );
+        assert!(
+            text.contains("33%"),
+            "percentage dropped at {width}: {text}"
+        );
+        assert!(
+            text.contains("Run  ") || text.contains("─  "),
+            "state block is not separated from the title at {width}: {text}"
+        );
+    }
+}
+
+#[test]
+fn history_row_drops_the_run_id_before_the_config_name() {
+    fn render_history_at(width: u16) -> String {
+        let backend = ratatui::backend::TestBackend::new(width, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let mut app = App::new(Mode::History);
+        app.screen = Screen::HistoryView;
+        app.runs = vec![test_run(
+            RunStatus::Success,
+            vec![test_run_item("one", ActionStatus::NoChange, None)],
+        )];
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    let narrow = render_history_at(50);
+    assert!(narrow.contains("dotman.yaml"), "{narrow}");
+    assert!(narrow.contains("success"), "{narrow}");
+    assert!(!narrow.contains("test-run"), "{narrow}");
+
+    let wide = render_history_at(100);
+    assert!(wide.contains("dotman.yaml"), "{wide}");
+    assert!(wide.contains("test-run"), "{wide}");
+}
+
+#[test]
+fn review_group_focus_skips_empty_groups_and_space_toggles_details() {
+    let icon_set = icons::current();
+    let mut app = App::new(Mode::Deploy);
+    app.screen = Screen::ConfirmView;
+    app.review_entries = vec![
+        ReviewEntry {
+            order: 0,
+            item: "shell".into(),
+            kind: "shell",
+            kind_icon: icon_set.action_shell,
+            severity: ReviewSeverity::Warning,
+            status: "sudo".into(),
+            detail: "sudo command".into(),
+        },
+        ReviewEntry {
+            order: 1,
+            item: "fish".into(),
+            kind: "install",
+            kind_icon: icon_set.action_install,
+            severity: ReviewSeverity::Run,
+            status: "missing".into(),
+            detail: "brew install fish".into(),
+        },
+    ];
+
+    assert_eq!(app.review_group_focus, 0);
+    handle_confirm(&mut app, KeyCode::Tab).unwrap();
+    assert_eq!(app.review_group_focus, 1);
+    handle_confirm(&mut app, KeyCode::Tab).unwrap();
+    assert_eq!(app.review_group_focus, 0);
+
+    assert!(app.review_expanded_groups.contains(&ReviewGroup::Attention));
+    assert!(app.review_expanded_groups.contains(&ReviewGroup::WillRun));
+    handle_confirm(&mut app, KeyCode::Char('h')).unwrap();
+    assert!(!app.review_expanded_groups.contains(&ReviewGroup::Attention));
+    handle_confirm(&mut app, KeyCode::Char('l')).unwrap();
+    assert!(app.review_expanded_groups.contains(&ReviewGroup::Attention));
+    handle_confirm(&mut app, KeyCode::Char(' ')).unwrap();
+    assert!(!app.review_expanded_groups.contains(&ReviewGroup::Attention));
+}
+
+#[test]
+fn footer_uses_one_row_until_a_notice_is_present() {
+    assert_eq!(footer_height(""), 1);
+    assert_eq!(footer_height("saved"), 2);
+}
+
+#[test]
+fn vim_prefix_supports_gg_escape_and_timeout() {
+    let mut app = App::new(Mode::History);
+    app.screen = Screen::HistoryView;
+    app.runs = vec![
+        test_run(RunStatus::Success, vec![]),
+        test_run(RunStatus::Failed, vec![]),
+        test_run(RunStatus::Aborted, vec![]),
+    ];
+    app.history_state.select(Some(2));
+
+    handle_key(&mut app, KeyCode::Char('g')).unwrap();
+    assert!(app.vim_pending_g);
+    let help = vim_prefix_help(&app, Line::from("help"), 100);
+    assert!(line_text(&help).contains("g…"));
+    handle_key(&mut app, KeyCode::Char('g')).unwrap();
+    assert_eq!(app.history_state.selected(), Some(0));
+    assert!(!app.vim_pending_g);
+
+    handle_key(&mut app, KeyCode::Char('g')).unwrap();
+    handle_key(&mut app, KeyCode::Esc).unwrap();
+    assert_eq!(app.screen, Screen::HistoryView);
+    assert!(!app.vim_pending_g);
+
+    app.vim_pending_g = true;
+    app.vim_pending_g_since = Some(Instant::now() - Duration::from_secs(1));
+    assert!(app.tick());
+    assert!(!app.vim_pending_g);
+}
+
+#[test]
+fn control_keys_keep_modifiers_and_use_vim_page_semantics() {
+    let mut app = App::new(Mode::Deploy);
+    app.screen = Screen::RunView;
+    app.log_viewport_height = 6;
+    for index in 0..20 {
+        push_log(&mut app, &format!("line {index}"), None);
+    }
+    app.log_scroll = 0;
+    app.log_follow = false;
+
+    handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+    )
+    .unwrap();
+    assert_eq!(app.log_scroll, 3);
+    handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+    )
+    .unwrap();
+    assert_eq!(app.log_scroll, 0);
+    handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
+    )
+    .unwrap();
+    assert_eq!(app.log_scroll, 6);
+    handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
+    )
+    .unwrap();
+    assert_eq!(app.log_scroll, 0);
+
+    let abort_flag = Arc::new(AtomicBool::new(false));
+    app.abort_flag = Some(Arc::clone(&abort_flag));
+    handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    )
+    .unwrap();
+    assert!(abort_flag.load(Ordering::SeqCst));
+    assert_ne!(app.log_filter, LogFilter::Current);
+}
+
+#[test]
+fn history_uses_h_l_and_requires_dd_for_delete() {
+    let mut app = App::new(Mode::History);
+    app.screen = Screen::HistoryView;
+    app.runs = vec![test_run(RunStatus::Success, vec![])];
+    app.history_state.select(Some(0));
+
+    history::handle_history(&mut app, KeyCode::Char('d')).unwrap();
+    assert_eq!(app.runs.len(), 1);
+    assert!(app.history_delete_pending.is_some());
+    assert!(app.status_message.contains("press d again"));
+
+    history::handle_history(&mut app, KeyCode::Char('l')).unwrap();
+    assert_eq!(app.screen, Screen::RunReplay);
+    assert!(app.history_delete_pending.is_none());
+    history::handle_replay(&mut app, KeyCode::Char('h')).unwrap();
+    assert_eq!(app.screen, Screen::HistoryView);
+    history::handle_history(&mut app, KeyCode::Char('h')).unwrap();
+    assert_eq!(app.screen, Screen::MainMenu);
 }

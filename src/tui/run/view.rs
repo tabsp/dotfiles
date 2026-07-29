@@ -1,7 +1,10 @@
 use crate::icons;
 use crate::model::{Action, ActionStatus, Plan, Run, RunAction, RunItem, RunStatus};
 use crate::theme::CATPPUCCIN_MOCHA;
-use crate::tui::{App, display_width, fit_to_width, run_status_color};
+use crate::tui::{
+    App, display_width, fit_to_width, format_elapsed, run_status_color, screen_header_prefix,
+    scroll_marker_line,
+};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::sync::atomic::Ordering;
@@ -58,28 +61,107 @@ pub(in crate::tui) fn run_title_line(app: &App, width: usize) -> Line<'static> {
     } else {
         ("Running", app.progress.0, app.progress.1)
     };
-    let prefix = format!("{}  Run  ", icon_set.running);
-    let progress = format!(
-        "{state}  {done}/{total}  {}",
-        run_progress_bar(done, total, 10)
-    );
-    let divider_width = width.saturating_sub(display_width(&prefix) + display_width(&progress));
-    Line::from(vec![
-        Span::styled(
-            prefix,
-            Style::default()
-                .fg(CATPPUCCIN_MOCHA.fg_dim)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "─".repeat(divider_width),
+    let state_color = run_border_color(app, run_is_aborting(app));
+    let is_running = state == "Running";
+    let prefix = screen_header_prefix(icon_set.running, "Run");
+    const GAP: usize = 2;
+    let prefix_width = prefix
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum::<usize>();
+    let right_width = width.saturating_sub(prefix_width + GAP);
+    let elapsed = (is_running)
+        .then(|| {
+            app.run_started
+                .map(|started| format_elapsed(started.elapsed()))
+        })
+        .flatten();
+    let percentage = done
+        .saturating_mul(100)
+        .checked_div(total)
+        .map(|value| format!("{value}%"));
+    let build_right =
+        |show_spinner: bool, show_bar: bool, show_percentage: bool, show_elapsed: bool| {
+            let mut spans = Vec::new();
+            if is_running && show_spinner {
+                spans.push(Span::styled(
+                    format!(
+                        "{} ",
+                        icons::SPINNER_BRAILLE[app.spinner_frame % icons::SPINNER_BRAILLE.len()]
+                    ),
+                    Style::default().fg(CATPPUCCIN_MOCHA.running),
+                ));
+            }
+            spans.push(Span::styled(
+                state.to_string(),
+                Style::default()
+                    .fg(state_color)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                format!("  {done}/{total}"),
+                Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+            ));
+            if show_bar {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    run_progress_bar(done, total, 10),
+                    Style::default().fg(state_color),
+                ));
+            }
+            if show_percentage && let Some(percentage) = &percentage {
+                spans.push(Span::styled(
+                    format!("  {percentage}"),
+                    Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+                ));
+            }
+            if show_elapsed && let Some(elapsed) = &elapsed {
+                spans.push(Span::styled(
+                    format!("  {elapsed}"),
+                    Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+                ));
+            }
+            spans
+        };
+    let spans_width = |spans: &[Span<'_>]| {
+        spans
+            .iter()
+            .map(|span| display_width(span.content.as_ref()))
+            .sum::<usize>()
+    };
+
+    let mut show_spinner = true;
+    let mut show_bar = true;
+    let mut show_percentage = true;
+    let mut show_elapsed = true;
+    let mut right = build_right(show_spinner, show_bar, show_percentage, show_elapsed);
+    for hide in 0..4 {
+        if spans_width(&right) <= right_width {
+            break;
+        }
+        match hide {
+            0 => show_elapsed = false,
+            1 => show_percentage = false,
+            2 => show_bar = false,
+            _ => show_spinner = false,
+        }
+        right = build_right(show_spinner, show_bar, show_percentage, show_elapsed);
+    }
+
+    let used = prefix_width + spans_width(&right) + GAP;
+    let rule = width.saturating_sub(used + 1);
+    let mut spans = prefix;
+    if rule > 0 {
+        spans.push(Span::styled(
+            format!(" {}", "─".repeat(rule)),
             Style::default().fg(CATPPUCCIN_MOCHA.border_subtle),
-        ),
-        Span::styled(
-            progress,
-            Style::default().fg(run_border_color(app, run_is_aborting(app))),
-        ),
-    ])
+        ));
+    }
+    // Always keep the state block visually detached from the title, even when
+    // the terminal is too narrow for a rule.
+    spans.push(Span::raw(" ".repeat(GAP)));
+    spans.extend(right);
+    Line::from(spans)
 }
 
 pub(in crate::tui) fn run_status_line(app: &App, width: usize) -> Line<'static> {
@@ -205,25 +287,34 @@ fn run_item_was_unselected(item: &RunItem) -> bool {
     item.status == ActionStatus::WillSkip && item.started_at.is_none()
 }
 
+/// Progress bar with 1/8-cell precision: full cells use █, the in-progress
+/// cell uses a partial block, and the remainder is the ░ track.
 pub(in crate::tui) fn run_progress_bar(done: usize, total: usize, width: usize) -> String {
+    const PARTIAL: [char; 8] = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
     if width == 0 {
         return String::new();
     }
     if total == 0 {
         return "░".repeat(width);
     }
-    let filled = (done.saturating_mul(width) + total / 2) / total;
-    format!(
-        "{}{}",
-        "█".repeat(filled.min(width)),
-        "░".repeat(width.saturating_sub(filled))
-    )
+    let eighths = ((done as u128 * width as u128 * 8 + total as u128 / 2) / total as u128) as usize;
+    let full = (eighths / 8).min(width);
+    let rem = eighths % 8;
+    let mut bar = String::with_capacity(width);
+    bar.push_str(&"█".repeat(full));
+    let mut used = full;
+    if used < width && rem > 0 {
+        bar.push(PARTIAL[rem]);
+        used += 1;
+    }
+    bar.push_str(&"░".repeat(width - used));
+    bar
 }
 
 pub(in crate::tui) fn run_log_panel_height(total_height: u16) -> u16 {
-    let available = total_height.saturating_sub(2);
-    let max_log = available.saturating_sub(4);
-    let desired = if available >= 24 { 10 } else { 7 };
+    let inner_height = total_height.saturating_sub(2);
+    let max_log = inner_height.saturating_sub(7);
+    let desired = if inner_height >= 24 { 10 } else { 7 };
     desired.min(max_log)
 }
 
@@ -260,8 +351,85 @@ pub(in crate::tui) fn run_body_lines(app: &App, width: usize, height: usize) -> 
     if finished_run_for_view(app).is_some() {
         grouped_run_lines(display_lines, width, height)
     } else {
-        ordered_run_lines(display_lines, width, height)
+        live_run_lines(display_lines, width, height)
     }
+}
+
+const RECENT_RUN_ACTIVITY: usize = 5;
+
+pub(in crate::tui) fn live_run_lines(
+    display_lines: Vec<RunDisplayLine>,
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
+    if height == 0 {
+        return Vec::new();
+    }
+    let active = display_lines
+        .iter()
+        .find(|line| line.active)
+        .map(|line| line.line.clone());
+    let completed = display_lines
+        .iter()
+        .filter(|line| {
+            !line.active
+                && !matches!(
+                    line.group,
+                    RunGroup::Pending | RunGroup::Skipped | RunGroup::NotRun
+                )
+        })
+        .map(|line| line.line.clone())
+        .collect::<Vec<_>>();
+    let remaining = display_lines
+        .iter()
+        .filter(|line| line.group == RunGroup::Pending)
+        .count();
+    let skipped = display_lines
+        .iter()
+        .filter(|line| line.group == RunGroup::Skipped)
+        .count();
+
+    let mut lines = Vec::new();
+    if let Some(active) = active {
+        lines.push(Line::from(Span::styled(
+            "Current action",
+            Style::default()
+                .fg(CATPPUCCIN_MOCHA.running)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(active);
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Preparing deployment…",
+            Style::default().fg(CATPPUCCIN_MOCHA.running),
+        )));
+    }
+
+    if !completed.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Recent activity",
+            Style::default()
+                .fg(CATPPUCCIN_MOCHA.text_muted)
+                .add_modifier(Modifier::BOLD),
+        )));
+        let start = completed.len().saturating_sub(RECENT_RUN_ACTIVITY);
+        lines.extend(completed.into_iter().skip(start));
+    }
+    if remaining > 0 {
+        lines.push(Line::from(Span::styled(
+            fit_to_width(&format!("  {remaining} actions remaining"), width),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        )));
+    }
+    if skipped > 0 {
+        lines.push(Line::from(Span::styled(
+            fit_to_width(&format!("  {skipped} actions skipped"), width),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        )));
+    }
+    lines.truncate(height);
+    lines
 }
 
 pub(in crate::tui) fn live_run_display_lines(
@@ -411,23 +579,18 @@ pub(in crate::tui) fn grouped_run_lines(
     if start > 0
         && let Some(first) = visible.first_mut()
     {
-        *first = Line::from(Span::styled(
-            fit_to_width(&format!("  ... {start} above"), width),
-            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
-        ));
+        *first = scroll_marker_line(true, start, width);
     }
     let below = all_lines.len().saturating_sub(end);
     if below > 0
         && let Some(last) = visible.last_mut()
     {
-        *last = Line::from(Span::styled(
-            fit_to_width(&format!("  ... {below} below"), width),
-            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
-        ));
+        *last = scroll_marker_line(false, below, width);
     }
     visible
 }
 
+#[cfg(test)]
 pub(in crate::tui) fn ordered_run_lines(
     display_lines: Vec<RunDisplayLine>,
     width: usize,
@@ -453,19 +616,13 @@ pub(in crate::tui) fn ordered_run_lines(
     if start > 0
         && let Some(first) = visible.first_mut()
     {
-        *first = Line::from(Span::styled(
-            fit_to_width(&format!("  ... {start} above"), width),
-            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
-        ));
+        *first = scroll_marker_line(true, start, width);
     }
     let below = all_lines.len().saturating_sub(end);
     if below > 0
         && let Some(last) = visible.last_mut()
     {
-        *last = Line::from(Span::styled(
-            fit_to_width(&format!("  ... {below} below"), width),
-            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
-        ));
+        *last = scroll_marker_line(false, below, width);
     }
     visible
 }
@@ -492,57 +649,18 @@ pub(in crate::tui) fn run_group_header_line(
     width: usize,
 ) -> Line<'static> {
     let icon_set = icons::current();
-    let (icon, label, style) = match group {
-        RunGroup::Failed => (
-            icon_set.failed,
-            "Failed",
-            Style::default().fg(CATPPUCCIN_MOCHA.danger),
-        ),
-        RunGroup::Aborted => (
-            icon_set.warning,
-            "Aborted",
-            Style::default().fg(CATPPUCCIN_MOCHA.warning),
-        ),
-        RunGroup::Running => (
-            icon_set.running,
-            "Running",
-            Style::default().fg(CATPPUCCIN_MOCHA.running),
-        ),
-        RunGroup::Ran => (
-            icon_set.success,
-            "Ran",
-            Style::default().fg(CATPPUCCIN_MOCHA.success),
-        ),
-        RunGroup::Changed => (
-            icon_set.success,
-            "Changed",
-            Style::default().fg(CATPPUCCIN_MOCHA.success),
-        ),
-        RunGroup::NoChange => (
-            icon_set.info,
-            "No Change",
-            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
-        ),
-        RunGroup::NotRun => (
-            icon_set.skipped,
-            "Not Run",
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
-        RunGroup::Skipped => (
-            icon_set.skipped,
-            "Skipped",
-            Style::default().fg(CATPPUCCIN_MOCHA.skip),
-        ),
-        RunGroup::Pending => (
-            icon_set.pending,
-            "Pending",
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
+    let (icon, label, color) = match group {
+        RunGroup::Failed => (icon_set.failed, "Failed", CATPPUCCIN_MOCHA.danger),
+        RunGroup::Aborted => (icon_set.warning, "Aborted", CATPPUCCIN_MOCHA.warning),
+        RunGroup::Running => (icon_set.running, "Running", CATPPUCCIN_MOCHA.running),
+        RunGroup::Ran => (icon_set.success, "Ran", CATPPUCCIN_MOCHA.success),
+        RunGroup::Changed => (icon_set.success, "Changed", CATPPUCCIN_MOCHA.success),
+        RunGroup::NoChange => (icon_set.info, "No Change", CATPPUCCIN_MOCHA.text_muted),
+        RunGroup::NotRun => (icon_set.skipped, "Not Run", CATPPUCCIN_MOCHA.fg_dim),
+        RunGroup::Skipped => (icon_set.skipped, "Skipped", CATPPUCCIN_MOCHA.skip),
+        RunGroup::Pending => (icon_set.pending, "Pending", CATPPUCCIN_MOCHA.fg_dim),
     };
-    Line::from(Span::styled(
-        fit_to_width(&format!("{icon} {label} ({count})"), width),
-        style.add_modifier(Modifier::BOLD),
-    ))
+    crate::tui::group_header_line(icon, label, count, color, width)
 }
 
 pub(in crate::tui) fn finished_action_line(
@@ -574,8 +692,6 @@ pub(in crate::tui) struct RunActionLineSpec<'a> {
 }
 
 pub(in crate::tui) fn run_action_line(spec: RunActionLineSpec<'_>) -> Line<'static> {
-    let status_width = 10;
-    let left_width = spec.width.saturating_sub(status_width + 3);
     let name = if spec.action_name.is_empty() || spec.action_name == spec.item_name {
         spec.item_name.to_string()
     } else {
@@ -589,14 +705,21 @@ pub(in crate::tui) fn run_action_line(spec: RunActionLineSpec<'_>) -> Line<'stat
     } else {
         run_status_icon(spec.status)
     };
+    let kind_icon = run_action_kind_icon(spec.kind);
+    let prefix_width = display_width(icon.content.as_ref()) + 1 + display_width(kind_icon) + 1;
+    let status_gap = 1;
+    let status_width = 10.min(
+        spec.width
+            .saturating_sub(prefix_width.saturating_add(status_gap)),
+    );
+    let left_width = spec
+        .width
+        .saturating_sub(prefix_width + status_gap + status_width);
     let status_style = run_status_style(spec.status, spec.active);
     Line::from(vec![
         icon,
         Span::raw(" "),
-        Span::styled(
-            run_action_kind_icon(spec.kind),
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
+        Span::styled(kind_icon, Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
         Span::raw(" "),
         Span::styled(
             fit_to_width(&name, left_width),

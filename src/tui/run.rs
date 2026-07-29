@@ -1,10 +1,13 @@
 use crate::theme::CATPPUCCIN_MOCHA;
-use crate::tui::{App, LogFilter, NoticeKind, RunThreadResult, Screen, run_help_line};
+use crate::tui::{
+    App, FooterNotice, LogFilter, NoticeKind, RunThreadResult, Screen, footer_height,
+    run_help_line, screen_footer, surface_panel,
+};
 use anyhow::Result;
 use crossterm::event::{KeyCode, MouseEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -23,7 +26,7 @@ pub(super) mod view;
 pub(super) use events::drain_run_events;
 use events::{apply_run_thread_result, clear_active_run_state, drain_all_run_events};
 use log::{
-    clamp_log_scroll, log_bottom_scroll, log_scroll_offset, push_log, run_log_title,
+    clamp_log_scroll, log_bottom_scroll, log_scroll_offset, push_log, run_log_title_line,
     scroll_run_log, scroll_run_log_lines, toggle_current_log_group, visible_log_lines,
 };
 pub(super) use view::{
@@ -44,12 +47,12 @@ pub(super) fn handle_run(app: &mut App, key: KeyCode) -> Result<()> {
         KeyCode::Down => scroll_run_log_lines(app, 1),
         KeyCode::Char('k') => scroll_run_log_lines(app, -1),
         KeyCode::Char('j') => scroll_run_log_lines(app, 1),
-        KeyCode::Left => {
+        KeyCode::Left | KeyCode::Char('h') => {
             app.log_filter = app.log_filter.previous();
             app.log_follow = true;
             app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
         }
-        KeyCode::Right => {
+        KeyCode::Right | KeyCode::Char('l') => {
             app.log_filter = app.log_filter.next();
             app.log_follow = true;
             app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
@@ -111,6 +114,11 @@ pub(super) fn jump_run_top(app: &mut App) {
 pub(super) fn jump_run_bottom(app: &mut App) {
     app.log_follow = true;
     app.log_scroll = log_bottom_scroll(app, app.log_viewport_height.max(1));
+}
+
+pub(super) fn scroll_run_half_page(app: &mut App, direction: isize) {
+    let amount = (app.log_viewport_height.max(2) / 2) as isize;
+    scroll_run_log_lines(app, direction.signum() * amount);
 }
 
 pub(super) fn start_run(app: &mut App) {
@@ -215,14 +223,16 @@ pub(super) fn render_run(f: &mut Frame, app: &mut App) {
 
     let aborting = run_is_aborting(app);
     let finished = run_is_terminal(app);
+    let footer_size = footer_height(&app.status_message);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
+        .margin(1)
         .constraints([
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(3),
             Constraint::Length(run_log_panel_height(area.height)),
-            Constraint::Length(1),
+            Constraint::Length(footer_size),
         ])
         .split(area);
 
@@ -237,33 +247,45 @@ pub(super) fn render_run(f: &mut Frame, app: &mut App) {
     );
 
     let step_lines = run_body_lines(app, usize::from(chunks[2].width), chunks[2].height as usize);
-    f.render_widget(
-        Paragraph::new(step_lines).block(Block::default().borders(Borders::NONE)),
-        chunks[2],
-    );
+    f.render_widget(Paragraph::new(step_lines), chunks[2]);
 
-    let log_viewport_height = chunks[3].height.saturating_sub(2).max(1) as usize;
+    // Borderless log panel: surface fill + inline title row.
+    f.render_widget(surface_panel(), chunks[3]);
+    let panel_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(chunks[3]);
+    f.render_widget(Paragraph::new(run_log_title_line(app)), panel_rows[0]);
+    let log_area = ratatui::layout::Rect {
+        x: panel_rows[1].x.saturating_add(1),
+        y: panel_rows[1].y,
+        width: panel_rows[1].width.saturating_sub(2),
+        height: panel_rows[1].height,
+    };
+    let log_viewport_height = usize::from(log_area.height).max(1);
     app.log_viewport_height = log_viewport_height;
     clamp_log_scroll(app, log_viewport_height);
     let log_lines = visible_log_lines(app, log_viewport_height);
     let log_scroll = log_scroll_offset(app, log_viewport_height);
-    f.render_widget(
-        Paragraph::new(log_lines)
-            .block(
-                Block::default()
-                    .title(run_log_title(app))
-                    .borders(Borders::ALL)
-                    .border_type(ratatui::widgets::BorderType::Plain),
-            )
-            .scroll((log_scroll, 0)),
-        chunks[3],
-    );
+    f.render_widget(Paragraph::new(log_lines).scroll((log_scroll, 0)), log_area);
 
-    let help = Paragraph::new(run_help_line(
+    let notice = (!finished && !app.status_message.is_empty()).then(|| FooterNotice {
+        message: &app.status_message,
+        kind: app.status_kind,
+    });
+    let footer = screen_footer(
+        notice,
+        crate::tui::vim_prefix_help(
+            app,
+            run_help_line(
+                usize::from(chunks[4].width),
+                aborting,
+                finished,
+                app.log_follow,
+            ),
+            usize::from(chunks[4].width),
+        ),
         usize::from(chunks[4].width),
-        aborting,
-        finished,
-        app.log_follow,
-    ));
-    f.render_widget(help, chunks[4]);
+    );
+    f.render_widget(footer, chunks[4]);
 }

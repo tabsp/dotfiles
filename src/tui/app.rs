@@ -19,6 +19,9 @@ pub struct App {
     pub runs: Vec<Run>,
     pub(super) review_entries: Vec<review::ReviewEntry>,
     pub(super) review_scroll: usize,
+    pub(super) review_group_focus: usize,
+    pub(super) review_follow_group_focus: bool,
+    pub(super) review_expanded_groups: BTreeSet<review::ReviewGroup>,
     pub(super) review_danger_confirmed: bool,
     pub(super) review_thread: Option<std::thread::JoinHandle<Vec<review::ReviewEntry>>>,
     pub menu_state: ListState,
@@ -37,6 +40,8 @@ pub struct App {
     pub status_is_focus_info: bool,
     pub should_quit: bool,
     pub vim_pending_g: bool,
+    pub vim_pending_g_since: Option<Instant>,
+    pub(super) history_delete_pending: Option<String>,
     pub dirty: bool,
     // For RunView
     pub spinner_frame: usize,
@@ -142,6 +147,9 @@ impl App {
             runs: Vec::new(),
             review_entries: Vec::new(),
             review_scroll: 0,
+            review_group_focus: 0,
+            review_follow_group_focus: true,
+            review_expanded_groups: review::default_expanded_groups(),
             review_danger_confirmed: false,
             review_thread: None,
             menu_state: list_state,
@@ -160,6 +168,8 @@ impl App {
             status_is_focus_info: false,
             should_quit: false,
             vim_pending_g: false,
+            vim_pending_g_since: None,
+            history_delete_pending: None,
             dirty: false,
             spinner_frame: 0,
             run_thread: None,
@@ -223,6 +233,9 @@ impl App {
         self.review_entries.clear();
         self.review_thread = None;
         self.review_scroll = 0;
+        self.review_group_focus = 0;
+        self.review_follow_group_focus = true;
+        self.review_expanded_groups = review::default_expanded_groups();
         self.review_danger_confirmed = false;
         self.plan_exit_pending = false;
         plan::select_first_plan_row(
@@ -235,8 +248,16 @@ impl App {
         Ok(())
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> bool {
         self.spinner_frame = (self.spinner_frame + 1) % icons::SPINNER_BRAILLE.len();
+        let pending_expired = self
+            .vim_pending_g_since
+            .is_some_and(|started| started.elapsed() >= Duration::from_millis(900));
+        if pending_expired {
+            self.vim_pending_g = false;
+            self.vim_pending_g_since = None;
+        }
+        pending_expired
     }
 }
 

@@ -128,22 +128,29 @@ dotman plan --headless       # headless: 输出 JSON plan
 
 Footer 只显示当前页面的主快捷键：
 
-| 页面         | 主快捷键                                                            |
-| ------------ | ------------------------------------------------------------------- |
-| 主菜单       | `↑↓` 导航，`Enter` 打开，`q` 退出                                   |
-| Plan         | `↑↓` 导航，`Space` 切换，`s` 保存，`r` 进入 Review，`q` 返回        |
-| Review       | `↑↓` 滚动，`r` 执行，`q` 返回                                       |
-| Run / Result | `↑↓` 滚动，`Tab` 过滤，`Enter` 折叠，暂停时 `f` 跟随，`q` 中止/返回 |
-| History      | `↑↓` 导航，`Enter` 打开，`d` 删除，`q` 返回                         |
-| 历史回放     | `↑↓` 导航，`Space` 折叠，`q` 返回                                   |
+| 页面         | 主快捷键                                                          |
+| ------------ | ----------------------------------------------------------------- |
+| 主菜单       | `↑↓` 导航，`Enter` 打开，`q` 退出                                 |
+| Plan         | `↑↓` 导航，`Space` 切换，`s` 保存，`r` 进入 Review，`q` 返回      |
+| Review       | `j/k` 切换分组，`h/l` 折叠，`Space` 切换，`r` 执行，`q` 返回      |
+| Run / Result | `j/k` 滚动，`h/l` 过滤，`Enter` 折叠，`f` 跟随，`q/Esc` 中止/返回 |
+| History      | `j/k` 导航，`l` 打开，`dd` 删除，`h` 返回                         |
+| 历史回放     | `j/k` 导航，`h/l` 折叠，`Space` 切换，`q` 返回                    |
 
 主菜单直达键（`d` 部署、`p` 计划、`h` 历史）、Vim 导航（`j/k`、`gg`、`G`）、
-`Home/End`、`PageUp/PageDown`、方向键切换过滤器，以及等价的 `Enter`/`Space`
-操作仍然可用，但不在 footer 中提示。
+`Home/End`、`PageUp/PageDown`、对应的方向键，以及各页面专用的
+`Enter`/`Space` 操作仍然可用，但不在 footer 中提示。`Ctrl-U/D` 移动半页，
+`Ctrl-B/F` 移动整页，`Ctrl-C` 按当前页面的安全语义返回或请求中止。
 
 结果名称有明确区分：**Ran** 表示 shell 命令已执行；**Changed** 表示 dotman
 完成了安装、创建、链接、备份或清理。错误优先于警告展示；历史保存失败时，
 最终运行结果仍保持可见。
+
+TUI 默认使用 `DOTMAN_THEME=auto`。auto 会保留终端原生或透明背景，并根据
+`COLORFGBG` 选择 Catppuccin Mocha 或 Latte 的前景色与语义色；无法检测背景时
+回退到终端默认前景色与 ANSI 语义色。显式设置 `mocha` 或 `latte` 才会启用
+对应的实色背景。`terminal` 只是透明 auto 模式的兼容别名，不再代表另一套
+配色；`ansi` 使用透明背景和 16 色强调色，`NO_COLOR` 会禁用配色。
 
 ## 配置
 

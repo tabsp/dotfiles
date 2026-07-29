@@ -1,5 +1,236 @@
 use super::*;
 
+// ---------------- shared chrome ----------------
+
+/// Apply the active background policy across the frame. Transparent themes use
+/// `Color::Reset`; explicit solid themes provide an RGB canvas color.
+pub(super) fn paint_background(f: &mut Frame) {
+    f.render_widget(
+        Block::default().style(Style::default().bg(CATPPUCCIN_MOCHA.bg)),
+        f.area(),
+    );
+}
+
+/// Panel/card layer. It remains transparent when the active theme does.
+pub(super) fn surface_panel() -> Block<'static> {
+    Block::default().style(Style::default().bg(CATPPUCCIN_MOCHA.surface))
+}
+
+pub(super) fn screen_header_prefix(icon: &str, name: &str) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(
+            format!("{icon}  "),
+            Style::default().fg(CATPPUCCIN_MOCHA.primary),
+        ),
+        Span::styled("dotman", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+        Span::styled(" · ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+        Span::styled(
+            name.to_string(),
+            Style::default()
+                .fg(CATPPUCCIN_MOCHA.fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]
+}
+
+pub(super) fn screen_header(
+    icon: &str,
+    name: &str,
+    meta: Vec<Span<'static>>,
+    width: usize,
+) -> Line<'static> {
+    let mut spans = screen_header_prefix(icon, name);
+    if !meta.is_empty() {
+        spans.push(Span::raw("  "));
+        spans.extend(meta);
+    }
+    let used: usize = spans
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum();
+    let rule = width.saturating_sub(used + 1);
+    if rule > 0 {
+        spans.push(Span::styled(
+            format!(" {}", "─".repeat(rule)),
+            Style::default().fg(CATPPUCCIN_MOCHA.border_subtle),
+        ));
+    }
+    Line::from(spans)
+}
+
+pub(super) struct FooterNotice<'a> {
+    pub message: &'a str,
+    pub kind: NoticeKind,
+}
+
+/// First footer line: transient notice. Info messages stay quiet (message
+/// only); warnings and errors get an explicit bold label.
+pub(super) fn footer_notice_line(notice: Option<FooterNotice<'_>>, width: usize) -> Line<'static> {
+    let Some(notice) = notice.filter(|notice| !notice.message.is_empty()) else {
+        return Line::from("");
+    };
+    let style = notice_style(notice.kind);
+    if matches!(notice.kind, NoticeKind::Info) {
+        return Line::from(Span::styled(
+            fit_to_width(&format!("  {}", notice.message), width),
+            style,
+        ));
+    }
+    let prefix = format!("  {}  ", notice_label(notice.kind));
+    Line::from(vec![
+        Span::styled(prefix.clone(), style.add_modifier(Modifier::BOLD)),
+        Span::styled(
+            fit_to_width(notice.message, width.saturating_sub(display_width(&prefix))),
+            style,
+        ),
+    ])
+}
+
+pub(super) fn screen_footer(
+    notice: Option<FooterNotice<'_>>,
+    help: Line<'static>,
+    width: usize,
+) -> Paragraph<'static> {
+    let lines = if notice
+        .as_ref()
+        .is_some_and(|notice| !notice.message.is_empty())
+    {
+        vec![footer_notice_line(notice, width), help]
+    } else {
+        vec![help]
+    };
+    Paragraph::new(lines).style(Style::default().bg(CATPPUCCIN_MOCHA.surface))
+}
+
+pub(super) fn footer_height(message: &str) -> u16 {
+    if message.is_empty() { 1 } else { 2 }
+}
+
+pub(super) fn vim_prefix_help(app: &App, help: Line<'static>, width: usize) -> Line<'static> {
+    if !app.vim_pending_g {
+        return help;
+    }
+    let prefix = vec![
+        Span::styled(
+            "g…",
+            Style::default()
+                .fg(CATPPUCCIN_MOCHA.primary)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+    ];
+    let prefix_width = 4;
+    if prefix_width + line_display_width(&help) > width {
+        return Line::from(prefix);
+    }
+    let mut spans = prefix;
+    spans.extend(help.spans);
+    Line::from(spans)
+}
+
+pub(super) fn scroll_marker_line(above: bool, count: usize, width: usize) -> Line<'static> {
+    let arrow = if above { "↑" } else { "↓" };
+    Line::from(Span::styled(
+        fit_to_width(&format!("  {arrow} {count} more"), width),
+        Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+    ))
+}
+
+/// Group header: icon + label in bold group color, count dimmed.
+pub(super) fn group_header_line(
+    icon: &str,
+    label: &str,
+    count: usize,
+    color: Color,
+    width: usize,
+) -> Line<'static> {
+    let head = format!("{icon} {label}");
+    let tail = format!(" ({count})");
+    let padding = width.saturating_sub(display_width(&head) + display_width(&tail));
+    Line::from(vec![
+        Span::styled(
+            head,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(tail, Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
+        Span::raw(" ".repeat(padding)),
+    ])
+}
+
+/// "2026-07-05T12:00:00+08:00" -> "Jul 05 12:00"; falls back to the date part.
+pub(super) fn short_datetime(rfc3339: &str) -> String {
+    let fallback = || rfc3339.split('T').next().unwrap_or(rfc3339).to_string();
+    let Ok(parsed) =
+        time::OffsetDateTime::parse(rfc3339, &time::format_description::well_known::Rfc3339)
+    else {
+        return fallback();
+    };
+    static FORMAT: &[time::format_description::FormatItem<'static>] =
+        time::macros::format_description!("[month repr:short] [day] [hour]:[minute]");
+    parsed.format(FORMAT).unwrap_or_else(|_| fallback())
+}
+
+pub(super) fn relative_datetime(rfc3339: &str) -> String {
+    let Ok(parsed) =
+        time::OffsetDateTime::parse(rfc3339, &time::format_description::well_known::Rfc3339)
+    else {
+        return short_datetime(rfc3339);
+    };
+    let elapsed = time::OffsetDateTime::now_utc() - parsed;
+    if elapsed.is_negative() {
+        return short_datetime(rfc3339);
+    }
+    let seconds = elapsed.whole_seconds();
+    if seconds < 60 {
+        "just now".into()
+    } else if seconds < 3_600 {
+        format!("{}m ago", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("{}h ago", seconds / 3_600)
+    } else if seconds < 2_592_000 {
+        format!("{}d ago", seconds / 86_400)
+    } else {
+        short_datetime(rfc3339)
+    }
+}
+
+pub(super) fn short_run_id(id: &str) -> String {
+    let mut chars = id.chars();
+    let short = chars.by_ref().take(8).collect::<String>();
+    if chars.next().is_some() {
+        format!("{short}…")
+    } else {
+        short
+    }
+}
+
+pub(super) fn format_elapsed(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m {:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {:02}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
+pub(super) fn plan_mode_label(mode: PlanMode) -> &'static str {
+    match mode {
+        PlanMode::Deploy => "deploy",
+    }
+}
+
+pub(super) fn mode_label(mode: &Mode) -> &'static str {
+    match mode {
+        Mode::Menu => "menu",
+        Mode::Deploy => "deploy",
+        Mode::Plan => "plan",
+        Mode::History => "history",
+        Mode::Run(_) => "run",
+    }
+}
+
 pub(super) fn span_bg_style(bg: Option<Color>) -> Style {
     if let Some(bg) = bg {
         Style::default().bg(bg)
@@ -51,7 +282,7 @@ pub(super) fn notice_style(kind: NoticeKind) -> Style {
 pub(super) fn notice_label(kind: NoticeKind) -> &'static str {
     match kind {
         NoticeKind::Info => "info",
-        NoticeKind::Success => "saved",
+        NoticeKind::Success => "done",
         NoticeKind::Warning => "warning",
         NoticeKind::Error => "error",
     }
@@ -149,9 +380,21 @@ pub(super) fn plan_help_line(width: usize, read_only: bool) -> Line<'static> {
 }
 
 pub(super) fn review_help_line(width: usize) -> Line<'static> {
-    let full = [("↑↓", " Scroll  "), ("r", " Run  "), ("q", " Back")];
-    let short = [("↑↓", " "), ("r", " "), ("q", "")];
-    let compact = [("↑↓", " "), ("r", " "), ("q", "")];
+    let full = [
+        ("↑↓", " Group  "),
+        ("h/l", " Fold  "),
+        ("Space", " Toggle  "),
+        ("r", " Run  "),
+        ("q", " Back"),
+    ];
+    let short = [
+        ("↑↓", " "),
+        ("h/l", " "),
+        ("Spc", " "),
+        ("r", " "),
+        ("q", ""),
+    ];
+    let compact = [("h/l", " "), ("Spc", " "), ("r", " "), ("q", "")];
 
     for parts in [&full[..], &short[..], &compact[..]] {
         let line = help_line_from_parts(parts);
@@ -170,7 +413,7 @@ pub(super) fn run_help_line(
     log_follow: bool,
 ) -> Line<'static> {
     if aborting {
-        let full = [("q", " Stopping")];
+        let full = [("q/Esc", " Stopping")];
         let compact = [("q", "")];
         for parts in [&full[..], &compact[..]] {
             let line = help_line_from_parts(parts);
@@ -183,22 +426,22 @@ pub(super) fn run_help_line(
 
     const PAUSED_FULL: &[(&str, &str)] = &[
         ("↑↓", " Scroll  "),
-        ("Tab", " Filter  "),
+        ("h/l", " Filter  "),
         ("Enter", " Fold  "),
         ("f", " Follow  "),
-        ("q", " Abort"),
+        ("q/Esc", " Abort"),
     ];
     const FINISHED_FULL: &[(&str, &str)] = &[
         ("↑↓", " Scroll  "),
-        ("Tab", " Filter  "),
+        ("h/l", " Filter  "),
         ("Enter", " Fold  "),
         ("q", " Back"),
     ];
     const RUNNING_FULL: &[(&str, &str)] = &[
         ("↑↓", " Scroll  "),
-        ("Tab", " Filter  "),
+        ("h/l", " Filter  "),
         ("Enter", " Fold  "),
-        ("q", " Abort"),
+        ("q/Esc", " Abort"),
     ];
     const PAUSED_COMPACT: &[(&str, &str)] = &[("↑↓", " "), ("f", " "), ("q", "")];
     const COMPACT: &[(&str, &str)] = &[("↑↓", " "), ("q", "")];

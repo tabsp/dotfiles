@@ -77,49 +77,39 @@ pub(super) fn handle_main_menu(app: &mut App, key: KeyCode) -> Result<()> {
 }
 
 pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
-    fn fmt_date(s: &str) -> String {
-        // RFC 3339: "2026-07-05T12:00:00+08:00" → "2026-07-05"
-        s.split('T').next().unwrap_or(s).to_string()
-    }
-
     let icon_set = icons::current();
     let area = f.area();
     let density = layout_density(area.width, area.height);
-    let has_run = !app.runs.is_empty();
-    let summary_size: u16 = if has_run { 3 } else { 2 };
-    let menu_height = match density {
-        LayoutDensity::Compact => 9,
-        LayoutDensity::Normal => 15,
-    };
+    // Keep the launcher as one compact composition at every terminal height.
+    // Extra rows belong below the content; stretching command gaps makes focus
+    // movement feel discontinuous and disconnects recent activity from actions.
+    const MENU_HEIGHT: u16 = 8;
+    const MENU_ACTIVITY_GAP: u16 = 1;
+    const ACTIVITY_HEIGHT: u16 = 4;
+    const CONTENT_MAX_WIDTH: u16 = 96;
+    let content_height = MENU_HEIGHT + MENU_ACTIVITY_GAP + ACTIVITY_HEIGHT;
+    let footer_size = footer_height(&app.status_message);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
             Constraint::Length(1),
-            Constraint::Length(menu_height),
-            Constraint::Length(summary_size),
-            Constraint::Length(1),
+            Constraint::Min(content_height),
+            Constraint::Length(footer_size),
         ])
         .split(area);
 
-    let title_prefix = format!("{}  dotman - Main Menu ", icon_set.app);
-    let divider_width = usize::from(chunks[0].width).saturating_sub(display_width(&title_prefix));
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled(
-            format!("{}  dotman - Main Menu", icon_set.app),
-            Style::default()
-                .fg(CATPPUCCIN_MOCHA.fg_dim)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" {}", "─".repeat(divider_width)),
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        ),
-    ]));
-    f.render_widget(title, chunks[0]);
+    f.render_widget(
+        Paragraph::new(screen_header(
+            icon_set.app,
+            "Main Menu",
+            Vec::new(),
+            usize::from(chunks[0].width),
+        )),
+        chunks[0],
+    );
 
-    // Menu items with two-line layout (title + description)
     let menu_items: [(&str, &str, &str); 4] = [
         (
             icon_set.menu_deploy,
@@ -128,7 +118,7 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
         ),
         (
             icon_set.menu_plan,
-            "Plan only",
+            "Plan",
             "Preview changes without executing",
         ),
         (
@@ -138,154 +128,193 @@ pub(super) fn render_main_menu(f: &mut Frame, app: &mut App) {
         ),
         (icon_set.menu_quit, "Quit", "Exit dotman"),
     ];
-    let mut styled_items: Vec<ListItem> = Vec::new();
-    let area_width = usize::from(chunks[1].width);
-    for (i, &(icon, title, desc)) in menu_items.iter().enumerate() {
-        let is_sel = app.menu_state.selected() == Some(i);
-        let title_text = format!("{} {}", icon, title);
-        if density == LayoutDensity::Compact {
-            let bg = is_sel.then(focus_bg);
-            let marker = if is_sel { "▎ " } else { "  " };
-            let style = span_bg_style(bg).fg(if is_sel {
-                CATPPUCCIN_MOCHA.primary
-            } else {
-                CATPPUCCIN_MOCHA.fg
-            });
-            let line = format!("{marker}{title_text}");
-            styled_items.push(ListItem::new(Line::from(Span::styled(
-                fit_to_width(&line, area_width),
-                style,
-            ))));
-            continue;
-        }
-        if is_sel {
-            let bg = focus_bg();
-            let title_content_w = 2 + display_width(&title_text);
-            let desc_content_w = 4 + display_width(desc);
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::styled(" ", Style::default().bg(bg)),
-                    Span::styled("▎", Style::default().fg(CATPPUCCIN_MOCHA.primary).bg(bg)),
-                    Span::styled(
-                        title_text.clone(),
-                        Style::default()
-                            .bg(bg)
-                            .fg(CATPPUCCIN_MOCHA.primary)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        " ".repeat(area_width.saturating_sub(title_content_w)),
-                        Style::default().bg(bg),
-                    ),
-                ]),
-                Line::from(vec![
-                    Span::styled(" ", Style::default().bg(bg)),
-                    Span::styled("▎", Style::default().fg(CATPPUCCIN_MOCHA.primary).bg(bg)),
-                    Span::styled("  ", Style::default().bg(bg)),
-                    Span::styled(desc, Style::default().bg(bg).fg(CATPPUCCIN_MOCHA.fg_dim)),
-                    Span::styled(
-                        " ".repeat(area_width.saturating_sub(desc_content_w)),
-                        Style::default().bg(bg),
-                    ),
-                ]),
-            ];
-            if i == 0 {
-                lines.insert(0, Line::from(" "));
-            }
-            if i < 4 {
-                lines.push(Line::from(" "));
-            }
-            styled_items.push(ListItem::new(lines));
-        } else {
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(title_text.clone(), Style::default().fg(CATPPUCCIN_MOCHA.fg)),
-                ]),
-                Line::from(vec![
-                    Span::raw("    "),
-                    Span::styled(desc, Style::default().fg(CATPPUCCIN_MOCHA.fg_dim)),
-                ]),
-            ];
-            if i == 0 {
-                lines.insert(0, Line::from(" "));
-            }
-            if i < 4 {
-                lines.push(Line::from(" "));
-            }
-            styled_items.push(ListItem::new(lines));
+    // One stable command rail: every description remains on the same row and
+    // moving focus changes only emphasis, never geometry.
+    let horizontal_gutter = match density {
+        LayoutDensity::Compact => 2,
+        LayoutDensity::Normal => 8,
+    };
+    let content_width =
+        CONTENT_MAX_WIDTH.min(chunks[1].width.saturating_sub(horizontal_gutter).max(1));
+    let vertical_offset = match density {
+        LayoutDensity::Compact => 0,
+        LayoutDensity::Normal => chunks[1].height.saturating_sub(content_height).min(2),
+    };
+    let content_area = Rect::new(
+        chunks[1].x + chunks[1].width.saturating_sub(content_width) / 2,
+        chunks[1].y + vertical_offset,
+        content_width,
+        content_height.min(chunks[1].height.saturating_sub(vertical_offset)),
+    );
+    let content_rows = Layout::vertical([
+        Constraint::Length(MENU_HEIGHT),
+        Constraint::Length(MENU_ACTIVITY_GAP),
+        Constraint::Length(ACTIVITY_HEIGHT),
+    ])
+    .split(content_area);
+    let selected = app
+        .menu_state
+        .selected()
+        .unwrap_or(0)
+        .min(menu_items.len() - 1);
+    let menu_width = usize::from(content_rows[0].width);
+    let mut menu_lines = Vec::with_capacity(usize::from(MENU_HEIGHT));
+    for (index, &(icon, title, description)) in menu_items.iter().enumerate() {
+        menu_lines.push(main_menu_command_line(
+            icon,
+            title,
+            description,
+            index == selected,
+            index == 3,
+            menu_width,
+        ));
+        let gap_after = [1, 1, 1, 0][index];
+        for _ in 0..gap_after {
+            menu_lines.push(Line::from(""));
         }
     }
-    let list = List::new(styled_items)
-        .highlight_style(Style::default())
-        .highlight_symbol("");
-    f.render_stateful_widget(list, chunks[1], &mut app.menu_state);
+    f.render_widget(Paragraph::new(menu_lines), content_rows[0]);
 
-    // Summary
     let cfg = app.config.as_ref();
-    let pkg = cfg.map(|c| c.install.len()).unwrap_or(0);
+    let packages = cfg.map(|c| c.install.len()).unwrap_or(0);
     let links = cfg.map(|c| c.links.len()).unwrap_or(0);
-    let dirs = cfg.map(|c| c.create.len()).unwrap_or(0);
-    let shells = cfg.map(|c| c.shell.len()).unwrap_or(0);
-
-    let os_part = if cfg!(target_os = "macos") {
+    let directories = cfg.map(|c| c.create.len()).unwrap_or(0);
+    let shell_steps = cfg.map(|c| c.shell.len()).unwrap_or(0);
+    let os = if cfg!(target_os = "macos") {
         "macOS"
     } else {
         "Linux"
     };
-    let arch_part = std::env::consts::ARCH;
-    let summary_line_str = format!(
-        "  {} {os_part} {arch_part} · {pkg} packages · {links} links · {dirs} directories · {shells} shell steps",
-        icon_set.host
+    let host = format!(
+        "{} {os} {} · {packages} packages · {links} links · {directories} directories · {shell_steps} shell steps",
+        icon_set.host,
+        std::env::consts::ARCH,
     );
-
-    let summary_width = usize::from(chunks[2].width).saturating_sub(2);
-    let summary_divider = format!("  {}", "─".repeat(summary_width));
-
-    let mut summary_lines = vec![
-        Line::from(vec![Span::styled(
-            summary_divider,
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        )]),
-        Line::from(vec![Span::styled(
-            summary_line_str,
-            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-        )]),
+    let activity_width = usize::from(content_rows[2].width);
+    let mut activity_lines = vec![
+        Line::from(Span::styled("─".repeat(activity_width), divider_style())),
+        Line::from(""),
     ];
-
     if let Some(run) = app.runs.first() {
-        let status_icon = match run.status {
-            RunStatus::Success => icon_set.success,
-            RunStatus::Failed => icon_set.failed,
-            RunStatus::Aborted => icon_set.warning,
-            RunStatus::Running => icon_set.running,
+        let summary = crate::model::RunSummary::from_run(run);
+        let (status_icon, status_text) = match run.status {
+            RunStatus::Success => (icon_set.success, "last deployment succeeded"),
+            RunStatus::Failed => (icon_set.failed, "last deployment failed"),
+            RunStatus::Aborted => (icon_set.warning, "last deployment aborted"),
+            RunStatus::Running => (icon_set.running, "deployment in progress"),
         };
         let status_color = run_status_color(run.status);
-        let mode_str = format!("{:?}", run.mode).to_lowercase();
-        let date_str = fmt_date(&run.started_at);
         let total = run
             .items
             .iter()
             .filter(|item| !matches!(item.status, ActionStatus::WillSkip))
             .count();
-        let failed = crate::model::RunSummary::from_run(run).failed;
-        summary_lines.push(Line::from(vec![
-            Span::styled(
-                format!("  last run: {date_str}  "),
-                Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
-            ),
+        let items_label = if total == 1 { "item" } else { "items" };
+        let details = format!(
+            "  {} · {} · {total} {items_label} · {} failed",
+            main_menu_short_date(&run.started_at),
+            plan_mode_label(run.mode),
+            summary.failed,
+        );
+        let status_width = display_width(status_icon) + 1 + display_width(status_text);
+        activity_lines.push(Line::from(vec![
             Span::styled(status_icon, Style::default().fg(status_color)),
             Span::styled(
-                format!(" {mode_str} ({total} items, {failed} fail)"),
-                Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+                format!(" {status_text}"),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                fit_to_width(&details, activity_width.saturating_sub(status_width)),
+                Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
             ),
         ]));
+    } else {
+        activity_lines.push(Line::from(Span::styled(
+            "no deployments recorded yet",
+            Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+        )));
+    }
+    activity_lines.push(Line::from(Span::styled(
+        fit_to_width(&host, activity_width),
+        Style::default().fg(CATPPUCCIN_MOCHA.text_muted),
+    )));
+    f.render_widget(Paragraph::new(activity_lines), content_rows[2]);
+
+    let notice = (!app.status_message.is_empty()).then(|| FooterNotice {
+        message: &app.status_message,
+        kind: app.status_kind,
+    });
+    let footer = screen_footer(
+        notice,
+        vim_prefix_help(
+            app,
+            main_menu_help_line(usize::from(chunks[2].width)),
+            usize::from(chunks[2].width),
+        ),
+        usize::from(chunks[2].width),
+    );
+    f.render_widget(footer, chunks[2]);
+}
+
+fn main_menu_command_line(
+    icon: &'static str,
+    title: &'static str,
+    description: &'static str,
+    selected: bool,
+    muted: bool,
+    width: usize,
+) -> Line<'static> {
+    let label_width = if width >= 72 { 18 } else { 14 };
+    let description_width = width.saturating_sub(2 + label_width + 2);
+    let background = selected.then(focus_bg);
+    let base = span_bg_style(background);
+    let marker = if selected { "▎ " } else { "  " };
+    let label_color = if selected {
+        CATPPUCCIN_MOCHA.primary
+    } else if muted {
+        CATPPUCCIN_MOCHA.text_muted
+    } else {
+        CATPPUCCIN_MOCHA.fg
+    };
+    let description_color = if muted {
+        CATPPUCCIN_MOCHA.fg_dim
+    } else {
+        CATPPUCCIN_MOCHA.text_muted
+    };
+    let mut label_style = base.fg(label_color);
+    if selected {
+        label_style = label_style.add_modifier(Modifier::BOLD);
     }
 
-    f.render_widget(Paragraph::new(summary_lines), chunks[2]);
+    Line::from(vec![
+        Span::styled(
+            marker,
+            base.fg(if selected {
+                CATPPUCCIN_MOCHA.focus_marker
+            } else {
+                label_color
+            }),
+        ),
+        Span::styled(
+            fit_to_width(&format!("{icon} {title}"), label_width),
+            label_style,
+        ),
+        Span::styled("  ", base),
+        Span::styled(
+            fit_to_width(description, description_width),
+            base.fg(description_color),
+        ),
+    ])
+}
 
-    let help = Paragraph::new(main_menu_help_line(usize::from(chunks[3].width)));
-    f.render_widget(help, chunks[3]);
+fn main_menu_short_date(rfc3339: &str) -> String {
+    short_datetime(rfc3339)
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn main_menu_help_line(width: usize) -> Line<'static> {

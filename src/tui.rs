@@ -17,7 +17,8 @@ use crate::store;
 use crate::theme::CATPPUCCIN_MOCHA;
 use anyhow::Result;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -26,7 +27,7 @@ use crossterm::terminal::{
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::BTreeSet;
 use std::io;
@@ -145,9 +146,9 @@ fn run_event_loop(app: &mut App, terminal: &mut ratatui::DefaultTerminal) -> Res
 
         // Tick animation 100ms.
         if last_tick.elapsed() >= Duration::from_millis(100) {
-            app.tick();
+            let key_prefix_expired = app.tick();
             last_tick = Instant::now();
-            if matches!(app.screen, Screen::RunView) {
+            if matches!(app.screen, Screen::RunView) || key_prefix_expired {
                 needs_draw = true;
             }
         }
@@ -157,7 +158,7 @@ fn run_event_loop(app: &mut App, terminal: &mut ratatui::DefaultTerminal) -> Res
         {
             match event {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    handle_key(app, key.code)?;
+                    handle_key_event(app, key)?;
                     needs_draw = true;
                 }
                 Event::Resize(_, _) => {
@@ -179,14 +180,31 @@ fn run_event_loop(app: &mut App, terminal: &mut ratatui::DefaultTerminal) -> Res
     }
 }
 
-fn handle_key(app: &mut App, key: KeyCode) -> Result<()> {
+fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<()> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        clear_vim_prefix(app);
+        return match key.code {
+            KeyCode::Char('c') => dispatch_key(app, KeyCode::Char('q')),
+            KeyCode::Char('d') => half_page(app, 1),
+            KeyCode::Char('u') => half_page(app, -1),
+            KeyCode::Char('f') => dispatch_key(app, KeyCode::PageDown),
+            KeyCode::Char('b') => dispatch_key(app, KeyCode::PageUp),
+            _ => Ok(()),
+        };
+    }
+
+    let key = key.code;
     if app.vim_pending_g {
-        app.vim_pending_g = false;
+        clear_vim_prefix(app);
         if key == KeyCode::Char('g') {
             return jump_to_top(app);
         }
+        if key == KeyCode::Esc {
+            return Ok(());
+        }
     } else if key == KeyCode::Char('g') {
         app.vim_pending_g = true;
+        app.vim_pending_g_since = Some(Instant::now());
         return Ok(());
     }
     if key == KeyCode::Char('G') {
@@ -198,6 +216,20 @@ fn handle_key(app: &mut App, key: KeyCode) -> Result<()> {
     if key == KeyCode::End {
         return jump_to_bottom(app);
     }
+    dispatch_key(app, key)
+}
+
+#[cfg(test)]
+fn handle_key(app: &mut App, key: KeyCode) -> Result<()> {
+    handle_key_event(app, KeyEvent::new(key, KeyModifiers::NONE))
+}
+
+fn clear_vim_prefix(app: &mut App) {
+    app.vim_pending_g = false;
+    app.vim_pending_g_since = None;
+}
+
+fn dispatch_key(app: &mut App, key: KeyCode) -> Result<()> {
     match app.screen {
         Screen::MainMenu => main_menu::handle_main_menu(app, key),
         Screen::PlanView => plan::handle_plan(app, key),
@@ -206,6 +238,62 @@ fn handle_key(app: &mut App, key: KeyCode) -> Result<()> {
         Screen::HistoryView => history::handle_history(app, key),
         Screen::RunReplay => history::handle_replay(app, key),
     }
+}
+
+fn half_page(app: &mut App, direction: isize) -> Result<()> {
+    match app.screen {
+        Screen::MainMenu => {
+            for _ in 0..2 {
+                main_menu::handle_main_menu(
+                    app,
+                    if direction < 0 {
+                        KeyCode::Up
+                    } else {
+                        KeyCode::Down
+                    },
+                )?;
+            }
+        }
+        Screen::PlanView => {
+            for _ in 0..4 {
+                plan::handle_plan(
+                    app,
+                    if direction < 0 {
+                        KeyCode::Up
+                    } else {
+                        KeyCode::Down
+                    },
+                )?;
+            }
+        }
+        Screen::ConfirmView => review::scroll_review(app, direction * 4),
+        Screen::RunView => run::scroll_run_half_page(app, direction),
+        Screen::HistoryView => {
+            for _ in 0..4 {
+                history::handle_history(
+                    app,
+                    if direction < 0 {
+                        KeyCode::Up
+                    } else {
+                        KeyCode::Down
+                    },
+                )?;
+            }
+        }
+        Screen::RunReplay => {
+            for _ in 0..4 {
+                history::handle_replay(
+                    app,
+                    if direction < 0 {
+                        KeyCode::Up
+                    } else {
+                        KeyCode::Down
+                    },
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn jump_to_top(app: &mut App) -> Result<()> {
@@ -235,8 +323,7 @@ fn jump_to_bottom(app: &mut App) -> Result<()> {
 // ---------------- render dispatch ----------------
 
 fn render(app: &mut App, f: &mut Frame) {
-    let area = f.area();
-    f.render_widget(Clear, area);
+    paint_background(f);
     match app.screen {
         Screen::MainMenu => main_menu::render_main_menu(f, app),
         Screen::PlanView => plan::render_plan(f, app),

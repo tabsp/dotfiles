@@ -272,17 +272,37 @@ pub(in crate::tui) fn toggle_current_log_group(app: &mut App) {
     }
 }
 
-pub(in crate::tui) fn run_log_title(app: &App) -> String {
+pub(in crate::tui) fn run_log_title_line(app: &App) -> Line<'static> {
     let follow = if app.log_follow { "follow" } else { "paused" };
-    if app.collapsed_log_groups.is_empty() {
-        format!(" log: {follow} · {} ", app.log_filter.label())
+    let follow_color = if app.log_follow {
+        CATPPUCCIN_MOCHA.accent
     } else {
-        format!(
-            " log: {follow} · {} · {} collapsed ",
+        CATPPUCCIN_MOCHA.warning
+    };
+    let separator = || Span::styled(" · ", Style::default().fg(CATPPUCCIN_MOCHA.fg_dim));
+    let mut spans = vec![
+        Span::styled(
+            " log",
+            Style::default()
+                .fg(CATPPUCCIN_MOCHA.fg)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        separator(),
+        Span::styled(follow, Style::default().fg(follow_color)),
+        separator(),
+        Span::styled(
             app.log_filter.label(),
-            app.collapsed_log_groups.len()
-        )
+            Style::default().fg(CATPPUCCIN_MOCHA.fg),
+        ),
+    ];
+    if !app.collapsed_log_groups.is_empty() {
+        spans.push(separator());
+        spans.push(Span::styled(
+            format!("{} collapsed", app.collapsed_log_groups.len()),
+            Style::default().fg(CATPPUCCIN_MOCHA.fg_dim),
+        ));
     }
+    Line::from(spans)
 }
 
 pub(in crate::tui) fn sanitize_tui_log_line(line: &str) -> String {

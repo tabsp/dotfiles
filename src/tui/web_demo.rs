@@ -192,8 +192,10 @@ pub fn export(config_path: &Path, width: u16, height: u16) -> Result<DemoBundle>
         schema: 1,
         width,
         height,
-        default_fg: color_to_css(CATPPUCCIN_MOCHA.fg).expect("theme foreground is RGB"),
-        default_bg: color_to_css(CATPPUCCIN_MOCHA.bg).expect("theme background is RGB"),
+        // The website demo has a stable branded canvas even when the export
+        // process itself is running with NO_COLOR.
+        default_fg: color_to_css(crate::theme::MOCHA.fg).expect("demo foreground is RGB"),
+        default_bg: color_to_css(crate::theme::MOCHA.bg).expect("demo background is RGB"),
         seed: demo_seed(&plan, &review_entries),
         frames,
     })
@@ -734,7 +736,7 @@ mod tests {
     #[test]
     fn css_color_preserves_theme_rgb() {
         assert_eq!(
-            color_to_css(CATPPUCCIN_MOCHA.primary).as_deref(),
+            color_to_css(crate::theme::MOCHA.primary).as_deref(),
             Some("#cba6f7")
         );
         assert_eq!(color_to_css(Color::Reset), None);
