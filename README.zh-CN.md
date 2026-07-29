@@ -237,6 +237,8 @@ Fish 从以下路径加载本地文件：
 ```
 
 新机器的首次设置参考 [docs/new-machine.md](docs/new-machine.md)。
+dotman 会安装 Herdr 并链接共享配置；Codex、Claude Code 和 Cursor 集成、
+账号授权以及可选的 Herdr Agent Skill 仍是该文档中明确列出的部署后手动步骤。
 
 ## 开发
 

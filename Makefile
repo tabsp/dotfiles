@@ -176,13 +176,21 @@ config-check-tools:
 		exit 1; \
 	fi
 
+# Load installed TPM plugins through a temporary HOME so plugin startup hooks
+# remain covered without modifying user-level agent configuration or state.
 config-check: config-check-tools format-check shell-lint fish-check portability-check secret-check nvim-check test $(DOTMAN)
 	yq '.' dotman.yaml >/dev/null
 	$(DOTMAN) plan --headless >/dev/null
 	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-tmux-check.XXXXXX")"; \
 	socket="$$tmp/tmux.sock"; \
+	test_home="$$tmp/home"; \
+	mkdir -p "$$test_home/.tmux"; \
+	if test -d "$$HOME/.tmux/plugins"; then \
+		ln -s "$$HOME/.tmux/plugins" "$$test_home/.tmux/plugins"; \
+	fi; \
 	trap 'tmux -S "$$socket" kill-server >/dev/null 2>&1 || true; rm -rf "$$tmp"' EXIT; \
-	tmux -S "$$socket" -f "$(CURDIR)/config/tmux.conf" new-session -d -s config-check; \
+	HOME="$$test_home" tmux -S "$$socket" -f "$(CURDIR)/config/tmux.conf" new-session -d -s config-check; \
+	test "$$(tmux -S "$$socket" show-environment -g HOME)" = "HOME=$$test_home"; \
 	test "$$(tmux -S "$$socket" show-options -gv default-terminal)" = tmux-256color; \
 	test "$$(tmux -S "$$socket" show-options -gv status-interval)" = 5
 

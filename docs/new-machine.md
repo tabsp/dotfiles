@@ -170,12 +170,45 @@ getent passwd "$USER" | cut -d: -f7
   输出或响铃时，状态栏分别显示 `#` 或 `!`，切换到该 window 后自动清除。
 - 使用 `del PATH...` 将文件移入系统垃圾桶；原始 `rm` 语义保持不变。
 
-## 8. 验证
+## 8. Herdr Agent 集成
+
+dotman 会安装 Herdr 并链接 `~/.config/herdr`，但不会修改 Codex、Claude Code
+或 Cursor 自己的用户配置，也不会处理账号登录和系统凭据。
+
+只为实际使用的 Agent 安装原生集成：
+
+```sh
+herdr integration install codex
+herdr integration install claude
+herdr integration install cursor
+herdr integration status
+```
+
+在 Codex、Claude Code 和 Cursor 中分别完成登录或授权。新安装 integration 后，
+重新启动对应的 Agent 进程或客户端，让 hooks 生效。新机器首次部署不需要额外升级
+或重启 Herdr server；已有机器升级 Herdr 后，先运行 `herdr status`，只在显示旧
+server 或需要重启时结束相关任务，再停止并重新启动该 session。
+
+可选安装 Herdr 官方 Agent Skill，让支持的 Agent 能在 Herdr pane 内通过 CLI
+创建和协调辅助 pane：
+
+```sh
+command -v npx
+npx --yes skills add ogulcancelik/herdr --skill herdr -g
+```
+
+该 Skill 安装到 `~/.agents/skills/herdr`，不是运行 Herdr 的必需项。如果 `npx`
+不可用，先确认 dotman 中可选的 mise runtime 安装 action 已成功，或手动运行
+`mise install`。安装 Skill 后重新启动对应 Agent，使其重新加载技能目录。
+
+## 9. 验证
 
 ```sh
 dotman status
 dotman doctor
 dotman history
+herdr --version
+herdr integration status
 ```
 
 `dotman history` 应显示刚完成的运行；打开记录后可逐 action 查看状态、错误和已保存输出。

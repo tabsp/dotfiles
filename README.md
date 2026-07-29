@@ -255,6 +255,9 @@ Fish loads local-only files from:
 ```
 
 For first-time setup on a new machine, follow [docs/new-machine.md](docs/new-machine.md).
+dotman installs Herdr and links its shared configuration; Codex, Claude Code,
+and Cursor integrations, account authorization, and the optional Herdr Agent
+Skill remain explicit post-deploy steps documented there.
 
 ## Development
 
