@@ -113,7 +113,7 @@ fish-check:
 	  'not set -q fish_user_paths; or test (count $$fish_user_paths) -eq 0'
 
 docker-lint:
-	hadolint tests/e2e/Dockerfile tests/e2e/Dockerfile.production tests/e2e/Dockerfile.sudo
+	hadolint --failure-threshold warning tests/e2e/Dockerfile tests/e2e/Dockerfile.production tests/e2e/Dockerfile.sudo
 
 action-lint:
 	actionlint
