@@ -25,7 +25,7 @@ fn run() -> Result<(), String> {
         Some(Command::Plan) => run_tui_or_headless(&cli, Mode::Plan),
         Some(Command::Sync) => run_sync(&cli),
         Some(Command::Status) => run_status(),
-        Some(Command::Doctor) => run_doctor(),
+        Some(Command::Doctor) => run_doctor(&cli),
         Some(Command::Self_ {
             action: SelfAction::Update,
         }) => dotman::self_update::run(),
@@ -44,15 +44,16 @@ fn run() -> Result<(), String> {
         Some(Command::Profile { action }) => run_profile(action),
         Some(Command::History) => run_tui_or_headless(&cli, Mode::History),
         Some(Command::Run { id }) => run_tui_or_headless(&cli, Mode::Run(id.clone())),
-        Some(Command::NewLink { target, source }) => add_link(target, source),
+        Some(Command::NewLink { target, source }) => add_link(&cli, target, source),
     }
 }
 
 fn run_tui_or_headless(cli: &Cli, mode: Mode) -> Result<(), String> {
-    // Menu in headless/non-TTY: show a brief status hint instead of deploying.
-    if matches!(mode, Mode::Menu) && !is_tty() {
-        eprintln!("headless mode requires an explicit subcommand (deploy, plan, status, etc.)");
-        eprintln!("run `dotman --help` for available commands");
+    // Menu without an explicit subcommand in headless/non-TTY mode: show a
+    // hint and exit with no side effects — never auto-init, clone, or sync
+    // for a command the user did not ask for.
+    if matches!(mode, Mode::Menu) && (cli.headless || !is_tty()) {
+        eprintln!("{}", headless::HEADLESS_MENU_HINT);
         return Ok(());
     }
 
@@ -116,8 +117,8 @@ fn run_status() -> Result<(), String> {
     init::show_status()
 }
 
-fn run_doctor() -> Result<(), String> {
-    let diagnostics = init::run_doctor();
+fn run_doctor(cli: &Cli) -> Result<(), String> {
+    let diagnostics = init::run_doctor(cli);
     let mut all_ok = true;
     for d in &diagnostics {
         let icon = if d.ok { "✓" } else { "✗" };
@@ -255,146 +256,15 @@ fn run_profile(action: &ProfileAction) -> Result<(), String> {
     }
 }
 
-fn add_link(target: &str, source: &str) -> Result<(), String> {
-    let path = std::path::Path::new("dotman.yaml");
-    let raw = std::fs::read_to_string(path)
+fn add_link(cli: &Cli, target: &str, source: &str) -> Result<(), String> {
+    // Resolve the config to edit the same way plan/deploy do — --config,
+    // ./dotman.yaml, or the active profile — but never auto-init.
+    let resolved = init::resolve_config_for_edit(cli)?;
+    let path = resolved.path();
+    let raw = std::fs::read_to_string(&path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    let updated = insert_link_entry(&raw, target, source)?;
-    std::fs::write(path, updated)
-        .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
-    println!("added link: {target} -> {source}");
+    let updated = ops::edit::add_link_entry(&raw, target, source)?;
+    ops::edit::write_config_atomic(&path, &updated)?;
+    println!("added link: {target} -> {source} ({})", path.display());
     Ok(())
-}
-
-fn insert_link_entry(raw: &str, target: &str, source: &str) -> Result<String, String> {
-    use serde_yaml::{Mapping, Value};
-
-    let mut doc: Value =
-        serde_yaml::from_str(raw).map_err(|e| format!("failed to parse dotman.yaml: {e}"))?;
-
-    let mapping = doc
-        .as_mapping_mut()
-        .ok_or_else(|| "dotman.yaml is not a mapping".to_string())?;
-
-    let target_val = Value::String(target.to_string());
-    let source_val = Value::String(source.to_string());
-
-    match mapping.get_mut("links") {
-        Some(Value::Mapping(links)) => {
-            links.insert(target_val, source_val);
-        }
-        Some(Value::Sequence(seq)) => {
-            // Convert sequence entries into a map, preserving simple {target, source} items.
-            let mut new_links = Mapping::new();
-            for item in seq.iter() {
-                let item_map = item.as_mapping().ok_or_else(|| {
-                    "links: list item is not a mapping; cannot convert to map form".to_string()
-                })?;
-                let item_target = item_map
-                    .get("target")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "links: list item missing 'target' field".to_string())?;
-                let item_source = item_map
-                    .get("source")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "links: list item missing 'source' field".to_string())?;
-                // Reject entries with extra fields that can't round-trip through map format.
-                let extra_keys: Vec<&str> = item_map
-                    .keys()
-                    .filter_map(|k| k.as_str())
-                    .filter(|k| *k != "target" && *k != "source")
-                    .collect();
-                if !extra_keys.is_empty() {
-                    return Err(format!(
-                        "links: list item '{}' has extra fields ({}) that cannot be preserved \
-                         in map format; edit dotman.yaml manually to add this link",
-                        item_target,
-                        extra_keys.join(", ")
-                    ));
-                }
-                new_links.insert(
-                    Value::String(item_target.to_string()),
-                    Value::String(item_source.to_string()),
-                );
-            }
-            new_links.insert(target_val, source_val);
-            mapping.insert(
-                Value::String("links".to_string()),
-                Value::Mapping(new_links),
-            );
-        }
-        Some(Value::Null) | None => {
-            let mut new_links = Mapping::new();
-            new_links.insert(target_val, source_val);
-            mapping.insert(
-                Value::String("links".to_string()),
-                Value::Mapping(new_links),
-            );
-        }
-        Some(_) => {
-            return Err("links: section has unexpected format".into());
-        }
-    }
-
-    serde_yaml::to_string(&doc).map_err(|e| format!("failed to serialize dotman.yaml: {e}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn insert_link_entry_adds_to_links_section() {
-        let raw = "install: []\nlinks:\n  ~/.config/fish: config/fish\ncreate: []\n";
-        let updated = insert_link_entry(raw, "~/.tmux.conf", "config/tmux.conf").unwrap();
-        // Verify round-trip: parsed YAML has both links.
-        let doc: serde_yaml::Value = serde_yaml::from_str(&updated).unwrap();
-        let links = doc["links"].as_mapping().unwrap();
-        assert_eq!(
-            links.get("~/.config/fish").unwrap().as_str().unwrap(),
-            "config/fish"
-        );
-        assert_eq!(
-            links.get("~/.tmux.conf").unwrap().as_str().unwrap(),
-            "config/tmux.conf"
-        );
-    }
-
-    #[test]
-    fn insert_link_entry_replaces_existing_target() {
-        let raw = "links:\n  ~/.tmux.conf: old\n";
-        let updated = insert_link_entry(raw, "~/.tmux.conf", "config/tmux.conf").unwrap();
-        let doc: serde_yaml::Value = serde_yaml::from_str(&updated).unwrap();
-        let links = doc["links"].as_mapping().unwrap();
-        assert_eq!(
-            links.get("~/.tmux.conf").unwrap().as_str().unwrap(),
-            "config/tmux.conf"
-        );
-    }
-
-    #[test]
-    fn insert_link_entry_handles_sequence_links_format() {
-        // Links as a sequence (list form): convert to map form, preserving all entries.
-        let raw = "install: []\nlinks:\n  - target: ~/.config/fish\n    source: config/fish\n";
-        let updated = insert_link_entry(raw, "~/.tmux.conf", "config/tmux.conf").unwrap();
-        let doc: serde_yaml::Value = serde_yaml::from_str(&updated).unwrap();
-        let links = doc["links"].as_mapping().unwrap();
-        assert_eq!(
-            links.get("~/.config/fish").unwrap().as_str().unwrap(),
-            "config/fish"
-        );
-        assert_eq!(
-            links.get("~/.tmux.conf").unwrap().as_str().unwrap(),
-            "config/tmux.conf"
-        );
-    }
-
-    #[test]
-    fn insert_link_entry_rejects_backup_field_in_sequence() {
-        // List entry with backup field cannot be represented in map form → error.
-        let raw = "links:\n  - target: ~/.config/fish\n    source: config/fish\n    backup: true\n";
-        let result = insert_link_entry(raw, "~/.tmux.conf", "config/tmux.conf");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("backup"));
-    }
 }

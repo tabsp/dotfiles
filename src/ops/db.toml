@@ -93,8 +93,12 @@ layer = "software"
 layer = "software"
 platforms = ["brew", "pacman"]
 
+# mise is on Homebrew and in Arch's official repositories; Debian/Ubuntu
+# need a third-party repo and Fedora has no official package, so only
+# brew/pacman are synthesized.
 [tools.mise]
 layer = "software"
+platforms = ["brew", "pacman"]
 
 [tools.ripgrep]
 binary = "rg"
@@ -140,15 +144,21 @@ layer = "enhancement"
 [tools.direnv]
 layer = "enhancement"
 
+# dua-cli is only in Debian sid (not stable) and not in Ubuntu, so the
+# default-synthesized `apt` command would fail on stock Debian/Ubuntu.
 [tools.dua-cli]
 binary = "dua"
 layer = "enhancement"
+platforms = ["brew", "pacman", "dnf"]
 
 [tools.fzf]
 layer = "enhancement"
 
+# gum is not in stock Debian/Ubuntu apt (it needs Charm's third-party repo),
+# so the default-synthesized `apt` command would fail there.
 [tools.gum]
 layer = "enhancement"
+platforms = ["brew", "pacman", "dnf"]
 
 [tools.ruby]
 layer = "enhancement"

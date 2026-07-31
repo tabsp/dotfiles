@@ -4,6 +4,7 @@
 
 pub mod clean;
 pub mod create;
+pub mod edit;
 pub mod install;
 pub mod link;
 pub mod shell;

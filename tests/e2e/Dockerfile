@@ -18,8 +18,15 @@ RUN useradd -m -s /bin/bash dotman-test \
     && echo 'dotman-test ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/dotman-test
 
 WORKDIR /app
+
+# Fetch dependencies before copying sources so the dependency layer survives
+# source changes (used with buildx gha cache in CI). A placeholder target is
+# required for cargo to resolve the manifest; COPY . . overwrites it below.
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && cargo fetch --locked
+
 COPY . .
-RUN cargo build --release \
+RUN cargo build --release --locked \
     && chmod +x /app/tests/e2e/*.sh /app/tests/e2e/scenarios/*.sh
 
 USER dotman-test

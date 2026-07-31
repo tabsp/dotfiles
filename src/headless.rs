@@ -13,6 +13,10 @@ use crate::plan;
 use crate::store;
 use std::path::PathBuf;
 
+/// Hint shown when no subcommand is given in headless or non-TTY mode.
+pub const HEADLESS_MENU_HINT: &str = "headless mode requires an explicit subcommand (deploy, plan, sync, status, doctor). \
+     run `dotman --help` for available commands";
+
 /// Run with a resolved config path (for plan/deploy commands).
 pub fn run_with_mode(config_path: PathBuf, mode: Mode) -> Result<(), String> {
     let cfg = config::load(&config_path).map_err(|e| e.to_string())?;
@@ -25,11 +29,7 @@ pub fn run_with_mode(config_path: PathBuf, mode: Mode) -> Result<(), String> {
             Ok(())
         }
         Mode::Deploy => run_full(&cfg),
-        Mode::Menu => Err(
-            "headless mode requires an explicit subcommand (deploy, plan, sync, status, doctor). \
-             run `dotman --help` for available commands"
-                .into(),
-        ),
+        Mode::Menu => Err(HEADLESS_MENU_HINT.into()),
         _ => Err(format!("mode {mode:?} requires TUI")),
     }
 }

@@ -142,6 +142,19 @@ assert_dir_exists() {
     fi
 }
 
+# assert_not_exists <path> — assert a path is absent.
+# Checks both -e and -L so dangling symlinks count as existing.
+assert_not_exists() {
+    local path="${1/#\~/$HOME}"
+    local msg="does not exist: $path"
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        pass "$msg"
+    else
+        fail "$msg"
+        return 1
+    fi
+}
+
 # assert_exit_code <expected_code> <command...>
 # Runs the command and checks its exit code.
 assert_exit_code() {

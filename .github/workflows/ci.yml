@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     strategy:
@@ -22,6 +26,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Record rustc version
+        id: rustc
+        shell: bash
+        run: echo "version=$(rustc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-deps-
+
+      - name: Cache Cargo build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-build-${{ steps.rustc.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-build-${{ steps.rustc.outputs.version }}-
 
       - uses: actions/setup-node@v4
         with:
@@ -45,6 +73,34 @@ jobs:
           brew_prefix="$("$brew_bin" --prefix)"
           echo "$brew_prefix/bin" >> "$GITHUB_PATH"
           echo "$brew_prefix/sbin" >> "$GITHUB_PATH"
-          "$brew_bin" install fish shellcheck hadolint actionlint jq neovim stylua gitleaks
+          "$brew_bin" install fish shellcheck hadolint actionlint jq neovim stylua gitleaks tmux yq
 
       - run: make ci
+
+      - name: Validate portable configuration (tmux, YAML, TOML)
+        run: make config-check-ci
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build e2e image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tests/e2e/Dockerfile
+          load: true
+          tags: dotman-e2e
+          cache-from: type=gha
+          # Write the gha cache only for pushes and same-repo PRs; fork PRs
+          # get an empty string so they never write to the cache.
+          cache-to: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'type=gha,mode=max' || '' }}
+
+      - name: Run e2e tests without network
+        run: docker run --rm -e SKIP_NETWORK_TESTS=1 dotman-e2e

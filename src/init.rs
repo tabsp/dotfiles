@@ -90,6 +90,58 @@ pub fn resolve_config(cli: &cli::Cli) -> Result<ConfigSource, String> {
     }
 }
 
+/// Resolve an existing dotman.yaml without any side effects.
+///
+/// Priority: `--config <path>`, `./dotman.yaml` in the cwd, then the active
+/// profile's checkout. Never auto-inits, clones, or syncs.
+///
+/// Returns `Ok(Some(source))` when a config exists, `Ok(None)` when nothing
+/// is configured, and `Err` for an explicit `--config` that is missing or an
+/// active profile whose checkout is not cloned yet.
+pub fn resolve_config_readonly(cli: &cli::Cli) -> Result<Option<ConfigSource>, String> {
+    // 1. Explicit --config
+    if let Some(config) = &cli.config {
+        if config.exists() {
+            return Ok(Some(ConfigSource::Direct(config.clone())));
+        }
+        return Err(format!("config file not found: {}", config.display()));
+    }
+
+    // 2. Current directory dotman.yaml
+    if Path::new("dotman.yaml").exists() {
+        return Ok(Some(ConfigSource::Direct(PathBuf::from("dotman.yaml"))));
+    }
+
+    // 3. Active profile (no clone: resolution must stay side-effect free)
+    if let Some(p) = profile::active_profile().map_err(|e| e.to_string())? {
+        let cp = p.config_path();
+        if cp.exists() {
+            return Ok(Some(ConfigSource::Profile(cp)));
+        }
+        return Err(format!(
+            "active profile checkout is not cloned at {} — run `dotman init` or `dotman sync` first",
+            p.checkout_path().display()
+        ));
+    }
+
+    Ok(None)
+}
+
+/// Resolve which dotman.yaml to edit (new-link), without any side effects.
+///
+/// Like `resolve_config_readonly`, but errors when nothing is configured so
+/// the caller can abort instead of silently guessing.
+pub fn resolve_config_for_edit(cli: &cli::Cli) -> Result<ConfigSource, String> {
+    match resolve_config_readonly(cli)? {
+        Some(source) => Ok(source),
+        None => Err(
+            "no dotman.yaml found (checked --config, ./dotman.yaml, and the active profile); \
+             run `dotman init` first"
+                .into(),
+        ),
+    }
+}
+
 /// Run profile sync (git pull) on the active profile checkout.
 ///
 /// Respects `auto_sync` — if the profile has `auto_sync = false`, sync is skipped.
@@ -444,12 +496,37 @@ fn update_or_add_profile(
 // ---- Doctor ----
 
 /// Validate system prerequisites and return a list of diagnostics.
+#[derive(Debug)]
 pub struct Diagnostic {
     pub ok: bool,
     pub message: String,
 }
 
-pub fn run_doctor() -> Vec<Diagnostic> {
+pub fn run_doctor(cli: &cli::Cli) -> Vec<Diagnostic> {
+    run_doctor_with_probe(cli, &RealCommandProbe)
+}
+
+/// Executable probe so package-manager checks can be faked in tests without
+/// depending on the host's real PATH.
+trait CommandProbe {
+    fn available(&self, binary: &str, args: &[&str]) -> bool;
+}
+
+struct RealCommandProbe;
+
+impl CommandProbe for RealCommandProbe {
+    fn available(&self, binary: &str, args: &[&str]) -> bool {
+        Command::new(binary)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+}
+
+fn run_doctor_with_probe(cli: &cli::Cli, probe: &impl CommandProbe) -> Vec<Diagnostic> {
     let mut results = Vec::new();
 
     if bootstrap::git_installed() {
@@ -464,70 +541,81 @@ pub fn run_doctor() -> Vec<Diagnostic> {
         });
     }
 
-    match profile::config_file_path() {
-        Ok(p) if p.exists() => results.push(Diagnostic {
-            ok: true,
-            message: format!("profile config found at {}", p.display()),
-        }),
-        Ok(p) => results.push(Diagnostic {
-            ok: false,
-            message: format!("profile config not found at {}", p.display()),
-        }),
+    // Resolve the config without any side effects (no auto-init/clone/sync).
+    // A direct config (--config or ./dotman.yaml) does not require a profile.
+    match resolve_config_readonly(cli) {
         Err(e) => results.push(Diagnostic {
             ok: false,
-            message: format!("cannot check profile config: {e}"),
+            message: format!("cannot resolve config: {e}"),
         }),
-    }
-
-    match profile::active_profile() {
-        Ok(Some(p)) => {
-            let cp = p.config_path();
-            if cp.exists() {
-                results.push(Diagnostic {
-                    ok: true,
-                    message: format!("active profile points to config: {}", cp.display()),
-                });
-            } else {
-                results.push(Diagnostic {
+        Ok(None) => results.push(Diagnostic {
+            ok: false,
+            message:
+                "no dotman.yaml found (checked --config, ./dotman.yaml, and the active profile); \
+                 run `dotman init` first"
+                    .into(),
+        }),
+        Ok(Some(source)) => {
+            let path = source.path();
+            results.push(Diagnostic {
+                ok: true,
+                message: format!("config resolved from {}", path.display()),
+            });
+            match crate::config::load(&path) {
+                Err(e) => results.push(Diagnostic {
                     ok: false,
-                    message: format!(
-                        "active profile configured but config not found at {}",
-                        cp.display()
-                    ),
-                });
+                    message: format!("failed to parse config: {e}"),
+                }),
+                Ok(cfg) => {
+                    let mgr = crate::package_managers::resolve_pkg_mgr_name(&cfg.package_managers)
+                        .unwrap_or_else(crate::package_managers::default_pkg_mgr_name);
+                    results.push(check_pkg_mgr(&mgr, probe));
+                }
             }
         }
-        Ok(None) => {
-            results.push(Diagnostic {
-                ok: false,
-                message: "no active profile configured".into(),
-            });
-        }
-        Err(e) => {
-            results.push(Diagnostic {
-                ok: false,
-                message: format!("failed to read profile: {e}"),
-            });
-        }
     }
 
-    let brew = std::process::Command::new("which")
-        .arg("brew")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    results.push(Diagnostic {
-        ok: true,
-        message: if brew {
-            "Homebrew available".into()
-        } else {
-            "Homebrew not available".into()
-        },
-    });
-
     results
+}
+
+/// Diagnostic for the resolved package manager.
+///
+/// Unknown managers are reported as not checked (ok) rather than failing
+/// without evidence.
+fn check_pkg_mgr(mgr: &str, probe: &impl CommandProbe) -> Diagnostic {
+    match mgr {
+        "brew" => {
+            let ok = probe.available("brew", &["--version"]);
+            Diagnostic {
+                ok,
+                message: if ok {
+                    "Homebrew available".into()
+                } else {
+                    "Homebrew not available".into()
+                },
+            }
+        }
+        "apt" => manager_diagnostic("apt-get", &["--version"], "apt", probe),
+        "pacman" => manager_diagnostic("pacman", &["--version"], "pacman", probe),
+        "dnf" => manager_diagnostic("dnf", &["--version"], "dnf", probe),
+        other => Diagnostic {
+            ok: true,
+            message: format!("package manager '{other}' — not checked"),
+        },
+    }
+}
+
+fn manager_diagnostic(
+    binary: &str,
+    args: &[&str],
+    label: &str,
+    probe: &impl CommandProbe,
+) -> Diagnostic {
+    let ok = probe.available(binary, args);
+    Diagnostic {
+        ok,
+        message: format!("{label} {}", if ok { "available" } else { "not available" }),
+    }
 }
 
 // ---- Status ----
@@ -575,7 +663,10 @@ pub fn show_status() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_repo_identity, ensure_matching_repo};
+    use super::{
+        CommandProbe, canonical_repo_identity, check_pkg_mgr, ensure_matching_repo,
+        run_doctor_with_probe,
+    };
     use crate::profile::{self, Profile, ProfileConfig};
     use std::collections::HashMap;
     use std::path::Path;
@@ -672,5 +763,93 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("does not match target repo"));
+    }
+
+    // ---- Doctor package-manager diagnostics ----
+
+    #[derive(Default)]
+    struct FakeProbe {
+        available: std::collections::BTreeSet<String>,
+    }
+
+    impl CommandProbe for FakeProbe {
+        fn available(&self, binary: &str, _args: &[&str]) -> bool {
+            self.available.contains(binary)
+        }
+    }
+
+    #[test]
+    fn pkg_mgr_diagnostics_cover_all_managers_when_available() {
+        let mut probe = FakeProbe::default();
+        probe
+            .available
+            .extend(["brew", "apt-get", "pacman", "dnf"].map(String::from));
+
+        let brew = check_pkg_mgr("brew", &probe);
+        assert!(brew.ok);
+        assert!(brew.message.contains("Homebrew available"));
+
+        let apt = check_pkg_mgr("apt", &probe);
+        assert!(apt.ok);
+        assert!(apt.message.contains("apt available"));
+
+        let pacman = check_pkg_mgr("pacman", &probe);
+        assert!(pacman.ok);
+        assert!(pacman.message.contains("pacman available"));
+
+        let dnf = check_pkg_mgr("dnf", &probe);
+        assert!(dnf.ok);
+        assert!(dnf.message.contains("dnf available"));
+    }
+
+    #[test]
+    fn pkg_mgr_diagnostics_report_missing_managers() {
+        let probe = FakeProbe::default();
+
+        let brew = check_pkg_mgr("brew", &probe);
+        assert!(!brew.ok);
+        assert!(brew.message.contains("Homebrew not available"));
+
+        for (mgr, label) in [("apt", "apt"), ("pacman", "pacman"), ("dnf", "dnf")] {
+            let diagnostic = check_pkg_mgr(mgr, &probe);
+            assert!(!diagnostic.ok, "{mgr} must fail when missing");
+            assert!(
+                diagnostic
+                    .message
+                    .contains(&format!("{label} not available")),
+                "{mgr} message was: {}",
+                diagnostic.message
+            );
+        }
+    }
+
+    #[test]
+    fn pkg_mgr_diagnostics_unknown_manager_is_not_checked() {
+        let probe = FakeProbe::default();
+        let diagnostic = check_pkg_mgr("linux", &probe);
+        assert!(diagnostic.ok, "unknown managers must not fail");
+        assert!(diagnostic.message.contains("not checked"));
+        assert!(diagnostic.message.contains("linux"));
+    }
+
+    #[test]
+    fn doctor_reports_parse_failure_for_invalid_direct_config() {
+        use crate::cli::Cli;
+        use clap::Parser;
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("dotman.yaml");
+        std::fs::write(&config, "unknown-field: true\n").unwrap();
+
+        let cli = Cli::parse_from(["dotman", "--config", config.to_str().unwrap()]);
+        let results = run_doctor_with_probe(&cli, &FakeProbe::default());
+        let parse = results
+            .iter()
+            .find(|d| d.message.contains("failed to parse config"));
+        assert!(
+            parse.is_some(),
+            "expected a parse-failure diagnostic, got: {results:?}"
+        );
+        assert!(!parse.unwrap().ok, "parse failure must not be ok");
     }
 }

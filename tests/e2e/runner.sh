@@ -35,6 +35,7 @@ SCENARIOS=(
     history-run
     new-link
     failure-behavior
+    clean
 )
 
 if [[ "${SKIP_NETWORK_TESTS:-0}" != "1" ]]; then

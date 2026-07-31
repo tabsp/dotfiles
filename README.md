@@ -118,6 +118,12 @@ dotman deploy --headless     # headless: non-interactive deploy
 dotman plan --headless       # headless: emit JSON plan to stdout
 ```
 
+`dotman new-link <target> <source>` edits the config resolved from
+`--config`, `./dotman.yaml`, or the active profile (it never auto-initializes
+or syncs). The new `links` entry is appended in the section's existing form
+(map or list; list entries with `backup`/`relink` are preserved), and
+comments and formatting are kept intact.
+
 Global options:
 
 ```sh
@@ -269,6 +275,7 @@ make lint
 make secret-check  # scan the working tree and Git history for secrets
 make test
 make config-check  # run the complete local configuration validation
+make config-check-ci  # portable CI config validation (tmux/YAML/TOML)
 make ci
 ```
 

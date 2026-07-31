@@ -1,0 +1,28 @@
+# dotman e2e fixture — clean-only config.
+#
+# All clean targets are confined to ~/.local/clean-fixture under the isolated
+# e2e HOME. Nothing else is referenced, so the scenario can prove that only
+# the listed targets are touched.
+
+package_managers:
+  ubuntu: brew
+auto_install_pkg_manager: false
+
+install: []
+
+links: {}
+
+create: []
+
+shell: []
+
+clean:
+  # Missing target — clean must be a no-op.
+  - target: ~/.local/clean-fixture/missing-target
+  # Plain file without force — must be left untouched.
+  - target: ~/.local/clean-fixture/plain-file
+  # Dangling symlink — symlinks are always cleaned.
+  - target: ~/.local/clean-fixture/dangling-link
+  # Plain file with force: true — must be backed up next to it, then removed.
+  - target: ~/.local/clean-fixture/forced-file
+    force: true

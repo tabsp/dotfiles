@@ -25,8 +25,13 @@ OUTPUT=$(dotman status 2>&1)
 assert_contains "$OUTPUT" "checkout" "status shows checkout info"
 
 info "dotman doctor"
-OUTPUT=$(dotman doctor 2>&1)
-assert_contains "$OUTPUT" "git" "doctor checks git"
+set +e
+DOCTOR_OUTPUT=$(dotman doctor 2>&1)
+DOCTOR_EXIT=$?
+set -e
+assert_contains "$DOCTOR_OUTPUT" "git" "doctor checks git"
+assert_contains "$DOCTOR_OUTPUT" "Homebrew not available" "doctor reports missing brew"
+assert_eq "$DOCTOR_EXIT" "1" "doctor exits non-zero when a prerequisite is missing"
 
 info "dotman plan --headless"
 PLAN=$(dotman plan 2>&1)
@@ -53,7 +58,7 @@ assert_symlink_exists "$HOME/.tmux.conf"
 assert_symlink_exists "$HOME/.local/bin/hello"
 
 info "Verify create results"
-assert_dir_exists "$HOME/.config/fish/local.d"
+assert_dir_exists "$HOME/.config/fish-local"
 
 info "Verify fish config is parseable"
 assert_exit_code 0 fish -n "$HOME/.config/fish/config.fish"

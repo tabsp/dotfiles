@@ -115,6 +115,11 @@ dotman deploy --headless     # headless: 无交互部署
 dotman plan --headless       # headless: 输出 JSON plan
 ```
 
+`dotman new-link <target> <source>` 会编辑通过 `--config`、`./dotman.yaml`
+或 active profile 解析出的配置文件（不会自动初始化或同步）。新链接条目
+按 `links` 区域原有形式（map 或 list；带 `backup`/`relink` 的列表条目会
+保留）追加，注释与格式保持不变。
+
 全局选项：
 
 ```sh
@@ -250,6 +255,7 @@ make lint
 make secret-check  # 扫描工作区和 Git 历史中的敏感信息
 make test
 make config-check  # 执行完整的本地配置验证
+make config-check-ci  # 便携的 CI 配置验证（tmux/YAML/TOML）
 make ci
 ```
 

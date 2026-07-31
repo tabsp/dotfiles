@@ -108,12 +108,40 @@ fn package_managers_detect_os() {
 
 #[test]
 fn doctor_returns_diagnostics() {
-    let results = dotman::init::run_doctor();
+    use clap::Parser;
+    use dotman::cli::Cli;
+    let cli = Cli::parse_from(["dotman"]);
+    let results = dotman::init::run_doctor(&cli);
     assert!(
         !results.is_empty(),
         "doctor should return at least one diagnostic"
     );
     assert!(results.iter().any(|d| d.message.contains("git")));
+}
+
+#[test]
+fn doctor_uses_the_config_resolution_chain_without_side_effects() {
+    use clap::Parser;
+    use dotman::cli::Cli;
+
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("dotman.yaml");
+    std::fs::write(
+        &config,
+        "package_managers:\n  macos: brew\n  ubuntu: brew\ninstall: []\nlinks: {}\n",
+    )
+    .unwrap();
+
+    let cli = Cli::parse_from(["dotman", "--config", config.to_str().unwrap()]);
+    let results = dotman::init::run_doctor(&cli);
+    assert!(
+        results
+            .iter()
+            .any(|d| d.ok && d.message.contains("config resolved from"))
+    );
+    // The direct config does not require a profile, and no profile state was
+    // written by the resolution.
+    assert!(!temp.path().join(".config/dotman/config.toml").exists());
 }
 
 // ---- Model serialization ----

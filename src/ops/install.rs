@@ -644,6 +644,74 @@ command = "brew install fish"
     }
 
     #[test]
+    fn apt_platform_is_not_synthesized_for_non_apt_packages() {
+        // gum, mise, and dua-cli are not in stock Debian/Ubuntu apt, so they
+        // must never fall back to the default `sudo apt install -y <name>`
+        // command. Resolving against apt must report "no install command"
+        // instead of a command that is guaranteed to fail.
+        let db = load_db().unwrap();
+        for tool in ["gum", "mise", "dua-cli"] {
+            let entry = find(&db, tool).unwrap();
+            assert!(
+                !entry.platforms.contains_key("apt"),
+                "{tool} must not synthesize an apt install command"
+            );
+            let spec = resolve_install(&db, tool, "apt").unwrap();
+            assert_eq!(spec.command, None, "{tool} must have no apt command");
+            assert!(
+                spec.error.as_deref().is_some_and(|e| e.contains("apt")),
+                "{tool} apt resolution should explain the unsupported platform"
+            );
+            // brew remains available for these tools.
+            let brew = resolve_install(&db, tool, "brew").unwrap();
+            let expected = format!("brew install {tool}");
+            assert_eq!(brew.command.as_deref(), Some(expected.as_str()));
+        }
+    }
+
+    #[test]
+    fn mise_resolves_via_brew_and_pacman_only() {
+        // mise is on Homebrew and in Arch's official repositories; apt
+        // (third-party repo needed) and dnf (no Fedora package) are disabled.
+        let db = load_db().unwrap();
+        let mise = find(&db, "mise").unwrap();
+        assert!(mise.platforms.contains_key("brew"));
+        assert!(mise.platforms.contains_key("pacman"));
+        assert!(!mise.platforms.contains_key("apt"));
+        assert!(!mise.platforms.contains_key("dnf"));
+
+        let pacman = resolve_install(&db, "mise", "pacman").unwrap();
+        assert_eq!(
+            pacman.command.as_deref(),
+            Some("sudo pacman -S --needed --noconfirm mise")
+        );
+
+        for mgr in ["apt", "dnf"] {
+            let spec = resolve_install(&db, "mise", mgr).unwrap();
+            assert_eq!(spec.command, None, "mise must have no {mgr} command");
+            assert!(
+                spec.error.as_deref().is_some_and(|e| e.contains(mgr)),
+                "mise {mgr} resolution should explain the unsupported platform"
+            );
+        }
+    }
+
+    #[test]
+    fn herdr_resolves_via_brew_or_direct_script() {
+        // herdr ships as an official Homebrew formula (with Linux bottles) and
+        // an official install script; no apt synthesis is involved.
+        let db = load_db().unwrap();
+        let herdr = find(&db, "herdr").unwrap();
+        assert_eq!(
+            herdr.platforms.get("brew").unwrap().command(),
+            "brew install herdr"
+        );
+        assert!(herdr.platforms.contains_key("macos"));
+        assert!(herdr.platforms.contains_key("linux"));
+        assert!(!herdr.platforms.contains_key("apt"));
+    }
+
+    #[test]
     fn find_synthesizes_unknown_tool_from_defaults() {
         let db = load_db().unwrap();
         let tool = find(&db, "totally-bogus").unwrap();

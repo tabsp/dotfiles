@@ -1,4 +1,4 @@
-.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint installer-test fish-check docker-lint action-lint portability-check secret-check nvim-check config-check config-check-tools test ci clean
+.PHONY: help build init plan deploy web-demo-generate web-demo-build format format-check format-tools lint lint-tools rust-lint shell-lint installer-test fish-check docker-lint action-lint portability-check secret-check nvim-check config-check config-check-tools config-check-ci test ci clean
 .DEFAULT_GOAL := help
 
 DOTMAN := target/debug/dotman
@@ -30,6 +30,7 @@ help:
 		'  make secret-check Scan the working tree and Git history for secrets' \
 		'  make nvim-check   Check Neovim config loads headlessly' \
 		'  make config-check Check all managed configuration files' \
+		'  make config-check-ci Check tmux/YAML/TOML config portably (CI)' \
 		'  make test         Run tests' \
 		'  make ci           Run lint and tests' \
 		'  make clean        Remove build artifacts'
@@ -180,6 +181,35 @@ config-check-tools:
 # remain covered without modifying user-level agent configuration or state.
 config-check: config-check-tools format-check shell-lint fish-check portability-check secret-check nvim-check test $(DOTMAN)
 	yq '.' dotman.yaml >/dev/null
+	$(DOTMAN) plan --headless >/dev/null
+	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-tmux-check.XXXXXX")"; \
+	socket="$$tmp/tmux.sock"; \
+	test_home="$$tmp/home"; \
+	mkdir -p "$$test_home/.tmux"; \
+	if test -d "$$HOME/.tmux/plugins"; then \
+		ln -s "$$HOME/.tmux/plugins" "$$test_home/.tmux/plugins"; \
+	fi; \
+	trap 'tmux -S "$$socket" kill-server >/dev/null 2>&1 || true; rm -rf "$$tmp"' EXIT; \
+	HOME="$$test_home" tmux -S "$$socket" -f "$(CURDIR)/config/tmux.conf" new-session -d -s config-check; \
+	test "$$(tmux -S "$$socket" show-environment -g HOME)" = "HOME=$$test_home"; \
+	test "$$(tmux -S "$$socket" show-options -gv default-terminal)" = tmux-256color; \
+	test "$$(tmux -S "$$socket" show-options -gv status-interval)" = 5
+
+# Portable config validation for CI: tmux, YAML, and TOML checks only.
+# Never deploys or installs. Runs on macOS and Linux with brew-installed
+# tools (tmux, yq) plus cargo and git. The heavier nvim/fish/shell checks
+# are already covered by `make ci`, so this target stays cheap.
+config-check-ci: $(DOTMAN)
+	yq '.' dotman.yaml >/dev/null
+	@set -e; \
+	for file in $$(git ls-files -- '*.yaml' '*.yml'); do \
+		case "$$file" in \
+			.github/workflows/*) ;; \
+			*) yq '.' "$$file" >/dev/null ;; \
+		esac; \
+	done
+	# Builds a plan from dotman.yaml, which also validates the embedded
+	# tool database (src/ops/db.toml) through load_db().
 	$(DOTMAN) plan --headless >/dev/null
 	@tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/dotfiles-tmux-check.XXXXXX")"; \
 	socket="$$tmp/tmux.sock"; \
