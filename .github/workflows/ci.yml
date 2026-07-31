@@ -58,6 +58,12 @@ jobs:
       - name: Install Prettier
         run: npm install --global prettier@3.9.5
 
+      - name: Install Linux config tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes tmux yq
+
       - name: Install lint tools
         shell: bash
         run: |
@@ -73,7 +79,11 @@ jobs:
           brew_prefix="$("$brew_bin" --prefix)"
           echo "$brew_prefix/bin" >> "$GITHUB_PATH"
           echo "$brew_prefix/sbin" >> "$GITHUB_PATH"
-          "$brew_bin" install fish shellcheck hadolint actionlint jq neovim stylua gitleaks tmux yq
+          packages=(fish shellcheck hadolint actionlint jq neovim stylua gitleaks)
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            packages+=(tmux yq)
+          fi
+          "$brew_bin" install "${packages[@]}"
 
       - run: make ci
 
